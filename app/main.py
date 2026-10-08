@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 import config
+import limites
 import pipeline
 import seguranca
 import uazapi
@@ -58,6 +59,7 @@ app = FastAPI(
     redoc_url=None,
     openapi_url="/openapi.json" if config.DOCS_ENABLED else None,
 )
+app.add_middleware(limites.LimiteCorpo, max_bytes=config.MAX_BODY_BYTES)
 
 
 @app.middleware("http")
@@ -66,6 +68,17 @@ async def protecoes(request: Request, call_next):
     if seguranca.rota_interna(request.url.path) and not seguranca.chamada_interna(
             request.client.host if request.client else None, request.headers):
         return JSONResponse({"detail": "Not Found"}, status_code=404)
+    grupo = request.url.path.split("/", 2)[1]
+    if grupo in ("webhooks", "api"):
+        try:
+            permitido = await limites.permitir(
+                app.state.redis, grupo,
+                limites.ip_cliente(request.client.host if request.client else None, request.headers))
+        except aioredis.RedisError:
+            return JSONResponse({"detail": "serviço temporariamente indisponível"}, status_code=503)
+        if not permitido:
+            return JSONResponse({"detail": "limite de requisições excedido"}, status_code=429,
+                                headers={"Retry-After": "1"})
     # SEG07: corpo grande demais é recusado antes de ser lido
     tamanho = request.headers.get("content-length")
     if tamanho and tamanho.isdigit() and int(tamanho) > config.MAX_BODY_BYTES:

@@ -1,0 +1,14 @@
+# Complemento opcional para o Caddy já instalado no painel.
+# Criar antes: docker network create --internal luxbrain_gateway_proxy
+services:
+  gateway:
+    networks:
+      default:
+      proxy:
+        aliases:
+          - luxbrain-gateway
+
+networks:
+  proxy:
+    external: true
+    name: luxbrain_gateway_proxy

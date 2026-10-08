@@ -1,5 +1,9 @@
 # By Koji Gateway — ambiente de teste (Fase 0)
 
+**VPS atual:** gateway disponível em https://painel.luxbrain.com.br/gateway/health
+por meio do Caddy do painel. Configuração e operação em [`docs/PUBLICACAO.md`](docs/PUBLICACAO.md).
+Diagnóstico do Skyone: [`docs/SKYONE.md`](docs/SKYONE.md). Resultados em [`PROGRESS.md`](PROGRESS.md).
+
 Gateway na VPS que recebe as mensagens do WhatsApp (uazapi), agrupa mensagens picadas (debounce), chama o agente no Skyone Studio, envia a resposta e **mede o tempo de cada etapa**. O Postgres guarda conversas, histórico, métricas e cardápio.
 
 ```

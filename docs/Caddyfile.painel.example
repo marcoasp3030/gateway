@@ -1,0 +1,88 @@
+# Referência da configuração aplicada em 2026-10-08.
+# Revisar as rotas existentes antes de usar em outra VPS.
+{
+	email admin@luxbrain.com.br
+	# HTTP continua no ar mesmo enquanto o certificado ainda não foi emitido.
+	auto_https disable_redirects
+	# Mascara segredos também nos logs de erro do proxy.
+	log default {
+		format filter {
+			wrap json
+			fields {
+				request>uri regexp "[?].*$" ""
+				request>headers>X-Api-Key delete
+				request>headers>X-Admin-Key delete
+			}
+		}
+	}
+}
+
+(gateway_https) {
+	@gateway path /gateway /gateway/*
+	handle @gateway {
+		route {
+			@inicio path /gateway /gateway/
+			redir @inicio /gateway/health 308
+			@publico path /gateway/health /gateway/webhooks/* /gateway/api/*
+			handle @publico {
+				request_body {
+					max_size 2MiB
+				}
+				uri strip_prefix /gateway
+				reverse_proxy luxbrain-gateway:8000 {
+					header_up X-Real-IP {remote_host}
+					header_up X-Forwarded-For {remote_host}
+					transport http {
+						dial_timeout 5s
+						response_header_timeout 30s
+					}
+				}
+			}
+			handle {
+				respond 404
+			}
+		}
+	}
+}
+
+(gateway_http) {
+	@gateway_http path /gateway /gateway/*
+	handle @gateway_http {
+		redir https://painel.luxbrain.com.br{uri} 308
+	}
+}
+
+(rotas) {
+	encode gzip
+	handle /auth/v1/* {
+		uri strip_prefix /auth/v1
+		reverse_proxy autenticacao:9999
+	}
+	handle /rest/v1/* {
+		uri strip_prefix /rest/v1
+		reverse_proxy api-rest:3000
+	}
+	handle {
+		reverse_proxy painel:3000
+	}
+}
+
+http://painel.luxbrain.com.br {
+	import gateway_http
+	import rotas
+}
+
+painel.luxbrain.com.br {
+	tls {
+		issuer acme {
+			dir https://acme-v02.api.letsencrypt.org/directory
+		}
+	}
+	import gateway_https
+	import rotas
+}
+
+:80 {
+	import gateway_http
+	import rotas
+}
