@@ -10,14 +10,16 @@
 |---|---|---|
 | Fase 0 — implantação simulada | ✅ Concluída (commit `aef6f26`) | `PROGRESS.md` |
 | Publicação no domínio | ✅ `https://painel.luxbrain.com.br/gateway/health` via **Caddy** do projeto `painel_koji` (rede `luxbrain_gateway_proxy`, `docker-compose.proxy.yml`) | `PROGRESS.md`, `docs/PUBLICACAO.md`, `docs/Caddyfile.painel.example` |
-| Fase 0.3 — descobertas no Skyone | 🟡 Parte respondida pelo Marco (ver `docs/SKYONE_RESULTADOS.md`); falta rodar o probe no fluxo validado e os testes de memória, tempo limite, simultâneas e autenticação | `docs/SKYONE_RESULTADOS.md`, `docs/SKYONE.md` |
-| Fases 0.5 em diante | ⏳ Não iniciadas | — |
+| Fase 0.3 — descobertas no Skyone | 🟡 Quase concluída: probe no fluxo validado ✅ (commit `bf7651d`, 42 testes), memória ✅ (gateway é dono do histórico), histórico enviado pelo gateway ✅, comparação de modelos ✅. Faltam: **autenticação do Webhook** (bloqueia a *conclusão* da 0.5, não o início), simultâneas e tempo limite/callback (antes da 0.6), chamada direta à OpenAI para medir o custo do Skyone | `docs/SKYONE_RESULTADOS.md`, `docs/SKYONE.md`, `PROGRESS.md` |
+| Fase 0.5 | ▶️ **Liberada para começar** (autenticação Skyone implementada de forma genérica; ver tarefa SEG13) | — |
+| Fases 0.6 em diante | ⏳ Não iniciadas | — |
 
 **Ambiente real da VPS (prevalece sobre exemplos deste plano):**
 - Proxy público é o **Caddy** do painel (`painel_koji`), não Nginx. `docs/nginx-gateway.conf` fica apenas como referência; a configuração em uso está em `docs/Caddyfile.painel.example` e `docs/PUBLICACAO.md`.
 - Domínio do gateway: `https://painel.luxbrain.com.br/gateway/` (apenas webhooks, `/api` e `/health` públicos).
 - Python 3.10 do host sem `venv`: testes rodam em container Python 3.12 (comando em `PROGRESS.md`).
-- O painel tem Postgres próprio (`painel_koji-banco-1`); o gateway usa o Postgres do seu próprio Compose. Banco de teste: `bykoji_test`.
+- O painel tem Postgres próprio (`painel_koji-banco-1`); o gateway usa o Postgres do seu próprio Compose. Banco de teste: `bykoji_test`. **Decisão (08/10/2026): o gateway continua com o Postgres próprio**; o Postgres do painel não é reaproveitado (isolamento e regra 2).
+- **Latência real do Skyone:** todo o tempo de resposta está no módulo AI Agent Call. Modelo padrão para atendimento: **GPT-4.1 mini** (sem raciocínio), 5,7–8,6 s por chamada. Planeje o gateway contando com **6–15 s por resposta do agente**; `SKYONE_TIMEOUT_S=90`.
 
 ---
 
@@ -208,25 +210,30 @@ docker compose logs gateway | grep -c "$UAZAPI_WEBHOOK_SECRET"     # 0 (SEG05)
 | Agente obedece instruções enviadas no payload? | **Sim**, quando o fluxo monta o prompt com `instrucoes_agente` |
 | Base de conhecimento, Skills ou modelo por chamada? | **Não** — o AI Agent Call só tem ID do Agente, Chave de contexto, Prompt e Anexos |
 | URL por fluxo? | **Sim.** Fluxo criado do zero ganha URL própria; duplicar mantém a URL do original → **nunca duplicar** |
-| Formato de entrada/saída | Ver contrato validado em `docs/SKYONE_RESULTADOS.md` (campos `message`, `session_id`, `instrucoes_agente`; resposta com `resposta`, `request_id`, `acao`) |
-| Latência | 9–14 s, ~99% no AI Agent Call; causa: prompt do sistema com a base inteira (~15 mil tokens). Correção é do lado do agente no Skyone |
+| Formato de entrada/saída | Ver contrato validado em `docs/SKYONE_RESULTADOS.md` (campos `conversation_id`, `session_id`, `request_id`, `message`, `instrucoes_agente`, `historico`; resposta com `resposta`, `request_id`, `conversation_id`, `status`, `tipo`, `acao`) |
+| Memória do Skyone por `session_id`? | **Não.** O gateway é dono do histórico e envia `historico`; `session_id = request_id`. Histórico enviado pelo gateway foi lembrado corretamente (3/3) |
+| Latência | **Todo o tempo está no AI Agent Call** (Logger). Prompt grande (~15 mil tokens) causa picos (até 64 s), mas não é a causa principal: com prompt de 4 linhas, GPT OSS 20b 10–15 s, GPT-5 8–12 s, GPT-5 mini 8–9 s, **GPT-4.1 mini 5,7–8,6 s** (padrão para atendimento). Suspeita de custo fixo do Skyone de ~4–6 s, a confirmar chamando a OpenAI direto |
 
 ### Tarefas
 - [ ] **Alinhar `scripts/skyone_probe.py` ao contrato validado:** corpo `{"conversation_id","session_id","request_id","message","instrucoes_agente"}`; ler `resposta`/`request_id`/`acao` da resposta. URL de teste: `https://luxtia.api.integrasky.cloud/k3iynwDoOU` (fluxo "gateway").
 - [ ] **Token opcional no probe:** o webhook do fluxo de teste está **sem autenticação** (opção "Solicitar autenticação" desligada). Permitir `SKYONE_PROBE_TOKEN` vazio **só no probe**, registrando no relatório que a chamada foi sem autenticação. Isso não vale para produção (ver Fase 0.5, SEG13).
 - [ ] Configurar `SKYONE_PROBE_URL` no `.env` e rodar o probe: os dois payloads de instrução + 3 repetições para latência. Registrar em `docs/SKYONE_RESULTADOS.md`.
-- [ ] 🛑 **PARE — testes do Marco no Skyone** (roteiro em `docs/SKYONE_RESULTADOS.md`, seção "Pendentes"):
-  1. **Memória** (`session_id` igual lembra, diferente esquece) → define quem é dono do histórico.
-  2. **Autenticação do Webhook** ("Solicitar autenticação": qual tipo? cabeçalho? nome?) e **limite máximo** de requisições/minuto.
-  3. **Simultâneas** (10 chamadas paralelas).
-  4. **Tempo limite** (Delay 60/120/300 s) e **callback** por módulo REST.
-  5. **Agente "Teste Rápido"** (prompt curto) para confirmar a causa da latência.
+- [x] Probe alinhado ao contrato, com `historico` e `session_id = request_id` (commit `bf7651d`).
+- [x] Memória (respondido: gateway é dono do histórico).
+- [x] Agente "Teste Rápido" e comparação de modelos (respondido: ver tabela "Já respondido").
+- [ ] Ajustar `SKYONE_TIMEOUT_S=90` no `.env` e no `.env.example` (o `.env` real só pelo terminal; nada de segredo no chat ou no git).
+- [ ] Acrescentar ao `docs/SKYONE_RESULTADOS.md` a seção "Comparação de modelos" (texto em `docs/SKYONE_RESULTADOS_acrescimo.md` deste pacote), sem apagar a seção "Probe executado na VPS".
+- [ ] 🛑 **Pendentes do Marco no Skyone** (não bloqueiam o início da Fase 0.5):
+  1. **Autenticação do Webhook** ("Solicitar autenticação": tipo, nome do cabeçalho, como gerar) e **limite máximo** de requisições/minuto → necessário para **concluir** a Fase 0.5 (SEG13).
+  2. **Chamada direta à OpenAI** (Postman, mesmo prompt, GPT-4.1 mini) → decide a Fase 2.5.
+  3. **Simultâneas** (10 chamadas paralelas) → antes da Fase 0.6.
+  4. **Tempo limite** (Delay 60/120/300 s) e **callback** por módulo REST → antes da Fase 0.6.
 - [ ] Registrar respostas em `docs/SKYONE_RESULTADOS.md` e no `PROGRESS.md`.
 
 ### Pronto quando
-- Probe executado com sucesso contra o fluxo validado.
-- Memória e autenticação respondidas (bloqueiam a Fase 0.5). Tempo limite, callback e simultâneas podem ficar para antes da Fase 0.6.
-- Estratégia anotada: `por_modelo` (instruções no prompt) com **um agente Skyone por cliente quando houver base/Skills próprias**; `sync` por padrão.
+- Probe executado com sucesso contra o fluxo validado. ✅
+- Memória respondida. ✅ Autenticação respondida antes de **fechar** a Fase 0.5. Tempo limite, callback e simultâneas antes da Fase 0.6.
+- Estratégia anotada: `por_modelo` (instruções no prompt) com **um agente Skyone por cliente quando houver base/Skills próprias**; `sync` por padrão; gateway dono do histórico. ✅
 
 ---
 
@@ -238,7 +245,7 @@ docker compose logs gateway | grep -c "$UAZAPI_WEBHOOK_SECRET"     # 0 (SEG05)
 
 ### Decisões fixas
 - **O painel nunca acessa o banco do gateway diretamente.** Só pela API `/admin/v1/*`, pela rede interna.
-- **Bancos separados no mesmo Postgres da VPS:** `bykoji_gateway` (gateway) e o banco do painel, cada um com seu usuário. Se o painel já tem um Postgres rodando, reutilizar o servidor e criar só o banco e o usuário novos.
+- **Banco do gateway no Postgres do próprio Compose do gateway** (decidido em 08/10/2026; o Postgres do painel `painel_koji-banco-1` não é usado). Banco de produção `gateway` (nome neutro, a plataforma é multiempresa) com usuário próprio; testes continuam em `bykoji_test`. Criar o banco `gateway` só com confirmação do Marco.
 - **O painel autentica os usuários dele.** O gateway confia no painel por chave de serviço (`PANEL_SERVICE_KEY`, com rotação via `PANEL_SERVICE_KEY_NEXT`, SEG12) e recebe, a cada chamada, quem agiu (`X-Actor`) para auditoria.
 - **`tenant_id` = slug** (ex.: `bykoji`), igual ao `tenant_id` usado no DQE.
 - **Credenciais de terceiros criptografadas** (Fernet, `ENCRYPTION_KEY`). Nunca devolvidas pela API (só `"configurado": true`).
@@ -251,7 +258,7 @@ docker compose logs gateway | grep -c "$UAZAPI_WEBHOOK_SECRET"     # 0 (SEG05)
   - `tenant_config` (padrões do tenant: os mesmos campos de comportamento de `agentes`, todos opcionais)
   - `modulos_tenant` (tenant_id, modulo, ativo, config jsonb) — quais módulos de capacidade a empresa contratou
   - `modelos_agente` (id slug, nome, tipo `atendimento|interno`, modulos text[], comportamento_padrao jsonb, desfechos text[], followups_padrao jsonb, skyone_fluxo_modelo text, versao) — globais da plataforma; tenant pode ter modelos próprios (`tenant_id` nulo = global)
-  - `agentes` (id, tenant_id, modelo_id, nome, status `rascunho|ativo|pausado`, `skyone_estrategia` `por_agente|por_modelo`, skyone_webhook_url, skyone_token_enc, `instrucoes_agente` text, `modo_resposta` `sync|async`, e o **comportamento**: debounce_s, max_wait_s, media_wait_s, pause_minutes, history_turns, slow_notice_s, aviso_demora, fallback, alerta_telefone, send_mode `dry|live`, agente_mode `mock|live`, modo_piloto bool, contatos_permitidos text[], encerrar_vazia_min, max_lotes_simultaneos, max_concorrencia, skyone_dominios_permitidos text[])
+  - `agentes` (id, tenant_id, modelo_id, nome, status `rascunho|ativo|pausado`, **`provedor` `skyone|mock|llm_direto`** (só `skyone` e `mock` implementados agora; `llm_direto` reservado para a Fase 2.5), `skyone_estrategia` `por_agente|por_modelo`, skyone_webhook_url, `skyone_auth_tipo` `nenhuma|cabecalho|bearer`, `skyone_auth_cabecalho` text, `skyone_auth_enc`, **`timeout_s`** (padrão 90), `instrucoes_agente` text, `modo_resposta` `sync|async`, e o **comportamento**: debounce_s, max_wait_s, media_wait_s, pause_minutes, history_turns, slow_notice_s, aviso_demora, fallback, alerta_telefone, send_mode `dry|live`, agente_mode `mock|live`, modo_piloto bool, contatos_permitidos text[], encerrar_vazia_min, max_lotes_simultaneos, max_concorrencia, skyone_dominios_permitidos text[])
   - `tenant_canais` (id, tenant_id, tipo `uazapi|meta|site|email|teams|luxbrain|api`, nome, `agente_id` (ou `triagem` com regras jsonb), webhook_secret, credenciais_enc jsonb, `publico` `clientes|interno`, ativo, status_conexao, ultimo_evento_em)
   - `tenant_unidades` (id, tenant_id, nome, telefone_whatsapp, horarios jsonb, ativo)
   - `audit_log` (id, tenant_id, actor, acao, alvo, dados jsonb, criado_em)
@@ -282,9 +289,11 @@ docker compose logs gateway | grep -c "$UAZAPI_WEBHOOK_SECRET"     # 0 (SEG05)
 - [ ] Atualizar `scripts/bench.py`: `--tenant`, `--agente`, `--panel-key` no lugar de `--admin-key`; opção de rodar vários tenants/agentes ao mesmo tempo.
 - [ ] Variáveis de validação a partir desta fase: `AUTH=(-H "Authorization: Bearer $PANEL_SERVICE_KEY" -H "X-Actor: cursor")`, `T=bykoji`, `A=<id do agente>`.
 - [ ] **SEG03 (SSRF):** `validar_formato_url` ao salvar URLs (Skyone, webhooks de saída, `base_url` de canal); `validar_url_saida` **chamada pelos adaptadores Skyone e uazapi antes de cada requisição** (hoje existe mas não é usada — pendência registrada no `PROGRESS.md`).
-- [ ] **SEG13:** campos `skyone_auth_tipo` e `skyone_auth_enc` no agente, conforme o tipo de autenticação descoberto na Fase 0.3; adaptador Skyone envia a credencial.
+- [ ] **SEG13 (genérico, para não esperar o teste do Marco):** o adaptador Skyone envia a credencial conforme `skyone_auth_tipo`: `cabecalho` → `<skyone_auth_cabecalho>: <valor>`; `bearer` → `Authorization: Bearer <valor>`; `nenhuma` → só aceito com `agente_mode=mock` ou tenant marcado como teste (agente `live` sem credencial → 400). Valor criptografado (Fernet), nunca devolvido pela API, nunca em log. Quando o Marco informar o formato real do Skyone, só ajustar o padrão e o teste — sem mudar o schema. 🛑 A Fase 0.5 **só fecha** depois desse teste real (401/403 sem credencial, 200 com credencial).
+- [ ] **Tempo limite por agente:** `timeout_s` do agente (padrão 90) usado pelo adaptador; `SKYONE_TIMEOUT_S` do `.env` vira só o padrão global.
 - [ ] **Contrato Skyone validado:** o adaptador envia exatamente os campos de `docs/SKYONE_RESULTADOS.md` (`message`, não `mensagem`; `session_id`; `instrucoes_agente`) e lê `resposta` como texto ou objeto `{"body": ...}`. Remover `token` do corpo (credencial vai no cabeçalho, SEG13).
-- [ ] **Estratégia de sessão** conforme o teste de memória: se o Skyone guarda memória por `session_id`, o gateway envia `session_id` estável por conversa e **não** reenvia histórico no prompt (evita duplicar contexto); se não guarda, o gateway monta o histórico no prompt. Documentar a escolha em `docs/SKYONE.md`.
+- [ ] **Estratégia de sessão (decidida em 08/10/2026):** o Skyone **não** manteve memória pela `session_id` no teste. **O gateway é o dono do histórico**: envia `historico` (últimos `history_turns` turnos com `enviada_em`, e depois o resumo da Fase 5.5) e `session_id = request_id` (sessão nova por turno, para não duplicar contexto caso o Skyone passe a guardar memória). Documentar em `docs/SKYONE.md` junto com o JavaScript do fluxo-modelo que monta o prompt com o histórico (código atual em `docs/SKYONE_RESULTADOS.md`).
+- [ ] **Teste de contrato com o histórico real:** o pacote montado pelo pipeline para uma conversa com 3 turnos anteriores tem `historico` com 3 itens em ordem cronológica, `role` `user|assistant`, `enviada_em` no fuso do tenant, e nunca inclui mensagens de outra conversa (INV17).
 - [ ] **SEG02:** toda rota nova de gestão sob `/admin`.
 - [ ] **LGPD03:** exportar e apagar/anonimizar contato, com `audit_log`.
 
@@ -391,9 +400,9 @@ curl -s https://painel.luxbrain.com.br/gateway/health
 **Objetivo:** medir o tempo real do agente, ainda sem enviar ao WhatsApp.
 
 ### Tarefas
-- [ ] 🛑 **PARE:** o Marco cria no Skyone o **fluxo-modelo** `atendente_delivery`: `Webhook → JavaScript (valida token, registra request_id no Log) → IF → AI Agent Call → Log → Retorno`, e informa a URL do webhook. O Retorno segue o **contrato do Apêndice A** (inclui `acao: "silencio"` com `motivo` e `desfecho`). Se a Fase 0.3 indicou estratégia `por_modelo`, o JavaScript repassa `instrucoes_agente` ao AI Agent Call.
-- [ ] Configurar o agente pela API (`PATCH /admin/v1/tenants/$T/agentes/$A`): `agente_mode=live`, `skyone_webhook_url`, `skyone_token`; manter `send_mode=dry`. Usar `POST .../agentes/$A/testar` para conferir.
-- [ ] Documentar em `docs/SKYONE.md` o passo a passo para **criar um agente novo no Skyone a partir de um fluxo-modelo** (o que clonar, o que trocar, como testar), para o provisionamento ser repetível.
+- [ ] 🛑 **PARE:** o Marco cria no Skyone, **do zero (nunca duplicando)**, o fluxo `atendente_delivery`: `Webhook (Solicitar autenticação ligado) → JavaScript "Normalizar Entrada" → AI Agent Call → Retorno`, com o agente em GPT-4.1 mini, e informa a URL do webhook. O Retorno segue o **contrato do Apêndice A** (inclui `acao: "silencio"` com `motivo` e `desfecho`). O JavaScript monta o prompt com `instrucoes_agente` e `historico`.
+- [ ] Configurar o agente pela API (`PATCH /admin/v1/tenants/$T/agentes/$A`): `agente_mode=live`, `skyone_webhook_url`, `skyone_auth_tipo` + credencial; manter `send_mode=dry`. Usar `POST .../agentes/$A/testar` para conferir.
+- [ ] Documentar em `docs/SKYONE.md` o passo a passo para **criar um agente novo no Skyone** (criar fluxo do zero, colar o JavaScript, configurar AI Agent Call e Retorno, ligar autenticação, testar), para o provisionamento ser repetível. Duplicar fluxo mantém a URL do original — proibido.
 - [ ] **Tempo explícito (INV10):** cada item de `historico` e a mensagem atual levam `enviada_em` (ISO, fuso do tenant); o pacote leva `agora` e `tempo_desde_ultima` em texto ("há 3 dias", "há 2 minutos"). Se a última conversa foi há mais de 12 h, marcar `"retomada": true`.
 - [ ] Interpretar o Retorno conforme o Apêndice A: `nenhuma`, `silencio`, `transferir_humano`, `encerrar` (com `desfecho`). Formato antigo (`resposta` como texto) continua aceito.
 - [ ] Conversa manual de teste:
@@ -414,7 +423,24 @@ curl -s "$GW/admin/v1/tenants/$T/metricas" "${AUTH[@]}"
 ### Pronto quando
 - 0 erros com 5 clientes.
 - `agente_p50`, `agente_p95` e `total_p95` registrados no `PROGRESS.md`.
-- 🛑 **PARE se `total_p95` > 15 s:** reportar ao Marco antes de seguir (pode exigir prompt menor, modelo mais rápido ou resposta assíncrona).
+- 🛑 **PARE se `total_p95` > 15 s:** reportar ao Marco antes de seguir (pode exigir prompt menor, modelo mais rápido, resposta assíncrona ou a Fase 2.5).
+
+---
+
+## FASE 2.5 — Provedor LLM direto (condicional)
+
+> Só iniciar se o Marco confirmar que a chamada direta à OpenAI é bem mais rápida que pelo Skyone (ex.: ≤ 2,5 s contra 6–8 s) **e** decidir usá-la para algum agente.
+
+**Objetivo:** agentes de atendimento simples, sem Skills/base do Skyone, chamam o modelo direto no provedor para responder mais rápido. Agentes que usam Skills, base de conhecimento ou integrações do Skyone continuam no Skyone.
+
+### Tarefas
+- [ ] Implementar `app/agentes/llm_direto.py` na mesma interface do adaptador (`enviar(pacote) -> Resposta`): prompt do sistema = `instrucoes_agente` do agente; histórico e mensagem atual montados como no JavaScript do fluxo-modelo; resposta convertida para o contrato do Apêndice A.
+- [ ] Campos no agente: `llm_provedor` (`openai` primeiro), `llm_modelo`, `llm_chave_enc` (Fernet; nunca devolvida), `max_tokens`, `temperatura`. URL do provedor fixa no código (sem SSRF por configuração).
+- [ ] Mesmo circuit breaker, timeout, fallback e métricas dos outros adaptadores; `turnos` registra `provedor`.
+- [ ] Testes: troca de `provedor` de um agente entre `skyone` e `llm_direto` sem mudar canal nem pipeline; chave nunca em log (INV13).
+
+### Pronto quando
+- Mesmo roteiro de conversas responde pelos dois provedores; métricas comparando `agente_p50` de cada um registradas no `PROGRESS.md`.
 
 ---
 
@@ -652,7 +678,7 @@ docker compose exec gateway pytest -q
 
 ## Apêndice A — Contrato VPS → Skyone
 
-> Campos **validados no Skyone** (08/10/2026): `conversation_id`, `session_id`, `request_id`, `message`, `instrucoes_agente`. O JavaScript "Normalizar Entrada" do fluxo-modelo lê exatamente esses nomes. Os demais campos abaixo são acrescentados nas fases indicadas, e o JavaScript do fluxo-modelo deve ser atualizado junto (documentar em `docs/SKYONE.md`). A credencial vai em **cabeçalho** (SEG13), nunca no corpo.
+> Campos **validados no Skyone** (08/10/2026): `conversation_id`, `session_id`, `request_id`, `message`, `instrucoes_agente`, `historico`. O JavaScript "Normalizar Entrada" do fluxo-modelo lê exatamente esses nomes. Os demais campos abaixo são acrescentados nas fases indicadas, e o JavaScript do fluxo-modelo deve ser atualizado junto (documentar em `docs/SKYONE.md`). A credencial vai em **cabeçalho** (SEG13), nunca no corpo.
 
 Ida (gateway → Skyone):
 
@@ -672,7 +698,7 @@ Ida (gateway → Skyone):
   "agora": "2026-10-08T19:42:00-03:00",
   "tempo_desde_ultima": "há 3 dias",
   "retomada": true,
-  "session_id": "bykoji:can_7f3a:5511999999999",
+  "session_id": "<igual ao request_id: sessão nova por turno>",
   "message": "texto consolidado do lote",
   "mensagens_do_lote": [
     {"enviada_em": "2026-10-08T19:41:50-03:00", "tipo": "texto", "texto": "oi"},
@@ -720,7 +746,8 @@ Volta (Retorno do Skyone → gateway). Formato **validado**: `{"resposta": "<tex
 | Métrica | Meta |
 |---|---|
 | Overhead da VPS (modo mock, sem contar o mock) | < 300 ms |
-| `total_p50` (live) | ≤ 10 s |
+| `agente_p50` (Skyone, GPT-4.1 mini) | ≤ 8 s (medido: 5,7–8,6 s) |
+| `total_p50` (live) | ≤ 10 s — com o agente em ~7,5 s, só cabe se o debounce for curto quando a mensagem parecer completa (Fase 3) |
 | `total_p95` (live) | ≤ 15 s |
 | Taxa de erro | < 1% |
 
@@ -728,8 +755,9 @@ Volta (Retorno do Skyone → gateway). Formato **validado**: `{"resposta": "<tex
 
 | Fase | O que é necessário |
 |---|---|
-| 0.3 | Testes no Skyone: agente parametrizável pelo payload? API de gestão? limite do webhook síncrono e chamada de callback? |
-| 0.5 | Revisar `docs/API_ADMIN.md`; informar se o Postgres do painel será reaproveitado; confirmar modelos iniciais de agente |
+| 0.3 | Autenticação do Webhook e limite por minuto; chamada direta à OpenAI; simultâneas; tempo limite e callback (respondidos: instruções pelo payload, memória, histórico, latência por modelo) |
+| 0.5 | Revisar `docs/API_ADMIN.md`; confirmar modelos iniciais de agente; confirmar a criação do banco `gateway` (Postgres do painel **não** será reaproveitado — decidido) |
+| 2.5 | Decidir se algum agente usa provedor LLM direto, com base na chamada direta à OpenAI |
 | 1 | Configurar webhook no uazapi e enviar mensagens de teste |
 | 2 | Fluxo do agente no Skyone e URL do webhook; Retorno no contrato do Apêndice A (silêncio, desfecho) |
 | 3 | Rodada de testes no celular e ajustes de prompt |

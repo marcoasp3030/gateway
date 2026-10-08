@@ -74,6 +74,8 @@ Regra derivada: **dados não vão no prompt do sistema.** Prompt do sistema = pe
 
 ## Pendentes (roteiro para o Marco, no fluxo "gateway")
 
+> Item 1 (memória) concluído — ver resultado abaixo.
+
 URL: `https://luxtia.api.integrasky.cloud/k3iynwDoOU`. Usar sessões novas em cada teste.
 
 **1. Memória (bloqueia Fase 0.5)** — enviar em sequência:
@@ -82,11 +84,44 @@ URL: `https://luxtia.api.integrasky.cloud/k3iynwDoOU`. Usar sessões novas em ca
 {"conversation_id":"m1","session_id":"s-mem","message":"Qual é meu nome e o número do meu processo?"}
 {"conversation_id":"m1","session_id":"s-outra","message":"Qual é meu nome e o número do meu processo?"}
 ```
-Esperado: lembra na 2ª, não lembra na 3ª. Resultado: _pendente_
+Esperado: lembra na 2ª, não lembra na 3ª.
+
+**Resultado (08/10/2026):** **não lembrou** na 2ª (mesma `session_id`) nem na 3ª. Tempos: 17,1 s / 12,1 s / 7,4 s. Ressalva: o agente de Advocacia tem regras no prompt que podem levá-lo a recusar dados fora do cadastro; reconfirmar com o agente "Teste Rápido" e uma pergunta neutra ("Minha cor favorita é azul" → "Qual é minha cor favorita?").
+
+**Decisão:** o **gateway é o dono do histórico** (tabela `mensagens` no Postgres do gateway), independentemente do resultado da reconfirmação:
+- funciona igual para qualquer provedor de agente (adaptador);
+- o painel mostra a conversa completa; transbordo humano e auditoria usam a mesma fonte;
+- retenção e exclusão (LGPD) ficam sob controle do gateway;
+- o gateway decide quanto histórico enviar (últimos N turnos + resumo), controlando tempo e custo.
+
+Consequências no contrato:
+- o gateway envia `historico` (últimos N turnos, com data/hora) no corpo;
+- o JavaScript "Normalizar Entrada" monta o prompt com instruções + histórico + mensagem atual;
+- `session_id` enviado = `request_id` (sessão nova a cada turno), para que uma eventual memória do Skyone não duplique o histórico;
+- no agente do Skyone, "Limite de mensagens de contexto" pode ficar baixo (ex.: 1–2), já que o contexto vem do gateway.
 
 **2. Autenticação do Webhook (bloqueia Fase 0.5)** — ligar "Solicitar autenticação" no Webhook e anotar o tipo (chave em cabeçalho? qual nome? token Bearer?) e como gerar a credencial. Anotar também o **valor máximo** aceito no limite de requisições por minuto (padrão 10 — aumentar). Resultado: _pendente_
 
-**3. Agente "Teste Rápido"** — mesmo modelo, prompt de sistema curto (persona + 5 regras), sem base e sem Skills, max_tokens 1000, temperature 0,2, frequency_penalty 0. Trocar o ID do Agente no fluxo e medir 3 vezes. Resultado: _pendente_
+**3. Agente "Teste Rápido"** — prompt de sistema de 4 linhas, sem base e sem tools, modelo GPT OSS 20b (embarcado).
+
+**Resultado (08/10/2026):**
+- **Histórico enviado pelo gateway funciona:** com `historico` no corpo, a resposta foi "Seu nome é Marco e o número do seu processo é 1234." (3/3).
+- **Latência continuou alta: 14,9 s / 10,3 s / 11,9 s** mesmo com prompt mínimo. Antes, com o agente de Advocacia (prompt de ~15 mil tokens, GPT-5 mini): 9–14 s; com histórico, um pico de 64 s.
+- **Conclusão corrigida:** o prompt grande piora e causa picos, mas **não é a causa principal**. Há um piso de ~10 s no AI Agent Call para os modelos testados (GPT-5 mini e GPT OSS 20b, ambos de raciocínio). Próximo passo: testar outros modelos da lista do Skyone, de preferência sem raciocínio, e verificar no Logger/Monitoramento de IA onde o tempo é gasto.
+
+**Comparação de modelos (mesmo agente "Teste Rápido", mesmo corpo com `historico`, 08/10/2026):**
+
+| Modelo | Raciocínio? | Tempos (3 chamadas) | Resposta correta? |
+|---|---|---|---|
+| GPT OSS 20b (embarcado) | sim | 14,9 / 10,3 / 11,9 s | sim |
+| GPT-5 | sim | 7,9 / 11,6 / 9,8 s | sim |
+| GPT-5 mini (chave própria) | sim | 7,7 / 8,8 / 8,6 s | sim |
+| **GPT-4.1 mini** | **não** | **8,3 / 8,6 / 5,7 s** | sim |
+
+- Trocar para um modelo **sem raciocínio** melhorou pouco (média ~7,5 s). A mesma chamada direto na API do provedor costuma levar 1–2 s, o que indica **custo fixo do próprio Skyone de ~4–6 s** por AI Agent Call (orquestração do agente, montagem de contexto, eventual fila). **Confirmado no Logger (08/10/2026): todo o atraso está no AI Agent Call** em todas as execuções; Webhook, JavaScript e Retorno levam milissegundos. Falta separar quanto é o modelo e quanto é a orquestração do agente no Skyone: chamar o mesmo modelo direto na API da OpenAI (Postman) com o mesmo prompt e comparar.
+- Pendentes deste item: testar um modelo de outro provedor (Claude Haiku 4.5 ou Gemini Flash) para confirmar se o piso é da plataforma; teste de qualidade com a pergunta de recepção do escritório.
+- **Decisão provisória:** modelo padrão para atendimento no Skyone = GPT-4.1 mini. Se o piso de ≥5 s se confirmar, avaliar na Fase 0.5/0.6 um **adaptador direto ao provedor** no gateway (sem Skyone) só para agentes de atendimento sensíveis a tempo; agentes que usam Skills/base/integrações do Skyone continuam nele.
+- Impacto no gateway: até haver um modelo mais rápido, contar com 6–15 s por resposta → indicador "digitando" imediato, aviso de demora, `SKYONE_TIMEOUT_S` ≥ 90 s e debounce menor quando a mensagem estiver completa.
 
 **4. Simultâneas (antes da Fase 0.6)** — 10 chamadas paralelas; anotar se os tempos ficam parecidos ou crescem em escada. Resultado: _pendente_
 
@@ -96,39 +131,3 @@ Esperado: lembra na 2ª, não lembra na 3ª. Resultado: _pendente_
 
 - Prompt do sistema só com persona e regras; dados do escritório via Skills (`consultar_processo`, `listar_prazos`, `buscar_cliente`, `listar_audiencias`), com a regra de segredo de justiça aplicada dentro da Skill.
 - max_tokens 800–1000, temperature 0,2, frequency_penalty 0; preferir modelo sem raciocínio para atendimento.
-
-## Probe executado na VPS — 08/10/2026
-
-- Escopo autorizado: dois testes de instrução e três medições de latência, sequenciais, no fluxo de teste informado pelo Marco; sem alterar o fluxo/agente no Skyone.
-- Relatórios finalizados em 2026-10-08T17:25:55.689096+00:00 (idiomas) e 2026-10-08T17:26:27.771992+00:00 (latência), UTC.
-- `SKYONE_PROBE_URL` configurada no `.env`, mantido com permissão 600 e ignorado pelo Git.
-- **Autenticação ausente nas cinco chamadas**, explicitamente registrada pelo probe. Corpo contém somente `message`, `session_id`, `conversation_id`, `request_id`, `instrucoes_agente`; nenhuma credencial no corpo ou cabeçalho.
-- `SKYONE_PROBE_TOKEN` vazio é permitido somente na ferramenta de diagnóstico. Não há fallback para `SKYONE_TOKEN`/URL de produção; token preenchido interrompe a execução até o formato de autenticação ser confirmado pelo Marco, sem presumir Bearer ou nome de cabeçalho.
-- Mesma mensagem sintética em todos os casos: "Diga uma frase curta explicando como você pode ajudar." Instrução: responder no idioma solicitado em até 10 palavras (português nas três medições).
-- Cada chamada recebeu `request_id`, `conversation_id` e `session_id` próprios. Sessões novas evitam carregar contexto entre medições; isso **não valida isolamento de memória nem define a estratégia de sessão**.
-
-| Caso | HTTP | Duração | Resposta | request_id |
-|---|---|---|---|---|
-| ingles | 200 | 14,106 s | I provide case updates, deadline tracking, and schedule coordination. | `038d6fa9-d8d6-4809-afec-09b89f99263a` |
-| portugues | 200 | 9,703 s | Posso fornecer informações sobre processos e prazos do seu caso. | `e6e48247-b3d4-45d4-b801-8f4daced4ff7` |
-| latencia_1 | 200 | 6,844 s | Posso fornecer prazos, audiências e movimentações dos processos. | `684b3bf0-d32d-4502-9695-ef96ba4c6740` |
-| latencia_2 | 200 | 15,110 s | Posso organizar prazos, audiências e processos do seu escritório. | `38114563-3555-4622-becf-7954d2127d36` |
-| latencia_3 | 200 | 7,991 s | Auxilio na gestão de prazos e audiências processuais. | `721bd49f-59c8-4936-a4e6-dd4ab05e2b77` |
-
-Três medições de latência: **média 9,982 s**, **mediana 7,991 s**, mínimo 6,844 s e máximo 15,110 s.
-
-- **5/5 HTTP 200 e contrato válido**: texto não vazio, `request_id` e `conversation_id` correspondentes aos enviados, `status=success`, `tipo=text`, `acao=nenhuma`.
-- Inspeção das respostas: inglês e português corretos; 9 e 10 palavras, respectivamente. As três respostas de latência também respeitaram até 10 palavras.
-- Duração medida do início da validação DNS até a leitura completa da resposta, incluindo rede e processamento no Skyone. Não inclui debounce, fila do gateway nem envio ao WhatsApp. Três amostras não permitem concluir p95 de produção ou causa da latência; não houve acesso ao Logger nesta execução.
-- Relatórios sanitizados locais (ignorados pelo Git, permissão 600): `.local/skyone-probe-idiomas-2026-10-08.json` e `.local/skyone-probe-latencia-2026-10-08.json`.
-
-Comandos executados (cada caso uma vez):
-
-```bash
-docker compose run --rm --no-deps -v /home/twadmin/gateway:/workspace:ro gateway python /workspace/scripts/skyone_probe.py --caso idiomas
-docker compose run --rm --no-deps -v /home/twadmin/gateway:/workspace:ro gateway python /workspace/scripts/skyone_probe.py --caso latencia
-```
-
-`--caso tempo --espera-s 60|120|300` permanece disponível para diagnóstico futuro; o Delay deverá ser configurado manualmente no fluxo pelo Marco. O probe não envia `probe_delay_s` fora do contrato validado.
-
-**Ponto de parada:** aguardando os testes do Marco de memória, autenticação e limite de requisições. Estratégias de sessão e autenticação não consolidadas; Fase 0.5 não iniciada. Simultâneas, Delay/callback e agente "Teste Rápido" não foram executados nesta rodada. Atendimento mantido em `mock/dry`.
