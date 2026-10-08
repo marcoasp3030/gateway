@@ -3,6 +3,8 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 import logging
 import os
+import asyncio
+import httpx
 import asyncpg
 import redis.asyncio as aioredis
 from fastapi import FastAPI, HTTPException, Request
@@ -15,6 +17,8 @@ from nucleo.configuracao import Configuracoes
 from nucleo.credenciais import Cofre, CredencialInvalida
 from admin.servico import Administracao
 from admin.rotas import router, api
+from canais.rotas import router as canais_router
+from nucleo.pipeline import Pipeline
 
 
 @dataclass(repr=False)
@@ -52,15 +56,28 @@ def criar_app(infra,db=None,redis=None):
     @asynccontextmanager
     async def lifespan(app):
         proprio = db is None
-        if proprio:
-            app.state.db=await asyncpg.create_pool(infra.database_url,min_size=2,max_size=10)
-            app.state.redis=aioredis.from_url(infra.redis_url,decode_responses=True)
-            preparar(app)
-        try: yield
-        finally:
+        agendador = None
+        try:
             if proprio:
-                await app.state.db.close()
-                await app.state.redis.aclose()
+                app.state.db=await asyncpg.create_pool(infra.database_url,min_size=2,max_size=10)
+                app.state.redis=aioredis.from_url(infra.redis_url,decode_responses=True)
+                preparar(app)
+            # Migrações nunca são automáticas.
+            versao=await app.state.db.fetchval('SELECT max(versao) FROM schema_migrations')
+            if versao != 5:
+                raise RuntimeError('Schema incompatível: aplique as migrações explicitamente')
+            await app.state.pipeline.recuperar()
+            agendador=asyncio.create_task(app.state.pipeline.agendador())
+            yield
+        finally:
+            if agendador:
+                agendador.cancel()
+                await asyncio.gather(agendador,return_exceptions=True)
+            if hasattr(app.state,'pipeline'): await app.state.pipeline.fechar()
+            if hasattr(app.state,'http'): await app.state.http.aclose()
+            if proprio:
+                if app.state.db is not None: await app.state.db.close()
+                if app.state.redis is not None: await app.state.redis.aclose()
 
     app=FastAPI(lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
     app.state.infra=infra
@@ -70,7 +87,9 @@ def criar_app(infra,db=None,redis=None):
         app.state.cofre=Cofre(infra.encryption_key)
         app.state.configuracoes=Configuracoes(Repositorio(app.state.db))
         app.state.admin=Administracao(app.state.db,app.state.cofre,app.state.configuracoes,infra)
-    preparar(app)
+        app.state.http=httpx.AsyncClient(follow_redirects=False)
+        app.state.pipeline=Pipeline(app.state.db,app.state.redis,app.state.configuracoes,app.state.cofre,app.state.http)
+    if db is not None: preparar(app)
     app.add_middleware(limites.LimiteCorpo,max_bytes=infra.max_body_bytes)
 
     @app.middleware('http')
@@ -110,5 +129,5 @@ def criar_app(infra,db=None,redis=None):
         await app.state.db.fetchval('SELECT 1'); await app.state.redis.ping()
         return {'ok':True}
 
-    app.include_router(router);app.include_router(api)
+    app.include_router(canais_router);app.include_router(router);app.include_router(api)
     return app

@@ -418,3 +418,12 @@ O módulo `plataforma.py` implementa tenants (GET/POST/PATCH), configuração GE
 Autenticação de agente: `skyone_auth_tipo=nenhuma|cabecalho|bearer`, `skyone_auth_cabecalho`, `skyone_auth` (somente escrita), `timeout_s` (1–600, padrão 90), `provedor=skyone|mock`. `skyone_auth_configurado` é a indicação pública; ciphertext nunca retorna. O nome antigo `skyone_token` não é aceito na API mínima. Credenciais de canais são objetos somente escrita, cifrados com Fernet e vinculados ao tenant. A URL com segredo de webhook só retorna na criação; leituras indicam configuração. Canais iniciam inativos. Apenas `modo_resposta=sync` é aceito nesta etapa; callback entra na 0.6.
 
 `GET /api/v1/conversas/{conversation_id}/mensagens` usa `X-API-Key` com `eventos:ler`, aplicando tenant e restrição opcional de agente. Descobertas globais por hash de chave e, posteriormente, ID de canal são fronteiras de autenticação, não acesso a dados de negócio sem tenant.
+
+## Pipeline integrado — Fase 0.5, bloco 4
+
+- `POST /webhooks/api/{canal_id}?s=...`: corpo `{identificador,texto,message_id?,enviada_em?}`; horário ISO com fuso. Não aceita origem humana definida pelo cliente. Provedores externos: normalizador uazapi herdado, pendente de fixtures reais na Fase 1; demais tipos respondem 501.
+- `POST /api/v1/conversas/mensagens`: mesmo corpo mais `canal_id`, com chave no escopo `conversar`; tenant e agente da chave restringem o canal.
+- `POST /admin/v1/tenants/{tenant_id}/agentes/{agente_id}/simular`: corpo acima, canal API ativo ligado ao agente, somente mock/dry. Substitui o corpo antigo `{usuario,texto}` nesta API mínima; usa identificador explícito.
+- `GET /admin/v1/tenants/{tenant_id}/conversas/{conversation_id}/mensagens` e `GET /admin/v1/tenants/{tenant_id}/metricas?agente=...`: consultas internas isoladas.
+
+Conversas usam `<tenant>:<canal_id>:<identificador>`. Cada mensagem aceita é registrada antes do agendamento. Canal inativo, agente pausado/rascunho e tenant suspenso retornam 200 ignorado. A versão nova não monta as rotas administrativas globais antigas. Não ativar `main:app` sobre `bykoji_test`: exige migrações até 005 e configuração do painel/pepper/Fernet. A troca para o banco vazio depende da confirmação do Marco.

@@ -253,7 +253,7 @@ docker compose logs gateway | grep -c "$UAZAPI_WEBHOOK_SECRET"     # 0 (SEG05)
 
 ### Tarefas — banco
 - [x] Criar o mecanismo de migrações (`app/migrations/NNN_*.sql` + `schema_migrations`). A migração `001_base.sql` é o `schema.sql` atual. Validado em banco isolado `gateway_migrations_test`; ver `docs/MIGRACOES.md`.
-- [ ] Migração `002_plataforma.sql` (DDL criado e validado em banco isolado; conversão do legado e extração física do catálogo ainda pendentes):
+- [ ] Migração `002_plataforma.sql` (DDL criado e validado em banco isolado; legado será preservado sem conversão; extração física do catálogo ainda pendente):
   - `tenants` (id slug PK, nome, status `ativo|suspenso`, plano, limite_turnos_mes, timezone, `retencao_dias`, `tenant_teste` bool, criado_em)
   - `tenant_config` (padrões do tenant: os mesmos campos de comportamento de `agentes`, todos opcionais)
   - `modulos_tenant` (tenant_id, modulo, ativo, config jsonb) — quais módulos de capacidade a empresa contratou
@@ -268,7 +268,7 @@ docker compose logs gateway | grep -c "$UAZAPI_WEBHOOK_SECRET"     # 0 (SEG05)
   - Adicionar `tenant_id NOT NULL` + FK em `conversas`, `mensagens`, `turnos`, `webhook_raw`; `agente_id` e `canal_id` em `conversas` e `turnos`; índices compostos começando por `tenant_id`.
   - `cardapio_itens` sai do núcleo e passa a pertencer ao módulo `catalogo` (Fase 4 completa o módulo).
   - `conversation_id` passa a ser `<tenant>:<canal_id>:<identificador>` (ex.: `bykoji:can_7f3a:5511999999999`) — o mesmo tenant pode ter vários números de WhatsApp.
-- [ ] Seed: modelos globais iniciais — `atendente_delivery` (módulos `catalogo`, `pedidos`), `assistente_generico` (sem módulos) — e o tenant `bykoji` com o agente "Atendimento By Koji". Migrar ou limpar os dados de teste (com confirmação do Marco).
+- [ ] Seed: modelos globais iniciais — `atendente_delivery` (módulos `catalogo`, `pedidos`), `assistente_generico` (sem módulos) — e o tenant `bykoji` com o agente "Atendimento By Koji". Decisão do Marco: não converter nem apagar os dados legados; preservar `bykoji_test` e preparar banco vazio no passo 5, após confirmação.
 
 ### Tarefas — código
 - [ ] Estrutura de pastas: `app/nucleo/` (pipeline, fila, conversas), `app/canais/<tipo>.py` (adaptadores), `app/agentes/` (adaptador de agente; `skyone.py` e `mock.py`), `app/modulos/<nome>/` (rotas, contexto, migrações do módulo), `app/admin/` (API `/admin/v1`).
