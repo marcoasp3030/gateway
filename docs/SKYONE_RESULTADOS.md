@@ -96,3 +96,39 @@ Esperado: lembra na 2ª, não lembra na 3ª. Resultado: _pendente_
 
 - Prompt do sistema só com persona e regras; dados do escritório via Skills (`consultar_processo`, `listar_prazos`, `buscar_cliente`, `listar_audiencias`), com a regra de segredo de justiça aplicada dentro da Skill.
 - max_tokens 800–1000, temperature 0,2, frequency_penalty 0; preferir modelo sem raciocínio para atendimento.
+
+## Probe executado na VPS — 08/10/2026
+
+- Escopo autorizado: dois testes de instrução e três medições de latência, sequenciais, no fluxo de teste informado pelo Marco; sem alterar o fluxo/agente no Skyone.
+- Relatórios finalizados em 2026-10-08T17:25:55.689096+00:00 (idiomas) e 2026-10-08T17:26:27.771992+00:00 (latência), UTC.
+- `SKYONE_PROBE_URL` configurada no `.env`, mantido com permissão 600 e ignorado pelo Git.
+- **Autenticação ausente nas cinco chamadas**, explicitamente registrada pelo probe. Corpo contém somente `message`, `session_id`, `conversation_id`, `request_id`, `instrucoes_agente`; nenhuma credencial no corpo ou cabeçalho.
+- `SKYONE_PROBE_TOKEN` vazio é permitido somente na ferramenta de diagnóstico. Não há fallback para `SKYONE_TOKEN`/URL de produção; token preenchido interrompe a execução até o formato de autenticação ser confirmado pelo Marco, sem presumir Bearer ou nome de cabeçalho.
+- Mesma mensagem sintética em todos os casos: "Diga uma frase curta explicando como você pode ajudar." Instrução: responder no idioma solicitado em até 10 palavras (português nas três medições).
+- Cada chamada recebeu `request_id`, `conversation_id` e `session_id` próprios. Sessões novas evitam carregar contexto entre medições; isso **não valida isolamento de memória nem define a estratégia de sessão**.
+
+| Caso | HTTP | Duração | Resposta | request_id |
+|---|---|---|---|---|
+| ingles | 200 | 14,106 s | I provide case updates, deadline tracking, and schedule coordination. | `038d6fa9-d8d6-4809-afec-09b89f99263a` |
+| portugues | 200 | 9,703 s | Posso fornecer informações sobre processos e prazos do seu caso. | `e6e48247-b3d4-45d4-b801-8f4daced4ff7` |
+| latencia_1 | 200 | 6,844 s | Posso fornecer prazos, audiências e movimentações dos processos. | `684b3bf0-d32d-4502-9695-ef96ba4c6740` |
+| latencia_2 | 200 | 15,110 s | Posso organizar prazos, audiências e processos do seu escritório. | `38114563-3555-4622-becf-7954d2127d36` |
+| latencia_3 | 200 | 7,991 s | Auxilio na gestão de prazos e audiências processuais. | `721bd49f-59c8-4936-a4e6-dd4ab05e2b77` |
+
+Três medições de latência: **média 9,982 s**, **mediana 7,991 s**, mínimo 6,844 s e máximo 15,110 s.
+
+- **5/5 HTTP 200 e contrato válido**: texto não vazio, `request_id` e `conversation_id` correspondentes aos enviados, `status=success`, `tipo=text`, `acao=nenhuma`.
+- Inspeção das respostas: inglês e português corretos; 9 e 10 palavras, respectivamente. As três respostas de latência também respeitaram até 10 palavras.
+- Duração medida do início da validação DNS até a leitura completa da resposta, incluindo rede e processamento no Skyone. Não inclui debounce, fila do gateway nem envio ao WhatsApp. Três amostras não permitem concluir p95 de produção ou causa da latência; não houve acesso ao Logger nesta execução.
+- Relatórios sanitizados locais (ignorados pelo Git, permissão 600): `.local/skyone-probe-idiomas-2026-10-08.json` e `.local/skyone-probe-latencia-2026-10-08.json`.
+
+Comandos executados (cada caso uma vez):
+
+```bash
+docker compose run --rm --no-deps -v /home/twadmin/gateway:/workspace:ro gateway python /workspace/scripts/skyone_probe.py --caso idiomas
+docker compose run --rm --no-deps -v /home/twadmin/gateway:/workspace:ro gateway python /workspace/scripts/skyone_probe.py --caso latencia
+```
+
+`--caso tempo --espera-s 60|120|300` permanece disponível para diagnóstico futuro; o Delay deverá ser configurado manualmente no fluxo pelo Marco. O probe não envia `probe_delay_s` fora do contrato validado.
+
+**Ponto de parada:** aguardando os testes do Marco de memória, autenticação e limite de requisições. Estratégias de sessão e autenticação não consolidadas; Fase 0.5 não iniciada. Simultâneas, Delay/callback e agente "Teste Rápido" não foram executados nesta rodada. Atendimento mantido em `mock/dry`.

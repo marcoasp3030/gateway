@@ -1,5 +1,7 @@
 # Descobertas no Skyone — Fase 0.3
 
+> Atualização de 08/10/2026: o probe foi adaptado ao contrato validado. O roteiro abaixo é histórico e ainda aguarda consolidação após os testes do Marco; não usar suas orientações de token no corpo ou API de clonagem. Para a execução atual, consultar `docs/SKYONE_RESULTADOS.md`, seção "Probe executado na VPS". Sessão e autenticação continuam sem decisão consolidada.
+
 Status em 2026-10-08: ferramenta preparada e testada; validação real pendente.
 O gateway continua em `mock/dry`. Nenhum fluxo real foi chamado.
 

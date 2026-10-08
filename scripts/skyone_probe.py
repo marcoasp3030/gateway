@@ -16,27 +16,27 @@ from pathlib import Path
 import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
-from seguranca import UrlRecusada, mascarar, validar_segredos, validar_url_saida
+from seguranca import UrlRecusada, mascarar, validar_url_saida
 
 
-def payloads(token: str, caso: str, espera_s: int) -> list[tuple[str, dict]]:
-    base = {
-        "token": token,
+def payloads(caso: str, espera_s: int) -> list[tuple[str, dict]]:
+    # Sessões sintéticas independentes evitam carregar contexto entre medições.
+    # Isso não define a estratégia de sessão do gateway.
+    if caso == "tempo":
+        instrucoes = [(f"tempo_{espera_s}s", "Responda somente: teste concluído.")]
+    elif caso == "latencia":
+        instrucoes = [(f"latencia_{i}", "Responda somente em português, em até 10 palavras.")
+                      for i in range(1, 4)]
+    else:
+        instrucoes = [("ingles", "Responda somente em inglês, em até 10 palavras."),
+                      ("portugues", "Responda somente em português, em até 10 palavras.")]
+    return [(nome, {
         "request_id": str(uuid.uuid4()),
         "conversation_id": "probe:" + uuid.uuid4().hex,
-        "canal": "test",
-        "mensagem": "Diga uma frase curta explicando como você pode ajudar.",
-        "historico": [],
-        "cliente": {"nome": "Teste de integração", "unidade_preferida": None},
-        "carrinho": {"itens": [], "total": 0},
-    }
-    if caso == "tempo":
-        return [(f"tempo_{espera_s}s", {**base, "probe_delay_s": espera_s,
-                                      "instrucoes_agente": "Responda somente: teste concluído."})]
-    return [
-        ("ingles", {**base, "instrucoes_agente": "Responda somente em inglês."}),
-        ("portugues", {**base, "instrucoes_agente": "Responda somente em português."}),
-    ]
+        "session_id": "probe:" + uuid.uuid4().hex,
+        "message": "Diga uma frase curta explicando como você pode ajudar.",
+        "instrucoes_agente": instrucao,
+    }) for nome, instrucao in instrucoes]
 
 
 def sanitizar(valor, segredos: list[str]):
@@ -54,10 +54,14 @@ def sanitizar(valor, segredos: list[str]):
 
 
 async def executar(url: str, token: str, casos, timeout: float, client) -> list[dict]:
+    if token:
+        raise ValueError("Autenticação do probe pendente dos testes do Marco; token não enviado.")
     resultados = []
     for nome, payload in casos:
         inicio = time.monotonic()
-        resultado = {"caso": nome}
+        resultado = {"caso": nome, "autenticacao": "ausente",
+                     "request_id_enviado": payload["request_id"],
+                     "session_id_enviado": payload["session_id"]}
         try:
             await validar_url_saida(url)
             async with client.stream("POST", url, json=payload, timeout=timeout,
@@ -75,6 +79,16 @@ async def executar(url: str, token: str, casos, timeout: float, client) -> list[
                 except ValueError:
                     corpo = texto
                 resultado["corpo"] = sanitizar(corpo, [token, url])
+                if isinstance(corpo, dict):
+                    resultado["retorno"] = sanitizar(
+                        {k: corpo.get(k) for k in ("resposta", "request_id", "acao")}, [token, url])
+                resultado["contrato_ok"] = (
+                    isinstance(corpo, dict)
+                    and isinstance(corpo.get("resposta"), str) and bool(corpo["resposta"].strip())
+                    and corpo.get("request_id") == payload["request_id"]
+                    and corpo.get("conversation_id") == payload["conversation_id"]
+                    and corpo.get("status") == "success" and corpo.get("tipo") == "text"
+                    and corpo.get("acao") == "nenhuma")
                 resultado["ok_http"] = 200 <= resposta.status_code < 300
                 if 300 <= resposta.status_code < 400:
                     resultado["observacao"] = "Redirecionamento recusado; conferir a URL do fluxo."
@@ -90,20 +104,22 @@ async def executar(url: str, token: str, casos, timeout: float, client) -> list[
 async def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--caso", choices=["idiomas", "tempo"], default="idiomas")
+    parser.add_argument("--caso", choices=["idiomas", "latencia", "tempo"], default="idiomas")
     parser.add_argument("--espera-s", type=int, choices=[60, 120, 300], default=60)
     parser.add_argument("--timeout", type=float, default=360)
     args = parser.parse_args()
     if not 1 <= args.timeout <= 600:
         parser.error("--timeout deve estar entre 1 e 600 segundos")
-    url = os.getenv("SKYONE_PROBE_URL") or os.getenv("SKYONE_WEBHOOK_URL", "")
-    token = os.getenv("SKYONE_PROBE_TOKEN") or os.getenv("SKYONE_TOKEN", "")
-    casos = payloads(token, args.caso, args.espera_s)
+    url = os.getenv("SKYONE_PROBE_URL", "")
+    token = os.getenv("SKYONE_PROBE_TOKEN", "")
+    casos = payloads(args.caso, args.espera_s)
     if args.dry_run:
-        print(json.dumps({"dry_run": True, "casos": sanitizar(dict(casos), [token, url])},
+        print(json.dumps({"dry_run": True, "autenticacao": "pendente" if token else "ausente", "casos": sanitizar(dict(casos), [token, url])},
                          ensure_ascii=False, indent=2))
         return 0
-    problemas = validar_segredos({"SKYONE_PROBE_TOKEN": token})
+    problemas = []
+    if token:
+        problemas.append("Autenticação do probe pendente dos testes do Marco; token não enviado.")
     if not url:
         problemas.append("Configure SKYONE_PROBE_URL no .env")
     if problemas:
@@ -115,7 +131,7 @@ async def main() -> int:
                       "resultados": resultados,
                       "avaliacao": "Revisar respostas no Logger do Skyone; HTTP 2xx não comprova parametrização nem callback."},
                      ensure_ascii=False, indent=2))
-    return 0 if all(r["ok_http"] for r in resultados) else 1
+    return 0 if all(r["ok_http"] and r.get("contrato_ok", False) for r in resultados) else 1
 
 
 if __name__ == "__main__":

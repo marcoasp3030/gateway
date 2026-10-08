@@ -10,11 +10,12 @@ spec.loader.exec_module(probe)
 
 
 def test_payloads_isolam_instrucao_sem_historico_real():
-    casos = probe.payloads("token-teste", "idiomas", 60)
+    casos = probe.payloads("idiomas", 60)
     a, b = casos[0][1].copy(), casos[1][1].copy()
     assert a.pop("instrucoes_agente") != b.pop("instrucoes_agente")
-    assert a == b and a["historico"] == []
-    assert a["conversation_id"].startswith("probe:")
+    assert all(a.pop(k) != b.pop(k) for k in ("request_id", "session_id", "conversation_id"))
+    assert a == b and set(a) == {"message"}
+
 
 
 def test_SEG05_probe_remove_eco_de_segredos():
@@ -40,8 +41,8 @@ def test_SEG03_probe_valida_cada_chamada_e_nao_segue_redirect(monkeypatch):
 
     async def executar():
         async with httpx.AsyncClient(transport=httpx.MockTransport(responder)) as client:
-            return await probe.executar("https://teste.invalid/", "segredo",
-                                        probe.payloads("segredo", "idiomas", 60), 5, client)
+            return await probe.executar("https://teste.invalid/", "",
+                                        probe.payloads("idiomas", 60), 5, client)
 
     resultados = asyncio.run(executar())
     assert len(validadas) == len(chamadas) == 2
@@ -59,8 +60,8 @@ def test_SEG03_probe_recusa_url_antes_de_enviar(monkeypatch):
 
     async def executar():
         async with httpx.AsyncClient(transport=httpx.MockTransport(nao_enviar)) as client:
-            return await probe.executar("https://127.0.0.1/", "segredo",
-                                        probe.payloads("segredo", "tempo", 60), 5, client)
+            return await probe.executar("https://127.0.0.1/", "",
+                                        probe.payloads("tempo", 60), 5, client)
 
     resultado = asyncio.run(executar())[0]
     assert resultado["erro"] == "UrlRecusada"
@@ -78,9 +79,66 @@ def test_probe_timeout_registra_tipo_sem_url_secreta(monkeypatch):
 
     async def executar():
         async with httpx.AsyncClient(transport=httpx.MockTransport(expirar)) as client:
-            return await probe.executar("https://teste.invalid/?s=segredo", "segredo",
-                                        probe.payloads("segredo", "tempo", 300), 1, client)
+            return await probe.executar("https://teste.invalid/?s=segredo", "",
+                                        probe.payloads("tempo", 300), 1, client)
 
     resultado = asyncio.run(executar())[0]
     assert resultado["erro"] == "ReadTimeout"
     assert "segredo" not in str(resultado)
+
+
+def test_probe_contrato_real_sem_autenticacao(monkeypatch):
+    import json
+
+    async def validar(url):
+        pass
+
+    def responder(request):
+        assert 'authorization' not in request.headers
+        corpo = json.loads(request.content)
+        assert set(corpo) == {'message', 'session_id', 'conversation_id', 'request_id', 'instrucoes_agente'}
+        return httpx.Response(200, json={
+            'resposta': 'Posso ajudar com suas dúvidas.', 'request_id': corpo['request_id'],
+            'conversation_id': corpo['conversation_id'], 'acao': 'nenhuma',
+            'status': 'success', 'tipo': 'text'})
+
+    monkeypatch.setattr(probe, 'validar_url_saida', validar)
+
+    async def executar():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(responder)) as client:
+            return await probe.executar('https://teste.invalid/', '', probe.payloads('latencia', 60), 5, client)
+
+    resultados = asyncio.run(executar())
+    assert len(resultados) == 3
+    assert all(r['contrato_ok'] and r['autenticacao'] == 'ausente' for r in resultados)
+
+
+def test_probe_http_200_nao_comprova_contrato(monkeypatch):
+    async def validar(url):
+        pass
+
+    monkeypatch.setattr(probe, 'validar_url_saida', validar)
+
+    async def executar():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(
+                lambda request: httpx.Response(200, json={'resposta': 'ok', 'request_id': 'incorreto'}))) as client:
+            return await probe.executar('https://teste.invalid/', '', probe.payloads('idiomas', 60), 5, client)
+
+    assert all(r['ok_http'] and not r['contrato_ok'] for r in asyncio.run(executar()))
+
+
+def test_probe_token_configurado_nao_e_enviado_sem_formato_confirmado():
+    import pytest
+    with pytest.raises(ValueError, match='pendente'):
+        asyncio.run(probe.executar('https://teste.invalid/', 'segredo', [], 5, None))
+
+
+def test_probe_nao_herda_token_de_producao(monkeypatch, capsys):
+    import json
+    monkeypatch.setenv('SKYONE_TOKEN', 'nao-usar-credencial-de-producao')
+    monkeypatch.setenv('SKYONE_PROBE_TOKEN', '')
+    monkeypatch.setattr(probe.sys, 'argv', ['probe', '--dry-run'])
+    assert asyncio.run(probe.main()) == 0
+    relatorio = json.loads(capsys.readouterr().out)
+    assert relatorio['autenticacao'] == 'ausente'
+    assert 'nao-usar-credencial' not in str(relatorio)
