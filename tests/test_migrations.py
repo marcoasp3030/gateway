@@ -32,9 +32,9 @@ def banco(cenario):
 
 def test_migracoes_seed_e_reaplicacao():
     async def cenario(conn):
-        assert await migrar.aplicar(conn) == ['001_base.sql','002_plataforma.sql','003_seed.sql']
+        assert await migrar.aplicar(conn) == [a.name for a in sorted(migrar.PASTA.glob('*.sql'))]
         assert await migrar.aplicar(conn) == []
-        assert await conn.fetchval('SELECT count(*) FROM schema_migrations') == 3
+        assert await conn.fetchval('SELECT count(*) FROM schema_migrations') == len(migrar.arquivos())
         agente = await conn.fetchrow("SELECT * FROM agentes WHERE id='bykoji_atendimento'")
         assert (agente['timeout_s'],agente['provedor'],agente['send_mode'],agente['status']) == (90,'mock','dry','rascunho')
         assert await conn.fetchval('SELECT count(*) FROM modelos_agente') == 2

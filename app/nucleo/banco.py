@@ -88,3 +88,12 @@ class Repositorio:
         return registro(await self.db.fetchrow(
             'SELECT * FROM modelos_agente WHERE id=$2 AND versao=$3 '
             'AND (tenant_id=$1 OR tenant_id IS NULL)',escopo(tenant_id),modelo_id,versao))
+
+    async def historico(self, tenant_id, conversa_id, antes_id, limite):
+        if not 0 <= limite <= 100:
+            raise ValueError('history_turns inválido')
+        rows = await self.db.fetch('SELECT direcao,conteudo,enviada_em FROM mensagens '
+            'WHERE tenant_id=$1 AND conversation_id=$2 AND id<$3 '
+            'ORDER BY enviada_em DESC,id DESC LIMIT $4',
+            escopo(tenant_id),conversa_id,antes_id,limite)
+        return [dict(r) for r in reversed(rows)]

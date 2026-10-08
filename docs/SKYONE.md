@@ -66,3 +66,11 @@ docker compose run --rm --no-deps \
 | Resposta `sync` ou `async`? | Resultado de tempo e callback | A decidir |
 
 O checkpoint da Fase 0.3 em `PLANO_CURSOR.md` pede esses resultados antes da Fase 0.5. A publicação do domínio foi antecipada por solicitação do Marco; ela não conclui a Fase 1, que também exige fixtures reais do uazapi.
+
+## Adaptador implementado — Fase 0.5, bloco 3
+
+`app/agentes/skyone.py` monta `message`, `conversation_id`, `request_id`, `session_id=request_id`, `instrucoes_agente` e `historico`, além dos IDs de tenant/agente/modelo. Histórico vem de `mensagens`, filtrado por tenant e conversa, anterior ao lote atual, limitado a `history_turns` itens e devolvido cronologicamente com `enviada_em` no fuso do tenant. Migração 004 acrescenta o horário à mensagem; dados existentes recebem `criado_em` como fallback.
+
+Autenticação genérica: `bearer` ou `cabecalho`, com valor Fernet obtido do agente. Chamadas live sem credencial só são permitidas em tenant de teste. Timeout total por agente, DNS/URL validados imediatamente antes de chamar e redirects recusados. Retornos exigem IDs correspondentes, status success e tipo text; texto em `resposta` ou `resposta.body`. Credencial ecoada na resposta é recusada.
+
+Validação com Postgres e transporte HTTP simulado; não houve chamada real ao Skyone neste bloco. O tipo real de autenticação e sua validação 401/403 versus 200 continuam dependentes do Marco para concluir a Fase 0.5.
