@@ -41,6 +41,45 @@ As FKs impedem referências entre tenants, mas não substituem o filtro de tenan
 - `sh scripts/test_suite.sh` reproduz a suíte com Postgres isolado `gateway_migrations_test` e Redis do Compose. Redis usa namespace aleatório para o teste Lua e remove somente as chaves desse cenário. Nenhum teste usa o banco do painel nem o banco de produção.
 - `tests/smoke_runtime.py` é exclusivamente um servidor de diagnóstico: fixa o banco isolado e usa chaves sintéticas. Executar somente com porta ligada a loopback, nunca como servidor de produção.
 
-Troca planejada, ainda não autorizada: criar banco vazio `gateway` com usuário próprio, aplicar migrações 001–005, ajustar infraestrutura no `.env`, reconstruir e recriar somente o serviço gateway e validar saúde/isolamento. `bykoji_test` fica preservado, sem conversão ou remoção. Benchmark de dois tenants/três agentes após a troca ainda não executado.
+Troca autorizada pelo Marco em 08/10/2026: criar banco vazio `gateway` com usuário próprio, aplicar migrações 001–005, ajustar infraestrutura no `.env`, reconstruir e recriar somente o serviço gateway e validar saúde/isolamento. A tentativa foi interrompida nos pré-requisitos, conforme registro abaixo. `bykoji_test` fica preservado, sem conversão ou remoção. Benchmark de dois tenants/três agentes após a troca ainda não executado.
 
 O processamento novo registra mensagens antes de agendar, usa Redis para debounce/trava e recupera pendências do Postgres na subida. Isso não substitui a Fase 0.6: separação de workers, fila durável completa e garantias de recuperação em falhas durante envio continuam pendentes. Casos live de provedores exigem a validação real prevista no plano.
+
+## Passo 5 — pré-requisitos e volta — 08/10/2026
+
+A troca **não ocorreu**. O container antigo continua funcionando, mas a imagem informada por `docker inspect` (`sha256:61a0f7129afd63f46cf024dea5bb4d2ad8956438bad20796f89b1024d01799f8`) não está disponível no armazenamento de imagens do Docker. `docker tag <id> gateway:fase0` retornou `No such image`; `docker image inspect <id>` confirmou a indisponibilidade. Não substituir essa imagem pela tag `latest`, que pode conter outra versão. A causa da indisponibilidade ainda não foi investigada.
+
+- Backup customizado (`pg_dump -Fc`): `/home/twadmin/backups/gateway/bykoji_test-20261008T192052Z.dump`, 14.498 bytes, permissão 600; diretório 700, fora do repositório. `pg_restore --list` conseguiu listar o arquivo; restauração não foi executada.
+- SHA-256 do dump: `078326f86fdb576126979bea4fed86854eabfa1cea5cd113572c532e9b427110`.
+- Ambiente anterior: `/home/twadmin/gateway/.env.antes-gateway`, permissão 600, ignorado pelo Git e idêntico ao `.env` atual.
+- Redis antigo: zero chaves `buf:*`; nenhuma chave removida.
+- Banco `gateway` não criado. Nenhuma migração aplicada ao serviço e nenhum container recriado.
+
+### Procedimento de volta após uma futura troca
+
+**Não executar agora:** a tag `gateway:fase0` não foi criada e o serviço já está no estado anterior. Antes de retomar a implantação, é necessário recuperar e verificar uma imagem fiel à versão antiga, com essa tag, além de renovar o backup e conferir novamente as filas. Não sobrescrever a cópia do ambiente anterior sem preservar a existente.
+
+Se uma validação falhar depois de uma futura troca, conferir que a imagem de volta existe, restaurar o ambiente e recriar **somente** o gateway usando a imagem preservada, sem build:
+
+```bash
+cd /home/twadmin/gateway
+docker image inspect gateway:fase0 --format '{{.Id}}'
+# Se a imagem não existir, parar: não recriar com outra imagem.
+install -m 600 .env.antes-gateway .env
+mkdir -p .local
+chmod 700 .local
+cat > .local/compose.volta.yml <<'YAML'
+services:
+  gateway:
+    image: gateway:fase0
+    pull_policy: never
+YAML
+docker compose --env-file .env \
+  -f docker-compose.yml -f docker-compose.proxy.yml \
+  -f .local/compose.volta.yml \
+  up -d --no-deps --no-build gateway
+curl --fail --silent http://127.0.0.1:8100/health
+curl --fail --silent https://painel.luxbrain.com.br/gateway/health
+```
+
+Executar os comandos em sequência, parando em qualquer erro. O ambiente salvo seleciona `docker-compose.yml:docker-compose.proxy.yml` e o banco legado `bykoji_test`. Na volta, o health interno esperado é `{"ok":true,"agente":"mock","envio":"dry"}`; o público deve ser somente `{"ok":true}`. Não usar `down`, não restaurar o dump sobre o banco intacto, não remover bancos/volumes/chaves Redis e não recriar Postgres, Redis ou painel. Preservar também o banco novo para diagnóstico, registrar o motivo em `PROGRESS.md` e parar.
