@@ -1,0 +1,20 @@
+---
+description: Regras do projeto Gateway de Agentes (VPS + Skyone Studio)
+alwaysApply: true
+---
+
+- O roteiro oficial é `PLANO_CURSOR.md`. Leia as seções 1, 2 e 2.1 antes de qualquer tarefa e trabalhe **uma fase por vez**.
+- Respeite todas as **Regras obrigatórias** (seção 2), os **Invariantes INV01–INV13** (seção 2.1) e as regras de **Segurança e LGPD SEG01–SEG10 / LGPD01–LGPD05** (seção 2.2). Testes levam o código no nome: `test_INV03_...`, `test_SEG03_...`.
+- Nunca remova nem enfraqueça proteções de `app/seguranca.py` ou do middleware em `app/main.py`. Rota de gestão nova sempre sob `/admin`. URL de saída sempre validada com `validar_url_saida` antes da chamada.
+- Em um checkpoint "🛑 PARE", pare e peça ao Marco o que está indicado. Não invente URL, token, payload de terceiro nem formato de API externa.
+- Nunca rode testes contra o banco de produção: o banco de teste termina em `_test`.
+- Não altere outros serviços da VPS (API DQE, outros blocos do Nginx). No Nginx, só adicione; rode `nginx -t` antes de recarregar.
+- Comandos destrutivos (`DROP`, `DELETE` sem `WHERE`, `docker compose down -v`, apagar volumes, `rm -rf`) só com confirmação explícita do Marco.
+- Segredos só no `.env` (fora do git) ou criptografados no banco. Nunca em código, log ou resposta de API.
+- Modelo de domínio na seção 1.1: tenant → módulos → modelos de agente → agentes → canais. Nada de regra de segmento no núcleo: ela vai em `app/modulos/<nome>/` ou na configuração do modelo. O Skyone só é acessado via `app/agentes/`.
+- Toda rota `/api/*` passa por `contexto_da_chave(escopo)` e respeita os escopos da chave (SEG11).
+- Toda tabela de negócio tem `tenant_id`; toda query filtra por ele; toda rota nova tem teste de isolamento entre dois tenants.
+- Gestão nova entra primeiro em `docs/API_ADMIN.md`, depois no código. O painel web nunca acessa o banco do gateway.
+- Mudança de schema só por migração nova em `app/migrations/`. Não edite migração aplicada.
+- Ao terminar uma fase: rodar as validações da fase, registrar no `PROGRESS.md` (comandos e resultados) e fazer commit `fase N: <resumo>`.
+- Responda ao Marco em português.
