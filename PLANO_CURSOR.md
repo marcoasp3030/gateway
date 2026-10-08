@@ -11,7 +11,7 @@
 | Fase 0 — implantação simulada | ✅ Concluída (commit `aef6f26`) | `PROGRESS.md` |
 | Publicação no domínio | ✅ `https://painel.luxbrain.com.br/gateway/health` via **Caddy** do projeto `painel_koji` (rede `luxbrain_gateway_proxy`, `docker-compose.proxy.yml`) | `PROGRESS.md`, `docs/PUBLICACAO.md`, `docs/Caddyfile.painel.example` |
 | Fase 0.3 — descobertas no Skyone | 🟡 Quase concluída: probe no fluxo validado ✅ (commit `bf7651d`, 42 testes), memória ✅ (gateway é dono do histórico), histórico enviado pelo gateway ✅, comparação de modelos ✅. Faltam: **autenticação do Webhook** (bloqueia a *conclusão* da 0.5, não o início), simultâneas e tempo limite/callback (antes da 0.6), chamada direta à OpenAI para medir o custo do Skyone | `docs/SKYONE_RESULTADOS.md`, `docs/SKYONE.md`, `PROGRESS.md` |
-| Fase 0.5 | ▶️ **Em andamento**: migrações e seed validados em banco isolado; API, pipeline e autenticação genérica ainda pendentes | `docs/MIGRACOES.md`, `PROGRESS.md` |
+| Fase 0.5 | ▶️ **Em andamento**: blocos 1–4 e troca para banco próprio `gateway` concluídos; benchmark mock/dry com 2 tenants e 3 agentes validado. Autenticação real Skyone e demais funcionalidades da fase ainda pendentes | `docs/MIGRACOES.md`, `PROGRESS.md` |
 | Fases 0.6 em diante | ⏳ Não iniciadas | — |
 
 **Ambiente real da VPS (prevalece sobre exemplos deste plano):**

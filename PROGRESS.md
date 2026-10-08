@@ -267,3 +267,40 @@ PY
   - Imagem candidata preservada, mas validação completa ainda pendente. O próximo teste precisa receber as variáveis de conexão equivalentes às do Compose, sem expor segredos e sem iniciar servidor. Não alterado o arquivo original de rollback.
   - Não retomado o passo 5: backup anterior preservado, sem nova geração nesta tentativa; nenhuma criação de banco/usuário, migração, troca de conexão ou recriação do serviço. Não foi necessário rollback, pois o serviço permaneceu intacto.
   - Motivo e estado atual documentados em `docs/MIGRACOES.md`. Benchmark e demais validações pós-troca continuam pendentes.
+
+## Fase 0.5 — Passo 5: banco próprio e troca concluída — 2026-10-08
+
+- Status: **passo 5 concluído**, conforme autorização do Marco. A Fase 0.5 completa continua com as pendências funcionais e externas já registradas.
+- Imagem de volta:
+  - Teste pelo Compose com `.env.antes-gateway`, arquivos base/proxy/`.local/compose.volta.yml`, `run --rm --no-deps --pull never gateway python -c "import main; print('ok')"` → **ok, exit 0**, sem servidor/agendador adicional.
+  - A opção `run --no-build` não é aceita pelo Compose instalado; foi substituída por `--pull never`, com `image: gateway:fase0` explícita e existente. Nenhum build nesse teste. As falhas anteriores de invocação não eram defeitos da imagem.
+  - Preservadas `gateway:fase0` e `gateway:8f388ed`, ID `sha256:7230ce922e07f577e443c734c910451eb306cb88a206fa01d4be8e2e454096ee`. Hashes 7/7 e pip freeze idênticos, conforme registro anterior.
+- Antes da troca:
+  - Novo `pg_dump -Fc` em `/home/twadmin/backups/gateway/bykoji_test-20261008T193845Z.dump`, permissão 600, diretório 700, fora do Git; `pg_restore --list` → válido. Backup anterior preservado; nenhum restore executado.
+  - SHA-256 do novo dump: `7e6e12a4473700b22720ca37d12cf76aff63b0cd1da578e15c2e803981838c1b`.
+  - `.env.antes-gateway` preservado (600), idêntico ao ambiente antigo antes da edição; Redis antigo com **zero chaves `buf:*`**, nenhuma chave removida nesta implantação.
+  - Imagem nova construída; `sh scripts/test_suite.sh` antes da troca → **65 passed em 11,23 s**, usando banco isolado.
+- Troca:
+  - Criados usuário `gateway` e banco vazio `gateway` no Postgres do próprio Compose. Senha gerada por `openssl rand -hex 24`, gravada somente no `.env`, sem exibição; SQL entregue por stdin com logging de statements desligado nessa sessão.
+  - Papel sem superuser/createdb/createrole/replication/bypassrls; consulta de propriedade confirma apenas o banco `gateway`.
+  - Acrescentado `docker-compose.database.yml`, selecionado pelo `COMPOSE_FILE` local, com `GATEWAY_DATABASE_URL` exclusiva do gateway. `POSTGRES_*`/Redis mantidos: nenhum ajuste de credenciais ou recriação dos serviços existentes.
+  - `docker compose run --rm --no-deps --pull never gateway python /app/migrar.py --apply` → aplicadas **001, 002, 003, 004, 005**; `schema_migrations` conferida.
+  - `docker compose up -d --no-deps --no-build gateway` → recriado somente gateway. Conexão efetiva `current_database()=gateway`, `current_user=gateway`.
+- Validações pós-troca:
+  - Health interno e HTTPS público → **200, somente `{"ok":true}`**; certificado verificado pelo cliente HTTP.
+  - Pelo domínio, `/gateway/admin/v1/tenants`, `/gateway/metricas`, `/gateway/docs` → **404**, inclusive com credencial de painel válida.
+  - Benchmark via API administrativa e webhooks autenticados: **2 tenants, 3 agentes, 3 canais API diferentes, 6 conversas simultâneas, 12 mensagens de entrada, 6/6 respondidas, zero erros**. Duas mensagens agrupadas por conversa.
+  - `bykoji`: agente seed `bykoji_atendimento` e `ag_7e8683a49b68e615aa4e2101`; tenant de teste `bench_passo5` (`tenant_teste=true`): agente `ag_0e4cabdea1793a645e60944c`.
+  - Todos os agentes ativos em **provedor mock / agente_mode mock / send_mode dry**, piloto desligado para as conversas sintéticas. Nenhum provedor externo conectado; nenhuma mensagem enviada ao WhatsApp. Os canais API e dados sintéticos foram preservados.
+  - Mediana observada **4,3075 s**, máximo **4,335 s** (inclui debounce de 4 s; não mede Skyone real).
+  - Métricas por agente (turnos / erros / p50 servidor / p95 servidor):
+    - `bykoji_atendimento`: **2 / 0 / 4.229 ms / 4.256 ms**.
+    - Segundo agente By Koji: **2 / 0 / 4.192,5 ms / 4.203,75 ms**.
+    - Agente do tenant teste: **2 / 0 / 4.190,5 ms / 4.208,05 ms**.
+  - Métricas agregadas: By Koji **4 turnos, zero erros, p95 4.250,9 ms**; tenant teste **2 turnos, zero erros, p95 4.208,05 ms**. Amostra pequena, sem inferência de p95 de produção.
+  - Conteúdo de cada conversa corresponde somente às suas duas entradas. Chaves restritas por agente lendo conversas de outro agente (inclusive mesmo tenant) → **404**; rotas administrativas sob tenant incorreto → **404**. Três chaves temporárias revogadas ao final.
+  - SQL: **zero cruzamentos** de tenant/agente/canal entre turnos e conversas, zero turnos em erro/ignorados e zero entradas pendentes.
+  - Busca em memória pelos valores das chaves, senhas, tokens e segredos dos canais criados nos logs desde o início da tentativa → **0 ocorrências** no gateway, Postgres, Redis e Caddy. Conteúdo bruto dos logs não foi exibido.
+  - IDs de containers do Postgres, Redis e todos os serviços do painel inalterados. `bykoji_test` preservado e sem `schema_migrations`.
+  - Resultados sanitizados em `docs/VALIDACAO_PASSO5.json`; roteiro local executado em `.local/validar_troca.py`. Procedimento de volta atualizado em `docs/MIGRACOES.md`.
+- Nenhuma validação real pós-troca falhou; rollback não necessário. Autenticação real/limite Skyone e demais tarefas da 0.5 fora dos blocos mínimos continuam pendentes; não iniciada a Fase 0.6.

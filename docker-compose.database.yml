@@ -1,0 +1,6 @@
+# Selecionado pelo COMPOSE_FILE local somente após provisionar o banco gateway.
+# As variáveis POSTGRES_* continuam descrevendo o cluster legado, sem recriá-lo.
+services:
+  gateway:
+    environment:
+      DATABASE_URL: ${GATEWAY_DATABASE_URL:?Configure a conexão do banco gateway no .env}

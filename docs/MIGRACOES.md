@@ -1,5 +1,7 @@
 # Migrações do gateway
 
+**Estado atual — 08/10/2026:** passo 5 concluído. O serviço usa banco e usuário `gateway`, migrações 001–005, agentes mock/dry. `bykoji_test` está preservado. A imagem de volta `gateway:fase0` foi validada pelo Compose. Os registros de impedimentos abaixo são históricos; consulte a seção final para operação e rollback.
+
 O executor `app/migrar.py` aplica `app/migrations/NNN_*.sql` em ordem, com uma transação por arquivo e registro em `schema_migrations` (versão, nome, SHA-256, data). Uma trava consultiva do Postgres serializa executores concorrentes. Arquivo já aplicado não pode ser alterado; adicione uma versão nova. Lacunas, versões desconhecidas e checksums diferentes interrompem a execução.
 
 - `001_base.sql`: cópia integral do `app/schema.sql` da Fase 0; permite registrar a base existente.
@@ -16,9 +18,9 @@ O executável usa `DATABASE_URL` do ambiente. Não passa DSN ou senha em argumen
 python /workspace/app/migrar.py --apply
 ```
 
-**Não executar esse comando no gateway atual**: ele aponta para `bykoji_test`, ocupado pela versão antiga do serviço. Os novos campos obrigatórios exigem adaptar o pipeline antes de trocar o banco. `app/schema.sql`, Compose e serviço em execução continuam preservados.
+**Não aplicar migrações no banco legado `bykoji_test`.** O gateway atual já aponta para `gateway` com versões 001–005 aplicadas. Migrações futuras exigem backup e aplicação explícita; nunca são executadas no startup.
 
-Nesta etapa, as migrações foram aplicadas apenas em `gateway_migrations_test`, no Postgres do Compose do gateway. Esse banco adicional permite testar a evolução sem modificar o `bykoji_test` do atendimento simulado. O banco de produção `gateway` e seu usuário não foram criados.
+As migrações foram primeiro validadas em `gateway_migrations_test` e depois aplicadas no banco vazio `gateway` com autorização do Marco. Ambos pertencem ao Postgres do Compose do gateway; o banco do painel não foi utilizado.
 
 ## Testes
 
@@ -28,11 +30,11 @@ Cada cenário usa um schema aleatório em uma transação externa que é reverti
 
 ## Limites desta entrega
 
-As FKs impedem referências entre tenants, mas não substituem o filtro de tenant das futuras consultas/API. SEG13 neste estágio tem campos e validações de formato no banco; validação de credencial real, criptografia no serviço e recusa de agente live sem autenticação dependem das próximas tarefas da 0.5.
+As FKs e os filtros da API mínima/pipeline foram testados com dois tenants. Criptografia e autenticação genérica estão implementadas; a autenticação real Skyone ainda depende do teste externo do Marco para concluir a fase.
 
-`cardapio_itens` recebeu `tenant_id`; sua extração física para as migrações do módulo `catalogo` segue pendente. O framework de módulos, API administrativa, pipeline multiempresa, migração dos dados antigos e troca do banco do serviço também continuam pendentes. Nenhuma fase foi declarada concluída.
+`cardapio_itens` recebeu `tenant_id`; sua extração física para as migrações do módulo `catalogo` segue pendente. O framework de módulos e a gestão administrativa completa continuam pendentes. API mínima e pipeline multiempresa estão ativos; dados antigos não serão convertidos, conforme decisão do Marco. A Fase 0.5 integral não foi declarada concluída.
 
-## Blocos 1–4 implementados — antes da troca de banco
+## Histórico: blocos 1–4 implementados — antes da troca de banco
 
 - `004_horario_mensagens.sql`: horário real/fallback da mensagem para o histórico.
 - `005_processamento.sql`: marcação de mensagens processadas e índice de pendentes.
@@ -57,9 +59,9 @@ A troca **não ocorreu**. O container antigo continua funcionando, mas a imagem 
 
 ### Procedimento de volta após uma futura troca
 
-**Não executar agora:** o serviço já está no estado anterior. A tag `gateway:fase0` foi reconstruída posteriormente (registro abaixo), mas a validação de importação ficou bloqueada pelas variáveis de conexão ausentes no arquivo de ambiente. Antes de retomar a implantação, é necessário concluir essa verificação, renovar o backup e conferir novamente as filas. Não sobrescrever a cópia do ambiente anterior sem preservar a existente.
+**Procedimento de contingência, não executar durante operação normal.** A troca está concluída e a imagem `gateway:fase0` foi validada pelo Compose (seção final). `.env.antes-gateway` continua sendo o ambiente original para retorno ao `bykoji_test`. Não sobrescrever essa cópia.
 
-Se uma validação falhar depois de uma futura troca, conferir que a imagem de volta existe, restaurar o ambiente e recriar **somente** o gateway usando a imagem preservada, sem build:
+Se uma validação falhar após a troca, conferir que a imagem de volta existe, restaurar o ambiente e recriar **somente** o gateway usando a imagem preservada, sem build:
 
 ```bash
 cd /home/twadmin/gateway
@@ -93,3 +95,36 @@ Executar os comandos em sequência, parando em qualquer erro. O ambiente salvo s
 - `docker run --rm --network none --env-file .env.antes-gateway gateway:fase0 python -c 'import main'` → **exit 1**, `KeyError: 'DATABASE_URL'`. Nenhum servidor ou agendador adicional foi iniciado. Tanto `DATABASE_URL` quanto `REDIS_URL` estão ausentes no arquivo salvo: o `docker-compose.yml` constrói essas variáveis a partir de `POSTGRES_*` e `REDIS_PASSWORD` para o serviço.
 - Parada conforme condição do Marco. A imagem ainda **não está integralmente validada para a troca**. Para retomar, o teste de importação precisa receber também as duas variáveis de conexão sintetizadas pelo Compose, sem exibir seus valores e sem iniciar servidor. O `.env.antes-gateway` original permanece intacto. Nenhum banco novo, migração ou troca de serviço foi executado.
 - Regra 15 do plano passa a exigir tag `gateway:<commit>` antes de builds que substituam a imagem em uso e confirmação do Marco antes de `docker image prune` ou `docker builder prune`.
+
+
+## Operação após a troca concluída — 08/10/2026
+
+O serviço foi recriado com `docker compose up -d --no-deps --no-build gateway`. A seleção local é `COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml:docker-compose.database.yml`. O complemento de banco altera somente `gateway.environment.DATABASE_URL`, lendo `GATEWAY_DATABASE_URL` do `.env`. As variáveis `POSTGRES_*` continuam descrevendo o cluster/ambiente legado; não devem ser trocadas pela senha do usuário novo. A senha nova foi gerada com 24 bytes aleatórios e gravada somente no `.env` (600).
+
+O usuário `gateway` é dono apenas do banco `gateway`, sem superuser, createdb, createrole, replication ou bypassrls. Migrações 001–005 aplicadas com esse usuário e conferidas em `schema_migrations`. `bykoji_test` permanece sem essa tabela; não houve conversão, restauração nem exclusão dos dados antigos. Os containers Postgres, Redis e painel não foram recriados.
+
+A validação correta da imagem antiga foi:
+
+```bash
+docker compose --env-file .env.antes-gateway \
+  -f docker-compose.yml -f docker-compose.proxy.yml -f .local/compose.volta.yml \
+  run --rm --no-deps --pull never gateway python -c "import main; print('ok')"
+```
+
+Resultado: `ok`, exit 0. O Compose instalado não aceita `--no-build` em `run`; a imagem explícita existente e `--pull never` permitem importar sem build, sem uvicorn e sem agendador. O teste aconteceu antes da troca, quando `.env` e `.env.antes-gateway` eram iguais. Para uma futura verificação do ambiente antigo, o procedimento de volta acima primeiro restaura `.env`, pois `env_file: .env` no serviço fornece também as demais variáveis do container.
+
+Imagem de volta preservada nas tags `gateway:fase0` e `gateway:8f388ed`, ID `sha256:7230ce922e07f577e443c734c910451eb306cb88a206fa01d4be8e2e454096ee`. Arquivos Python e dependências já haviam sido comparados integralmente. Não é necessário restaurar dump para fazer rollback: restaurar `.env.antes-gateway` e usar a imagem antiga com os arquivos base/proxy/override de volta basta para reconectar ao banco legado intacto. O complemento `docker-compose.database.yml` **não entra no comando de rollback**. Nenhum dado do banco novo é convertido para o legado na volta; preserve ambos.
+
+Backup renovado: `/home/twadmin/backups/gateway/bykoji_test-20261008T193845Z.dump`, modo 600, SHA-256 `7e6e12a4473700b22720ca37d12cf76aff63b0cd1da578e15c2e803981838c1b`. Backup anterior preservado. `pg_restore --list` conferido; restauração não testada.
+
+Health interno/público aprovados, rotas administrativas públicas 404, benchmark de 6 conversas em 2 tenants/3 agentes com zero erros e isolamento conferido. Logs do gateway, Postgres, Redis e Caddy sem ocorrências dos segredos pesquisados. Detalhes em `PROGRESS.md` e `VALIDACAO_PASSO5.json`. Cenário sintético preservado: três agentes mock/dry e três canais API; chaves temporárias do benchmark revogadas.
+
+### Suíte automatizada após a troca
+
+Não executar a suíte contra `gateway`. Para reproduzir os testes usando a configuração de teste anterior, selecione explicitamente apenas os arquivos base/proxy, mantendo a conexão do runner no ambiente `_test`:
+
+```bash
+COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml sh scripts/test_suite.sh
+```
+
+O wrapper encaminha as integrações para `gateway_migrations_test` com as credenciais de teste existentes; `conftest.py` recusa qualquer URL de banco sem sufixo `_test`. A suíte desta entrega passou antes da troca: **65 testes**. O benchmark pós-troca no banco novo foi uma validação operacional explicitamente autorizada pelo Marco, não a execução da suíte de testes contra produção.
