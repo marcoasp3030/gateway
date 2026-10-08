@@ -304,3 +304,10 @@ PY
   - IDs de containers do Postgres, Redis e todos os serviços do painel inalterados. `bykoji_test` preservado e sem `schema_migrations`.
   - Resultados sanitizados em `docs/VALIDACAO_PASSO5.json`; roteiro local executado em `.local/validar_troca.py`. Procedimento de volta atualizado em `docs/MIGRACOES.md`.
 - Nenhuma validação real pós-troca falhou; rollback não necessário. Autenticação real/limite Skyone e demais tarefas da 0.5 fora dos blocos mínimos continuam pendentes; não iniciada a Fase 0.6.
+
+## Fase 0.5 — Contrato único e acesso do painel — 2026-10-08
+
+- Reescrito `docs/API_ADMIN.md` com status por rota, contrato real de credenciais/simulação, campos válidos, erros, limites e separação do planejamento. `/testar` identificado como não implementado (não há corpo real aceito); documentação interativa ausente, banco `gateway` e fluxos criados do zero.
+- Proposta de conectar somente backend do painel à rede existente `luxbrain_gateway_proxy`, utilizando alias já configurado `luxbrain-gateway:8000`. Alteração do Compose do painel depende de confirmação e não foi feita.
+- Container temporário na rede, somente cliente HTTP: administração autenticada → 200; `X-Forwarded-For`, `X-Real-IP` e `Forwarded` → 404 cada, com chave válida. Nenhum servidor/agendador novo e nenhuma exposição de credenciais.
+- Suíte em banco `_test`: 65 testes aprovados. Serviço permanece mock/dry e não foi recriado.
