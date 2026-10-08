@@ -88,4 +88,3 @@ class Repositorio:
         return registro(await self.db.fetchrow(
             'SELECT * FROM modelos_agente WHERE id=$2 AND versao=$3 '
             'AND (tenant_id=$1 OR tenant_id IS NULL)',escopo(tenant_id),modelo_id,versao))
-

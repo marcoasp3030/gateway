@@ -410,3 +410,11 @@ POST /api/v1/conversas/{conversation_id}/notificar
 - Resposta: `{ "ok": true, "turno_id": 123, "enviado": true }`.
 
 As rotas de cardápio, carrinho e pedidos (Fase 4) estão em `docs/SKILLS.md`.
+
+## Implementação mínima — Fase 0.5, bloco 2
+
+O módulo `plataforma.py` implementa tenants (GET/POST/PATCH), configuração GET/PUT, agentes/canais/chaves (GET/POST/PATCH), revogação DELETE de chave e auditoria GET sob `/admin/v1/tenants/{tenant_id}`. As demais rotas do contrato continuam como planejamento até seus blocos correspondentes. `PATCH status` suspende/reativa tenant ou pausa/ativa agente. Paginação de entidades: limite 1–99, cursor por ID.
+
+Autenticação de agente: `skyone_auth_tipo=nenhuma|cabecalho|bearer`, `skyone_auth_cabecalho`, `skyone_auth` (somente escrita), `timeout_s` (1–600, padrão 90), `provedor=skyone|mock`. `skyone_auth_configurado` é a indicação pública; ciphertext nunca retorna. O nome antigo `skyone_token` não é aceito na API mínima. Credenciais de canais são objetos somente escrita, cifrados com Fernet e vinculados ao tenant. A URL com segredo de webhook só retorna na criação; leituras indicam configuração. Canais iniciam inativos. Apenas `modo_resposta=sync` é aceito nesta etapa; callback entra na 0.6.
+
+`GET /api/v1/conversas/{conversation_id}/mensagens` usa `X-API-Key` com `eventos:ler`, aplicando tenant e restrição opcional de agente. Descobertas globais por hash de chave e, posteriormente, ID de canal são fronteiras de autenticação, não acesso a dados de negócio sem tenant.

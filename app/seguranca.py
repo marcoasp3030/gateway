@@ -62,7 +62,7 @@ def chamada_interna(client_host: str | None, headers) -> bool:
     O painel, chamando direto 127.0.0.1:8100, não envia. Só o IP não basta,
     porque o Nginx do host também chega ao container por IP privado.
     """
-    if headers.get("x-forwarded-for") or headers.get("x-real-ip") or headers.get("forwarded"):
+    if any(nome in headers for nome in ("x-forwarded-for", "x-real-ip", "forwarded")):
         return False
     try:
         ip = ipaddress.ip_address(client_host or "")
