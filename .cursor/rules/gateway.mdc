@@ -8,7 +8,8 @@ alwaysApply: true
 - Nunca remova nem enfraqueça proteções de `app/seguranca.py` ou do middleware em `app/main.py`. Rota de gestão nova sempre sob `/admin`. URL de saída sempre validada com `validar_url_saida` antes da chamada.
 - Em um checkpoint "🛑 PARE", pare e peça ao Marco o que está indicado. Não invente URL, token, payload de terceiro nem formato de API externa.
 - Nunca rode testes contra o banco de produção: o banco de teste termina em `_test`.
-- Não altere outros serviços da VPS (API DQE, outros blocos do Nginx). No Nginx, só adicione; rode `nginx -t` antes de recarregar.
+- Não altere outros serviços da VPS (API DQE, painel `painel_koji`, rotas existentes do Caddy). No Caddy, só ajuste os caminhos `/gateway`; rode `caddy validate` antes de `caddy reload` (ver `docs/PUBLICACAO.md`).
+- Leia a seção 0 do `PLANO_CURSOR.md` (estado atual) e o `PROGRESS.md` antes de cada fase; o ambiente real prevalece sobre exemplos do plano.
 - Comandos destrutivos (`DROP`, `DELETE` sem `WHERE`, `docker compose down -v`, apagar volumes, `rm -rf`) só com confirmação explícita do Marco.
 - Segredos só no `.env` (fora do git) ou criptografados no banco. Nunca em código, log ou resposta de API.
 - Modelo de domínio na seção 1.1: tenant → módulos → modelos de agente → agentes → canais. Nada de regra de segmento no núcleo: ela vai em `app/modulos/<nome>/` ou na configuração do modelo. O Skyone só é acessado via `app/agentes/`.

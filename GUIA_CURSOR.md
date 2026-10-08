@@ -28,7 +28,7 @@ No terminal integrado do Cursor:
 docker --version && docker compose version
 git --version
 ss -ltnp | grep -E ':8100|:5433'      # deve vir vazio
-sudo nginx -t                          # Nginx atual está saudável?
+docker ps --format '{{.Names}}' | grep -i caddy   # proxy em uso (Caddy do painel)
 ```
 
 Se a porta 5433 ou 8100 estiver ocupada, anote para ajustar no `docker-compose.yml`.
@@ -57,7 +57,7 @@ O projeto já traz `.cursor/rules/gateway.mdc` com `alwaysApply: true`. Isso faz
 ### 1.5 Ajustes de segurança no Cursor
 
 - Em **Settings → Agent**, deixe a execução de comandos **pedindo confirmação** (não use "auto-run" para tudo). Se quiser agilidade, libere só comandos de leitura e teste (`ls`, `cat`, `grep`, `pytest`, `curl -s`, `docker compose ps`, `docker compose logs`).
-- Nunca aprove automaticamente: `rm`, `docker compose down -v`, `DROP`, `systemctl reload nginx`, `git push`.
+- Nunca aprove automaticamente: `rm`, `docker compose down -v`, `DROP`, `caddy reload`, `git push`.
 - O `.env` com segredos reais só existe na VPS e está no `.gitignore`.
 
 ### 1.6 Como trabalhar com o agente
@@ -144,16 +144,17 @@ Ordem: **0 → 0.3 → 0.5 → 0.6 → 1 → 2 → 3 → 4 → 5 → 5.5 → 6 �
 
 ### Fase 0.3 — Descobertas no Skyone
 
-**O agente vai:** preparar `scripts/skyone_probe.py` para enviar payloads de teste a um fluxo.
+**Situação:** parte já respondida por você (ver `docs/SKYONE_RESULTADOS.md`): instruções pelo prompt funcionam, base/Skills só por agente, URL por fluxo (nunca duplicar), contrato de entrada/saída validado, latência causada pelo prompt do agente.
 
-**🛑 Você faz no Skyone (é a parte principal desta fase):**
-1. Crie um fluxo simples `Webhook → JavaScript → AI Agent Call → Retorno`.
-2. **Agente parametrizável?** Mande dois payloads com `instrucoes_agente` diferentes ("responda só em inglês" × "só em português") e veja se o agente obedece. Teste também se dá para escolher base de conhecimento ou Skills pelo payload.
-3. **API de gestão:** procure na documentação/suporte do Skyone se existe API para criar ou clonar fluxos e agentes.
-4. **Tempo e callback:** coloque um Delay de 60 s, depois 120 s e 300 s no fluxo e veja o que o webhook devolve. Teste um bloco REST no fim do fluxo chamando uma URL externa (ex.: um webhook.site).
-5. Conte os resultados ao agente do Cursor para ele registrar em `docs/SKYONE.md`.
+**O agente do Cursor vai:** alinhar o `scripts/skyone_probe.py` ao contrato validado, permitir rodar sem token (o fluxo de teste ainda está sem autenticação) e executar o probe na URL `https://luxtia.api.integrasky.cloud/k3iynwDoOU`.
 
-**Por que importa:** se o agente aceitar instruções pelo payload, um fluxo serve vários clientes do mesmo tipo (menos trabalho a cada venda). Se não, cada agente tem seu próprio fluxo, e o gateway só guarda a URL.
+**🛑 Você faz no Skyone** (roteiro completo na seção "Pendentes" de `docs/SKYONE_RESULTADOS.md`):
+1. **Memória:** mesma `session_id` lembra? sessão diferente esquece?
+2. **Autenticação:** ligue "Solicitar autenticação" no Webhook e anote o tipo e o nome do cabeçalho; anote o limite máximo de requisições/minuto.
+3. **Agente "Teste Rápido"** com prompt curto, para confirmar a latência.
+4. Depois (antes da Fase 0.6): simultâneas, tempo limite e callback.
+
+Itens 1 e 2 bloqueiam a Fase 0.5. Conte os resultados ao agente do Cursor para ele registrar.
 
 ### Fase 0.5 — Multiempresa, agentes e chaves
 
@@ -177,11 +178,11 @@ Ordem: **0 → 0.3 → 0.5 → 0.6 → 1 → 2 → 3 → 4 → 5 → 5.5 → 6 �
 
 **Você confere:** o agente do Cursor demonstra (com os testes) que derrubar o Redis ou um worker no meio do processamento não perde mensagem, e que um agente com o Skyone fora do ar não atrasa os outros.
 
-### Fase 1 — Nginx e uazapi real
+### Fase 1 — uazapi real (publicação já feita)
 
-**O agente vai:** aplicar o `docs/nginx-gateway.conf` no Nginx (só webhooks, API e health ficam públicos), criar o tenant e o canal uazapi pela API e te devolver a `webhook_url`.
+**O agente vai:** conferir a publicação já feita no Caddy (`https://painel.luxbrain.com.br/gateway/`, só webhooks, API e health públicos), criar o tenant e o canal uazapi pela API e te devolver a `webhook_url`.
 
-**Você confere de fora da VPS (celular ou seu computador):** `https://<dominio>/gateway/metricas` → 404 e `https://<dominio>/gateway/health` → `{"ok":true}`.
+**Você confere de fora da VPS (celular ou seu computador):** `https://painel.luxbrain.com.br/gateway/metricas` → 404 e `https://painel.luxbrain.com.br/gateway/health` → `{"ok":true}`.
 
 **🛑 Você faz:**
 1. Na instância uazapi **de teste**, configure o webhook com a `webhook_url` informada (evento de mensagens).

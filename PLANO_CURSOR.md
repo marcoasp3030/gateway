@@ -4,6 +4,23 @@
 
 ---
 
+## 0. Estado atual (atualizado em 08/10/2026)
+
+| Etapa | Situação | Onde está o registro |
+|---|---|---|
+| Fase 0 — implantação simulada | ✅ Concluída (commit `aef6f26`) | `PROGRESS.md` |
+| Publicação no domínio | ✅ `https://painel.luxbrain.com.br/gateway/health` via **Caddy** do projeto `painel_koji` (rede `luxbrain_gateway_proxy`, `docker-compose.proxy.yml`) | `PROGRESS.md`, `docs/PUBLICACAO.md`, `docs/Caddyfile.painel.example` |
+| Fase 0.3 — descobertas no Skyone | 🟡 Parte respondida pelo Marco (ver `docs/SKYONE_RESULTADOS.md`); falta rodar o probe no fluxo validado e os testes de memória, tempo limite, simultâneas e autenticação | `docs/SKYONE_RESULTADOS.md`, `docs/SKYONE.md` |
+| Fases 0.5 em diante | ⏳ Não iniciadas | — |
+
+**Ambiente real da VPS (prevalece sobre exemplos deste plano):**
+- Proxy público é o **Caddy** do painel (`painel_koji`), não Nginx. `docs/nginx-gateway.conf` fica apenas como referência; a configuração em uso está em `docs/Caddyfile.painel.example` e `docs/PUBLICACAO.md`.
+- Domínio do gateway: `https://painel.luxbrain.com.br/gateway/` (apenas webhooks, `/api` e `/health` públicos).
+- Python 3.10 do host sem `venv`: testes rodam em container Python 3.12 (comando em `PROGRESS.md`).
+- O painel tem Postgres próprio (`painel_koji-banco-1`); o gateway usa o Postgres do seu próprio Compose. Banco de teste: `bykoji_test`.
+
+---
+
 ## 1. Contexto
 
 **Plataforma SaaS de agentes de IA**, multiempresa, multiagente e multicanal. **Toda conversa passa pelo gateway**: ele recebe os canais, organiza a conversa, chama o agente no Skyone Studio, entrega a resposta e mede tudo. Os agentes podem ser de atendimento ao cliente (delivery, clínica, advocacia, varejo) ou internos de empresas (assistente, analista, especialista, ex.: especialista em projetos).
@@ -55,8 +72,8 @@ Canais ──► RECEPÇÃO (/webhooks/*) ──► grava mensagem ──► fil
 ## 2. Regras obrigatórias (valem para todas as fases)
 
 1. **Nunca rode testes contra o banco de produção.** Testes automatizados usam um banco cujo nome termina em `_test`. O `conftest.py` deve abortar se `DATABASE_URL` não terminar em `_test`.
-2. **Não altere outros serviços da VPS.** Em especial a API DQE (`/dqe`) e as `location` existentes do Nginx. No Nginx, apenas **adicione** o bloco `/gateway/`. Antes de recarregar, rode `nginx -t`.
-3. **Nunca exponha portas publicamente.** Gateway em `127.0.0.1:8100` e Postgres em `127.0.0.1:5433`. Acesso externo só pelo Nginx.
+2. **Não altere outros serviços da VPS.** Em especial a API DQE (`/dqe`), o painel (`painel_koji`) e as rotas existentes do **Caddy**. No Caddy, só acrescente ou ajuste os caminhos `/gateway`; antes de recarregar, rode `caddy validate` (procedimento em `docs/PUBLICACAO.md`). Alterações em arquivos do painel são registradas em `PROGRESS.md` e não entram em commit deste repositório.
+3. **Nunca exponha portas publicamente.** Gateway em `127.0.0.1:8100` e Postgres em `127.0.0.1:5433`. Acesso externo só pelo Caddy, pelo domínio `painel.luxbrain.com.br/gateway`.
 4. **Nunca coloque segredos no código, em logs ou no git.** Tudo em `.env`, que deve estar no `.gitignore`.
 5. **Recepção e processamento separados (a partir da Fase 0.6).** Até a Fase 0.6, uvicorn com 1 worker (o agendador roda no processo). A partir dela, a recepção só valida, grava e enfileira; workers separados processam. Nenhuma chamada ao Skyone ou ao canal acontece dentro da requisição do webhook.
 6. **Preço nunca vem da LLM.** Todo preço e total vêm do Postgres.
@@ -100,16 +117,17 @@ Regras testáveis, no mesmo espírito dos invariantes. Código do teste: `test_S
 | Código | Regra | Como é verificada | Fase |
 |---|---|---|---|
 | SEG01 | **Falhar fechado.** O gateway não sobe com segredo vazio, com menos de 16 caracteres ou com valor de exemplo (`troque...`). Webhook sem segredo configurado recusa tudo. Chave de API, segredo de canal ou tenant inexistente → recusa, nunca "deixa passar". | Subir com `ADMIN_KEY=troque-x` deve encerrar com erro; webhook com segredo vazio → 401 | 0 ✅ |
-| SEG02 | **Rotas administrativas só pela rede interna.** `/admin`, `/test`, `/metricas`, `/docs`, `/openapi.json` respondem 404 para qualquer chamada que passou pelo Nginx (presença de `X-Forwarded-For`/`X-Real-IP`) ou veio de IP público, **mesmo com a chave certa**. O Nginx público expõe só `/gateway/webhooks/`, `/gateway/api/` e `/gateway/health` (ver `docs/nginx-gateway.conf`). O painel chama `http://127.0.0.1:8100` direto. | Teste com cabeçalho `X-Forwarded-For` → 404; `curl https://<dominio>/gateway/admin/v1/tenants` → 404 | 0 ✅ / 1 (Nginx) / 0.5 (`/admin/v1`) |
+| SEG02 | **Rotas administrativas só pela rede interna.** `/admin`, `/test`, `/metricas`, `/docs`, `/openapi.json` respondem 404 para qualquer chamada que passou pelo proxy público (Caddy; presença de `X-Forwarded-For`/`X-Real-IP`) ou veio de IP público, **mesmo com a chave certa**. O proxy público expõe só `/gateway/webhooks/`, `/gateway/api/` e `/gateway/health` (ver `docs/PUBLICACAO.md`). O painel chama `http://127.0.0.1:8100` direto. | Teste com cabeçalho `X-Forwarded-For` → 404; `curl https://painel.luxbrain.com.br/gateway/admin/v1/tenants` → 404 | 0 ✅ / publicação ✅ / 0.5 (`/admin/v1`) |
 | SEG03 | **Proteção contra SSRF.** Toda URL que o gateway chama e que vem de configuração (webhook do Skyone, webhooks de saída, base do provedor de canal) é validada: só `https`, porta 443, sem usuário/senha, sem `localhost`/`.internal`/`.local`, e o DNS precisa resolver **só para IPs públicos** — validado ao salvar (`validar_formato_url`) **e imediatamente antes de cada chamada** (`validar_url_saida`, contra DNS rebinding). Chamadas de saída não seguem redirecionamentos. Opcional por tenant: lista de domínios permitidos para o Skyone. | Testes com `127.0.0.1`, `10.x`, `172.17.x`, `169.254.169.254`, `[::1]`, `localhost`, DNS falso apontando para IP privado → recusado | 0.5 |
 | SEG04 | **Segredos comparados em tempo constante** (`hmac.compare_digest` via `segredo_confere`), com falha fechada para valor esperado vazio. Chaves de API armazenadas só como hash (SHA-256 com pepper do `.env`). | Teste unitário | 0 ✅ / 0.5 (hash) |
-| SEG05 | **Nenhum segredo em log.** Query string sensível (`s`, `token`, `key`, `secret`, `api_key`) é mascarada em todos os logs da aplicação e do uvicorn; o Nginx registra webhooks sem query string. Tokens nunca vão para `webhook_raw` nem para o payload do Skyone (exceto o token do próprio Skyone). | Grep do segredo no log após uma chamada real = 0 | 0 ✅ |
+| SEG05 | **Nenhum segredo em log.** Query string sensível (`s`, `token`, `key`, `secret`, `api_key`) é mascarada em todos os logs da aplicação e do uvicorn; o proxy registra webhooks sem segredo na query string. Tokens nunca vão para `webhook_raw` nem para o payload do Skyone (exceto o token do próprio Skyone). | Grep do segredo no log após uma chamada real = 0 | 0 ✅ |
 | SEG06 | **Defesa contra prompt injection no servidor, não no prompt.** Toda Skill opera só sobre a conversa do `conversation_id` recebido, que precisa pertencer ao tenant da chave. Ações sensíveis (cancelar, alterar endereço depois de fechar, reembolso) são validadas pelo gateway (status, janela de tempo, dono). O pacote enviado ao agente nunca contém dados de outro contato. | Testes: Skill com conversa de outro contato/tenant → 404; cancelar pedido fora da janela → 422 mesmo que o agente peça | 0.5 / 4 |
-| SEG07 | **Limites de abuso.** Corpo máximo (`MAX_BODY_BYTES` no app + `client_max_body_size` no Nginx); limite de requisições por IP no Nginx; por tenant na API; e por contato no pipeline (ex.: mais de 20 mensagens/min do mesmo contato → para de chamar o agente, registra e alerta). | Corpo de 3 MB → 413; rajada do mesmo contato não gera chamadas ao agente além do limite | 0 ✅ / 3 (por contato) |
-| SEG08 | **Documentação da API desligada em produção** (`DOCS_ENABLED=false`); `/health` público responde só `{"ok": true}`. | `/docs` → 404; health via Nginx sem detalhes | 0 ✅ |
+| SEG07 | **Limites de abuso.** Corpo máximo (`MAX_BODY_BYTES` no app, inclusive corpo chunked ✅); limite de requisições por IP (token bucket no Redis ✅, `app/limites.py`); por tenant na API; e por contato no pipeline (ex.: mais de 20 mensagens/min do mesmo contato → para de chamar o agente, registra e alerta). | Corpo de 3 MB → 413; rajada do mesmo contato não gera chamadas ao agente além do limite | 0 ✅ / 3 (por contato) |
+| SEG08 | **Documentação da API desligada em produção** (`DOCS_ENABLED=false`); `/health` público responde só `{"ok": true}`. | `/docs` → 404; health via proxy sem detalhes | 0 ✅ |
 | SEG09 | **Infraestrutura mínima.** Container sem root, sistema de arquivos somente leitura, `no-new-privileges`; Redis com senha; `.env` com permissão 600; firewall da VPS só 22/80/443; SSH só por chave. | `docker compose exec gateway id` ≠ root; `stat -c %a .env` = 600; `ufw status` | 0 ✅ (container) / 9 (VPS) |
 | SEG11 | **Chaves de API com escopo, validade e origem.** Cada chave tem escopos (ex.: `ferramentas:catalogo`, `ferramentas:pedidos`, `notificar`, `eventos:ler`, `callback`), validade opcional e lista opcional de IPs. Chave usada fora do escopo → 403; vencida ou revogada → 401. Último uso registrado. | Testes por escopo; chave `skyone` chamando `/notificar` sem o escopo → 403 | 0.5 |
 | SEG12 | **Rotação sem parada da chave do painel.** O gateway aceita `PANEL_SERVICE_KEY` e `PANEL_SERVICE_KEY_NEXT` ao mesmo tempo durante a troca; o log indica qual foi usada para saber quando remover a antiga. | Teste com as duas chaves válidas | 0.5 |
+| SEG13 | **Gateway → Skyone autenticado.** Em produção, todo fluxo do Skyone chamado pelo gateway tem "Solicitar autenticação" ligado; o gateway envia a credencial do agente (guardada criptografada) no formato exigido pelo Skyone. Fluxo sem autenticação só é aceito para agente com `agente_mode=mock` ou marcado como teste. | Cadastrar agente `live` sem credencial → 400 | 0.5 |
 | SEG10 | **Webhooks de entrada autenticados pelo meio mais forte que o provedor oferecer**: assinatura HMAC da Meta (`X-Hub-Signature-256`), segredo por canal no uazapi; todos com deduplicação. | Teste com assinatura inválida → 401 | 0.5 / 7 |
 | LGPD01 | **Retenção curta do payload bruto:** `webhook_raw` apagado após `WEBHOOK_RAW_DIAS` (padrão 30). | Linha antiga é removida pela limpeza | 0 ✅ |
 | LGPD02 | **Retenção por tenant** de mensagens e conversas (prazo definido pelo cliente): após o prazo, anonimizar (telefone/nome/conteúdo) mantendo métricas agregadas. | Teste com relógio avançado | 9 |
@@ -180,18 +198,35 @@ docker compose logs gateway | grep -c "$UAZAPI_WEBHOOK_SECRET"     # 0 (SEG05)
 
 ## FASE 0.3 — Descobertas no Skyone (validação rápida)
 
-**Objetivo:** responder três perguntas que definem a modelagem dos agentes antes da Fase 0.5. Trabalho principal do Marco no Skyone; o agente do Cursor prepara o payload de teste e registra as respostas.
+**Objetivo:** fechar as perguntas que definem como o gateway conversa com os fluxos do Skyone antes da Fase 0.5. Resultados já obtidos pelo Marco estão em **`docs/SKYONE_RESULTADOS.md`** — leia antes de começar.
+
+> **Decisão fixa:** os fluxos e agentes no Skyone são criados **manualmente pelo Marco**. O gateway **nunca** cria, altera ou clona nada no Skyone; ele só guarda, por agente, a URL do webhook do fluxo e (quando houver) a credencial de autenticação, cadastrados pelo painel.
+
+### Já respondido (não repetir)
+| Pergunta | Resposta |
+|---|---|
+| Agente obedece instruções enviadas no payload? | **Sim**, quando o fluxo monta o prompt com `instrucoes_agente` |
+| Base de conhecimento, Skills ou modelo por chamada? | **Não** — o AI Agent Call só tem ID do Agente, Chave de contexto, Prompt e Anexos |
+| URL por fluxo? | **Sim.** Fluxo criado do zero ganha URL própria; duplicar mantém a URL do original → **nunca duplicar** |
+| Formato de entrada/saída | Ver contrato validado em `docs/SKYONE_RESULTADOS.md` (campos `message`, `session_id`, `instrucoes_agente`; resposta com `resposta`, `request_id`, `acao`) |
+| Latência | 9–14 s, ~99% no AI Agent Call; causa: prompt do sistema com a base inteira (~15 mil tokens). Correção é do lado do agente no Skyone |
 
 ### Tarefas
-- [ ] Preparar em `scripts/skyone_probe.py` um envio de teste para uma URL de fluxo, com dois payloads iguais exceto pelo campo `instrucoes_agente` (ex.: "responda só em inglês" × "responda só em português") e medição de tempo.
-- [ ] 🛑 **PARE:** o Marco testa no Skyone e informa:
-  1. **Agente parametrizável?** Um mesmo fluxo/AI Agent Call respeita instruções e configuração enviadas no payload (`instrucoes_agente`, base de conhecimento, lista de Skills)? → define **"1 fluxo por agente"** ou **"1 fluxo por modelo de agente"**.
-  2. **Existe API de gestão** no Skyone para criar/clonar fluxos e agentes, ou é só pela interface? → define se o provisionamento pode ser automatizado.
-  3. **Limite de tempo do webhook síncrono** (o que acontece com um fluxo que demora 60 s, 120 s, 300 s?) e se um bloco REST no fim do fluxo consegue chamar uma URL externa (base do callback assíncrono).
-- [ ] Registrar as respostas no `PROGRESS.md` e em `docs/SKYONE.md` (decisões e limites conhecidos).
+- [ ] **Alinhar `scripts/skyone_probe.py` ao contrato validado:** corpo `{"conversation_id","session_id","request_id","message","instrucoes_agente"}`; ler `resposta`/`request_id`/`acao` da resposta. URL de teste: `https://luxtia.api.integrasky.cloud/k3iynwDoOU` (fluxo "gateway").
+- [ ] **Token opcional no probe:** o webhook do fluxo de teste está **sem autenticação** (opção "Solicitar autenticação" desligada). Permitir `SKYONE_PROBE_TOKEN` vazio **só no probe**, registrando no relatório que a chamada foi sem autenticação. Isso não vale para produção (ver Fase 0.5, SEG13).
+- [ ] Configurar `SKYONE_PROBE_URL` no `.env` e rodar o probe: os dois payloads de instrução + 3 repetições para latência. Registrar em `docs/SKYONE_RESULTADOS.md`.
+- [ ] 🛑 **PARE — testes do Marco no Skyone** (roteiro em `docs/SKYONE_RESULTADOS.md`, seção "Pendentes"):
+  1. **Memória** (`session_id` igual lembra, diferente esquece) → define quem é dono do histórico.
+  2. **Autenticação do Webhook** ("Solicitar autenticação": qual tipo? cabeçalho? nome?) e **limite máximo** de requisições/minuto.
+  3. **Simultâneas** (10 chamadas paralelas).
+  4. **Tempo limite** (Delay 60/120/300 s) e **callback** por módulo REST.
+  5. **Agente "Teste Rápido"** (prompt curto) para confirmar a causa da latência.
+- [ ] Registrar respostas em `docs/SKYONE_RESULTADOS.md` e no `PROGRESS.md`.
 
 ### Pronto quando
-- As três respostas estão registradas e a estratégia escolhida (`por_agente` ou `por_modelo`, `sync`/`async`) está anotada em `docs/SKYONE.md`.
+- Probe executado com sucesso contra o fluxo validado.
+- Memória e autenticação respondidas (bloqueiam a Fase 0.5). Tempo limite, callback e simultâneas podem ficar para antes da Fase 0.6.
+- Estratégia anotada: `por_modelo` (instruções no prompt) com **um agente Skyone por cliente quando houver base/Skills próprias**; `sync` por padrão.
 
 ---
 
@@ -246,7 +281,10 @@ docker compose logs gateway | grep -c "$UAZAPI_WEBHOOK_SECRET"     # 0 (SEG05)
 - [ ] Remover as rotas antigas `/admin/*`, `/test/*` e `/metricas` globais. Equivalentes: `POST /admin/v1/tenants/{id}/agentes/{agente}/simular` (conversa `<tenant>:test:<usuario>`), `GET /admin/v1/tenants/{id}/conversas/{conv}/mensagens`, `GET /admin/v1/tenants/{id}/metricas?agente=`.
 - [ ] Atualizar `scripts/bench.py`: `--tenant`, `--agente`, `--panel-key` no lugar de `--admin-key`; opção de rodar vários tenants/agentes ao mesmo tempo.
 - [ ] Variáveis de validação a partir desta fase: `AUTH=(-H "Authorization: Bearer $PANEL_SERVICE_KEY" -H "X-Actor: cursor")`, `T=bykoji`, `A=<id do agente>`.
-- [ ] **SEG03 (SSRF):** `validar_formato_url` ao salvar URLs (Skyone, webhooks de saída, `base_url` de canal); `validar_url_saida` antes de cada chamada.
+- [ ] **SEG03 (SSRF):** `validar_formato_url` ao salvar URLs (Skyone, webhooks de saída, `base_url` de canal); `validar_url_saida` **chamada pelos adaptadores Skyone e uazapi antes de cada requisição** (hoje existe mas não é usada — pendência registrada no `PROGRESS.md`).
+- [ ] **SEG13:** campos `skyone_auth_tipo` e `skyone_auth_enc` no agente, conforme o tipo de autenticação descoberto na Fase 0.3; adaptador Skyone envia a credencial.
+- [ ] **Contrato Skyone validado:** o adaptador envia exatamente os campos de `docs/SKYONE_RESULTADOS.md` (`message`, não `mensagem`; `session_id`; `instrucoes_agente`) e lê `resposta` como texto ou objeto `{"body": ...}`. Remover `token` do corpo (credencial vai no cabeçalho, SEG13).
+- [ ] **Estratégia de sessão** conforme o teste de memória: se o Skyone guarda memória por `session_id`, o gateway envia `session_id` estável por conversa e **não** reenvia histórico no prompt (evita duplicar contexto); se não guarda, o gateway monta o histórico no prompt. Documentar a escolha em `docs/SKYONE.md`.
 - [ ] **SEG02:** toda rota nova de gestão sob `/admin`.
 - [ ] **LGPD03:** exportar e apagar/anonimizar contato, com `audit_log`.
 
@@ -288,6 +326,7 @@ curl -s "$GW/admin/v1/tenants/$T/metricas?agente=$A" "${AUTH[@]}"
   - `gateway-api`: recepção de webhooks + `/api` + `/admin`. Valida, grava a mensagem, enfileira e responde. **Nunca chama o Skyone nem o canal dentro da requisição.**
   - `gateway-worker` (N réplicas): debounce, montagem do contexto, chamada ao agente, envio, turnos.
   - `gateway-agendador` (1 réplica, com trava de liderança no Redis): lotes vencidos, follow-ups, limpezas.
+- [ ] Corrigir pendência registrada no `PROGRESS.md`: hoje o buffer é retirado do Redis **antes** de concluir o processamento; com a fila durável, o lote só sai depois do turno gravado.
 - [ ] **Fila durável:** Redis Streams com grupo de consumidores (`XREADGROUP` + `XACK`); item só é confirmado após o turno gravado; itens pendentes de worker morto são retomados (`XAUTOCLAIM`). Reconciliação na subida: mensagens no Postgres sem turno e fora da fila voltam para a fila (INV01/INV14).
 - [ ] **Trava por conversa** mantida (um lote por conversa por vez) e **justiça** por tenant e por agente (INV07): limites `max_lotes_simultaneos` (tenant) e `max_concorrencia` (agente).
 - [ ] **Adaptador de agente** (`app/agentes/`): interface `enviar(pacote) -> Resposta | Pendente`. Implementações `mock` e `skyone`. O núcleo não importa nada do Skyone diretamente.
@@ -310,13 +349,13 @@ curl -s "$GW/admin/v1/tenants/$T/metricas?agente=$A" "${AUTH[@]}"
 
 ---
 
-## FASE 1 — Exposição via Nginx e uazapi real
+## FASE 1 — uazapi real (publicação já concluída)
 
 **Objetivo:** receber mensagens reais do WhatsApp de teste, ainda sem responder.
 
+> A publicação pelo Caddy em `https://painel.luxbrain.com.br/gateway/` já foi feita e validada (ver `PROGRESS.md` e `docs/PUBLICACAO.md`). Nesta fase só conferir que continua valendo: `/gateway/health` → `{"ok":true}`; `/gateway/metricas` e `/gateway/admin/...` → 404.
+
 ### Tarefas
-- [ ] Adicionar ao Nginx o conteúdo de `docs/nginx-gateway.conf` (sem alterar outros blocos): `limit_req_zone` e `log_format` no contexto `http {}`, e os `location` no `server {}` do domínio HTTPS. Só webhooks, API de integração e health ficam públicos (SEG02); todo o resto de `/gateway/` responde 404. Rodar `nginx -t` e só então `systemctl reload nginx`.
-- [ ] Validar de fora da VPS: `curl -s -o /dev/null -w '%{http_code}' https://<dominio>/gateway/metricas` → 404; `https://<dominio>/gateway/health` → `{"ok":true}`; o log `/var/log/nginx/gateway.log` não contém `?s=`.
 - [ ] Criar (ou conferir do seed) o tenant `bykoji`, o agente "Atendimento By Koji" e o canal uazapi de teste ligado a ele, pela API administrativa; anotar a `webhook_url` devolvida.
 - [ ] 🛑 **PARE:** pedir ao Marco para configurar essa URL como webhook na instância uazapi de teste (evento de mensagens) e enviar: texto, várias mensagens picadas, áudio, imagem, imagem logo depois de um texto, **pino de localização**, documento PDF, reação com emoji, e **uma resposta manual pelo celular antes de o bot responder** (para capturar o caso de borda do INV03).
 - [ ] Ler os payloads reais:
@@ -330,10 +369,12 @@ curl -s "$GW/admin/v1/tenants/$T/metricas?agente=$A" "${AUTH[@]}"
 - [ ] **Reação com emoji:** registrar como mensagem `tipo=reacao`; não abre turno sozinha (o agente não responde a 👍), mas entra no histórico.
 - [ ] Confirmar na documentação da instância os endpoints de envio de texto e de presença ("digitando") e ajustar `enviar_texto()` e `digitando()`.
 - [ ] Criar testes unitários de `normalizar()` usando os payloads reais **anonimizados** em `tests/fixtures/`.
+- [ ] **Sanitizar `webhook_raw`** (pendência do `PROGRESS.md`): remover tokens/credenciais presentes no payload do provedor antes de gravar, com base nas fixtures reais.
+- [ ] **Erros de envio do uazapi** (pendência do `PROGRESS.md`): propagar HTTP de erro ao pipeline; não registrar mensagem como entregue quando o provedor recusar.
 
 ### Validação
 ```bash
-curl -s https://<dominio>/gateway/health
+curl -s https://painel.luxbrain.com.br/gateway/health
 # na tabela mensagens: as mensagens de teste aparecem com origem 'cliente'
 # a resposta manual pelo celular aparece com origem 'humano' e a conversa fica com bot_pausado_ate preenchido
 # reenviar o mesmo payload → resposta {"duplicada": true}
@@ -404,6 +445,7 @@ curl -s "$GW/admin/v1/tenants/$T/metricas" "${AUTH[@]}"
 - [ ] **Modo piloto (INV09):** `modo_piloto` + `contatos_permitidos` por agente (com padrão no tenant), editáveis pela API administrativa.
 - [ ] **Encerramento:** quando o agente devolve `encerrar`, gravar `conversas.status='encerrada'`, `desfecho` (ex.: `pedido_feito`, `duvida_resolvida`, `reclamacao`, `sem_interesse`) e o horário. Uma nova mensagem do cliente reabre a conversa.
 - [ ] **Conversa vazia:** job a cada 5 min encerra, com `desfecho='vazia'`, conversas cuja única entrada não tem texto nem anexo legível após `encerrar_vazia_min`.
+- [ ] **INV03 antes do envio** (pendência do `PROGRESS.md`): checar de novo se a conversa foi pausada **depois** da resposta do agente e **antes** de enviar; se pausou, descartar a resposta e registrar.
 - [ ] **Retomada do bot:** quando a pausa expirar, o bot volta sozinho. Adicionar também um comando do atendente (ex.: mensagem `#bot` enviada pelo celular) que retoma imediatamente e não é encaminhado ao agente.
 - [ ] **Alerta de transbordo:** quando `acao = transferir_humano`, enviar aviso para um número interno (`alerta_telefone` da configuração do tenant) com nome, telefone e motivo.
 - [ ] **Recuperação após reinício:** na subida do app, reagendar conversas com `buf:*` pendente no Redis.
@@ -610,11 +652,12 @@ docker compose exec gateway pytest -q
 
 ## Apêndice A — Contrato VPS → Skyone
 
+> Campos **validados no Skyone** (08/10/2026): `conversation_id`, `session_id`, `request_id`, `message`, `instrucoes_agente`. O JavaScript "Normalizar Entrada" do fluxo-modelo lê exatamente esses nomes. Os demais campos abaixo são acrescentados nas fases indicadas, e o JavaScript do fluxo-modelo deve ser atualizado junto (documentar em `docs/SKYONE.md`). A credencial vai em **cabeçalho** (SEG13), nunca no corpo.
+
 Ida (gateway → Skyone):
 
 ```json
 {
-  "token": "<token do Skyone do tenant>",
   "request_id": "uuid",
   "tenant_id": "bykoji",
   "agente_id": "ag_01",
@@ -629,7 +672,8 @@ Ida (gateway → Skyone):
   "agora": "2026-10-08T19:42:00-03:00",
   "tempo_desde_ultima": "há 3 dias",
   "retomada": true,
-  "mensagem": "texto consolidado do lote",
+  "session_id": "bykoji:can_7f3a:5511999999999",
+  "message": "texto consolidado do lote",
   "mensagens_do_lote": [
     {"enviada_em": "2026-10-08T19:41:50-03:00", "tipo": "texto", "texto": "oi"},
     {"enviada_em": "2026-10-08T19:41:55-03:00", "tipo": "localizacao", "texto": "[localização: -23.60, -46.72]"}
@@ -651,7 +695,7 @@ Ida (gateway → Skyone):
 
 `tarefa`: `responder` (padrão), `notificar` (com `evento` preenchido, ver `/notificar`) ou `resumir` (Fase 5.5).
 
-Volta (Retorno do Skyone → gateway):
+Volta (Retorno do Skyone → gateway). Formato **validado**: `{"resposta": "<text.body>", "request_id", "conversation_id", "status", "tipo", "acao"}`; os campos `motivo`, `desfecho`, `uso`, `arquivos`, `parcial` entram nas fases seguintes:
 
 ```json
 {
