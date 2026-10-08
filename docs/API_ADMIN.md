@@ -14,7 +14,7 @@ Navegador ──► Painel web (login, papéis, telas)
 ```
 
 - Base: `http://127.0.0.1:8100/admin/v1` (painel no host) ou `http://<ip-do-host-na-rede-docker>:8100/admin/v1` (painel em container).
-- **A API administrativa não é pública (SEG02).** Pelo domínio, `/gateway/admin/...` responde 404, mesmo com a chave correta. O gateway também recusa qualquer chamada a `/admin` que tenha passado pelo Nginx (`X-Forwarded-For`/`X-Real-IP`). Se o painel um dia rodar em outro servidor, use túnel (WireGuard/SSH) ou rede privada, nunca a internet aberta.
+- **A API administrativa não é pública (SEG02).** Pelo domínio, `/gateway/admin/...` responde 404, mesmo com a chave correta. O gateway também recusa qualquer chamada a `/admin` que tenha passado pelo proxy público (Caddy; `X-Forwarded-For`/`X-Real-IP`). Se o painel um dia rodar em outro servidor, use túnel (WireGuard/SSH) ou rede privada, nunca a internet aberta.
 - A chamada sai do **servidor** do painel, nunca do navegador. A `PANEL_SERVICE_KEY` não pode chegar ao front-end.
 - `X-Actor` é obrigatório em toda escrita e vai para o `audit_log`. Formato livre, ex.: `marco@luxtia` ou `user:42`.
 - **Controle de papel fica no painel.** Ex.: usuário de uma empresa cliente só pode chamar rotas do seu `tenant_id`. O gateway confia no painel para isso; por isso a chave de serviço é tratada como credencial de administrador.
