@@ -87,6 +87,7 @@ Canais ──► RECEPÇÃO (/webhooks/*) ──► grava mensagem ──► fil
 12. **Núcleo genérico (seção 1.1).** Regras de segmento vivem em módulos (`app/modulos/<nome>/`) e modelos de agente; o núcleo só conhece interfaces. O Skyone é acessado apenas pelo adaptador de agente (`app/agentes/`).
 13. **Invariantes do atendimento (seção 2.1) são lei.** Todo invariante tem pelo menos um teste automatizado com o mesmo código (ex.: `test_INV03_...`). Uma mudança que quebra um invariante não entra.
 14. Ao terminar cada fase, atualize o `PROGRESS.md` e faça commit com a mensagem `fase N: <resumo>`.
+15. **Preservação da imagem em uso:** antes de qualquer `build` que substitua a imagem em uso, identificar o commit correspondente ao código do container e adicionar à imagem atual a tag `gateway:<commit>` (além das tags existentes). Conferir que a tag resolve para a imagem preservada antes de construir. Se a imagem estiver indisponível, parar e recuperar/verificar a imagem de volta antes de prosseguir. Nunca executar `docker image prune` ou `docker builder prune` sem confirmação explícita do Marco.
 
 ### 2.1 Invariantes do atendimento
 

@@ -57,7 +57,7 @@ A troca **não ocorreu**. O container antigo continua funcionando, mas a imagem 
 
 ### Procedimento de volta após uma futura troca
 
-**Não executar agora:** a tag `gateway:fase0` não foi criada e o serviço já está no estado anterior. Antes de retomar a implantação, é necessário recuperar e verificar uma imagem fiel à versão antiga, com essa tag, além de renovar o backup e conferir novamente as filas. Não sobrescrever a cópia do ambiente anterior sem preservar a existente.
+**Não executar agora:** o serviço já está no estado anterior. A tag `gateway:fase0` foi reconstruída posteriormente (registro abaixo), mas a validação de importação ficou bloqueada pelas variáveis de conexão ausentes no arquivo de ambiente. Antes de retomar a implantação, é necessário concluir essa verificação, renovar o backup e conferir novamente as filas. Não sobrescrever a cópia do ambiente anterior sem preservar a existente.
 
 Se uma validação falhar depois de uma futura troca, conferir que a imagem de volta existe, restaurar o ambiente e recriar **somente** o gateway usando a imagem preservada, sem build:
 
@@ -83,3 +83,13 @@ curl --fail --silent https://painel.luxbrain.com.br/gateway/health
 ```
 
 Executar os comandos em sequência, parando em qualquer erro. O ambiente salvo seleciona `docker-compose.yml:docker-compose.proxy.yml` e o banco legado `bykoji_test`. Na volta, o health interno esperado é `{"ok":true,"agente":"mock","envio":"dry"}`; o público deve ser somente `{"ok":true}`. Não usar `down`, não restaurar o dump sobre o banco intacto, não remover bancos/volumes/chaves Redis e não recriar Postgres, Redis ou painel. Preservar também o banco novo para diagnóstico, registrar o motivo em `PROGRESS.md` e parar.
+
+### Reconstrução da imagem de volta — 08/10/2026
+
+- Comparados SHA-256 e conjunto completo dos sete arquivos `.py` de `/app` no container com todos os commits ancestrais anteriores ao Bloco 1. Correspondência exata com `8f388ed`, `faaee65`, `bf7651d`, `52a2f6f`, `1e3f4a0` e `d6c607a`. Não é possível identificar um único commit de origem pelos arquivos Python, que são iguais nesses commits. Escolhido o mais recente, `8f388ed6a2b47ce64acc43f39c93b148a8cac6f3`, como fonte equivalente para reconstrução.
+- Build em worktree temporário destacado desse commit, removido ao final. Checkout principal preservado. Não foi utilizado `docker commit`.
+- Imagem candidata: `gateway:fase0`, também marcada `gateway:8f388ed`, ID `sha256:7230ce922e07f577e443c734c910451eb306cb88a206fa01d4be8e2e454096ee`.
+- Hashes dos sete arquivos Python da imagem iguais aos do container; `pip freeze` ordenado também idêntico, sem diferenças de versões.
+- `docker run --rm --network none --env-file .env.antes-gateway gateway:fase0 python -c 'import main'` → **exit 1**, `KeyError: 'DATABASE_URL'`. Nenhum servidor ou agendador adicional foi iniciado. Tanto `DATABASE_URL` quanto `REDIS_URL` estão ausentes no arquivo salvo: o `docker-compose.yml` constrói essas variáveis a partir de `POSTGRES_*` e `REDIS_PASSWORD` para o serviço.
+- Parada conforme condição do Marco. A imagem ainda **não está integralmente validada para a troca**. Para retomar, o teste de importação precisa receber também as duas variáveis de conexão sintetizadas pelo Compose, sem exibir seus valores e sem iniciar servidor. O `.env.antes-gateway` original permanece intacto. Nenhum banco novo, migração ou troca de serviço foi executado.
+- Regra 15 do plano passa a exigir tag `gateway:<commit>` antes de builds que substituam a imagem em uso e confirmação do Marco antes de `docker image prune` ou `docker builder prune`.

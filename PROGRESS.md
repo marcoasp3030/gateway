@@ -247,3 +247,23 @@ PY
   - Não houve criação de usuário/banco, geração de senha, aplicação de migrações, alteração da conexão ou recriação de containers. Postgres, Redis e painel não foram alterados.
   - Não foi necessário executar rollback: o `.env` e o container antigo permaneceram intactos. Recriar o container seria inseguro enquanto a imagem antiga estiver indisponível.
 - Ponto de parada: conforme a condição do Marco, interrompido diante da falha do pré-requisito. Benchmark de dois tenants/três agentes, validações públicas pós-troca e busca de segredos nos logs pós-troca não foram executados. A retomada exige primeiro recuperar e verificar a imagem de volta; Fase 0.5 não concluída.
+
+## Fase 0.5 — Reconstrução da imagem antiga — 2026-10-08
+
+- Status: imagem reconstruída; troca interrompida na validação de importação, conforme condição de parar em qualquer falha.
+- Identificação:
+  - Inventariados e calculados os SHA-256 dos sete arquivos `.py` sob `/app` no container em execução; comparados com os arquivos obtidos por `git show` de todos os commits anteriores ao Bloco 1.
+  - Correspondência exata (conteúdo e conjunto de arquivos) em seis commits: `8f388ed`, `faaee65`, `bf7651d`, `52a2f6f`, `1e3f4a0` e `d6c607a`. Os hashes não distinguem o commit original entre eles. Escolhido o mais recente, `8f388ed6a2b47ce64acc43f39c93b148a8cac6f3`, para reconstruir o mesmo código.
+- Feito:
+  - `git worktree add --detach .local/fase0-worktree 8f388ed6a2b47ce64acc43f39c93b148a8cac6f3` e `docker build -t gateway:fase0 .local/fase0-worktree/app` → concluídos. Worktree removido ao final; checkout principal não foi trocado. Nenhum `docker commit` ou prune executado.
+  - Imagem `sha256:7230ce922e07f577e443c734c910451eb306cb88a206fa01d4be8e2e454096ee`, tags `gateway:fase0` e `gateway:8f388ed`.
+  - Acrescentada regra 15 ao `PLANO_CURSOR.md`: preservar imagem com tag do commit antes de build que a substitua; exigir confirmação do Marco para `docker image prune` e `docker builder prune`.
+- Validações:
+  - Hashes Python da imagem candidata versus container → **7/7 iguais**, sem arquivos adicionais/ausentes.
+  - `pip freeze` ordenado da imagem versus container → **idêntico**, zero diferenças de pacotes/versões.
+  - `docker run --rm --network none --env-file .env.antes-gateway gateway:fase0 python -c 'import main'` → **exit 1**, `KeyError: 'DATABASE_URL'`. O arquivo salvo não contém `DATABASE_URL` nem `REDIS_URL`; essas variáveis são sintetizadas pelo Compose. Nenhum servidor/agendador adicional iniciado.
+  - `.env` continua idêntico a `.env.antes-gateway`; health do serviço antigo → `{"ok":true,"agente":"mock","envio":"dry"}`.
+- Ponto de parada:
+  - Imagem candidata preservada, mas validação completa ainda pendente. O próximo teste precisa receber as variáveis de conexão equivalentes às do Compose, sem expor segredos e sem iniciar servidor. Não alterado o arquivo original de rollback.
+  - Não retomado o passo 5: backup anterior preservado, sem nova geração nesta tentativa; nenhuma criação de banco/usuário, migração, troca de conexão ou recriação do serviço. Não foi necessário rollback, pois o serviço permaneceu intacto.
+  - Motivo e estado atual documentados em `docs/MIGRACOES.md`. Benchmark e demais validações pós-troca continuam pendentes.
