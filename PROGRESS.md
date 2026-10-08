@@ -318,3 +318,9 @@ PY
 - API de registro/habilitação por tenant e busca de catálogo com conversa, chave/escopo e modelo corretos; desabilitado → 404; contexto só de módulos contratados/habilitados.
 - Suíte isolada: **66 passed**. Teste INV08/SEG06 cobre dados de dois tenants, módulo desabilitado, conversa alheia e tenant inexistente. Corrigido valor padrão de config omitida encontrado no primeiro teste.
 - Código/migração preparados, ainda não aplicados no serviço. Nenhum modo live ativado.
+
+## Fase 0.5 — Modelos versionados — 2026-10-08
+
+- API de modelos globais/privados, leitura de versão e PATCH que cria versão imutável; agentes mantêm a versão fixada. Escopo/ID imutáveis, validação de capacidades e configuração.
+- Auditoria global explícita (tenant nulo, migração 007) e consulta administrativa de plataforma; modelos privados auditados no proprietário.
+- Suíte isolada: **67 passed**, incluindo acesso privado cruzado recusado, atualização de versão sem mudar agentes existentes e auditoria global. Ainda sem aplicar ao serviço.

@@ -75,8 +75,8 @@ Todas as rotas desta seção são relativas a `/admin/v1`. Escritas confirmadas 
 | GET | `/modulos` | ✅ Registro/configuração de módulos |
 | GET | `/tenants/{tenant}/modulos` | ✅ Registro/configuração de módulos |
 | PUT | `/tenants/{tenant}/modulos/{modulo}` | ✅ Registro/configuração de módulos |
-| GET, POST | `/modelos-agente` | ⏳ Fase 0.5 |
-| GET, PATCH | `/modelos-agente/{modelo}` | ⏳ Fase 0.5; versões imutáveis |
+| GET, POST | `/modelos-agente` | ✅ Lista/cria versões |
+| GET, PATCH | `/modelos-agente/{modelo}` | ✅ Detalhe/PATCH cria nova versão |
 | GET, POST | `/tenants/{tenant}/unidades` | ⏳ Fase 0.5 |
 | GET, PATCH, DELETE | `/tenants/{tenant}/unidades/{unidade}` | ⏳ Fase 0.5 |
 | GET, POST | `/tenants/{tenant}/webhooks-saida` | ⏳ Fase 0.5 |
@@ -194,3 +194,11 @@ O contrato das ferramentas de pedidos/carrinho entra na Fase 4 em `docs/SKILLS.m
 | GET | `/api/v1/catalogo/busca?conversation_id=&q=` | ✅ Escopo `ferramentas:catalogo`, conversa do tenant/agente, módulo habilitado no tenant e no modelo. Até 50 itens ativos. |
 
 Módulo desabilitado retorna 404; preço vem do Postgres. O pacote ao agente contém `contexto_modulos` somente de capacidades habilitadas no tenant e no modelo. Migração 006 renomeia a tabela legada para `catalogo_itens` sem apagar dados.
+
+## Modelos versionados
+
+POST exige `id`, `nome`; aceita `tenant_id` opcional (ausente/nulo = global), `tipo`, `modulos`, `comportamento_padrao`, `desfechos`, `followups_padrao` e `skyone_fluxo_modelo` (referência de fluxo criado do zero). GET de lista/detalhe usa `?tenant=` para incluir modelos privados; detalhe aceita `?versao=`, padrão última. PATCH com o mesmo escopo cria nova versão, sem editar anteriores; ID/tenant são imutáveis. Agentes continuam na versão fixada até PATCH explícito de `modelo_versao`. Modelos globais usam auditoria de plataforma (tenant nulo), privados usam auditoria do proprietário.
+
+| Método | Rota administrativa | Status |
+|---|---|---|
+| GET | `/auditoria/plataforma` | ✅ Últimas 100 operações globais; chave de serviço |
