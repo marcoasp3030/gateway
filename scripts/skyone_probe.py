@@ -20,8 +20,7 @@ from seguranca import UrlRecusada, mascarar, validar_url_saida
 
 
 def payloads(caso: str, espera_s: int) -> list[tuple[str, dict]]:
-    # Sessões sintéticas independentes evitam carregar contexto entre medições.
-    # Isso não define a estratégia de sessão do gateway.
+    # O gateway é dono do histórico; cada turno usa session_id = request_id.
     if caso == "tempo":
         instrucoes = [(f"tempo_{espera_s}s", "Responda somente: teste concluído.")]
     elif caso == "latencia":
@@ -30,13 +29,19 @@ def payloads(caso: str, espera_s: int) -> list[tuple[str, dict]]:
     else:
         instrucoes = [("ingles", "Responda somente em inglês, em até 10 palavras."),
                       ("portugues", "Responda somente em português, em até 10 palavras.")]
-    return [(nome, {
-        "request_id": str(uuid.uuid4()),
-        "conversation_id": "probe:" + uuid.uuid4().hex,
-        "session_id": "probe:" + uuid.uuid4().hex,
-        "message": "Diga uma frase curta explicando como você pode ajudar.",
-        "instrucoes_agente": instrucao,
-    }) for nome, instrucao in instrucoes]
+    casos = []
+    for nome, instrucao in instrucoes:
+        request_id = str(uuid.uuid4())
+        casos.append((nome, {
+            "request_id": request_id,
+            "conversation_id": "probe:" + uuid.uuid4().hex,
+            "session_id": request_id,
+            "message": "Diga uma frase curta explicando como você pode ajudar.",
+            "instrucoes_agente": instrucao,
+            # Cada caso é uma conversa de diagnóstico nova, sem turnos anteriores.
+            "historico": [],
+        }))
+    return casos
 
 
 def sanitizar(valor, segredos: list[str]):

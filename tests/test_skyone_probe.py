@@ -11,10 +11,15 @@ spec.loader.exec_module(probe)
 
 def test_payloads_isolam_instrucao_sem_historico_real():
     casos = probe.payloads("idiomas", 60)
+    for caso in ("idiomas", "latencia", "tempo"):
+        for _, payload in probe.payloads(caso, 60):
+            assert payload["session_id"] == payload["request_id"]
+            assert payload["historico"] == []
     a, b = casos[0][1].copy(), casos[1][1].copy()
     assert a.pop("instrucoes_agente") != b.pop("instrucoes_agente")
     assert all(a.pop(k) != b.pop(k) for k in ("request_id", "session_id", "conversation_id"))
-    assert a == b and set(a) == {"message"}
+    assert a == b and set(a) == {"message", "historico"}
+    assert a["historico"] == []
 
 
 
@@ -96,7 +101,9 @@ def test_probe_contrato_real_sem_autenticacao(monkeypatch):
     def responder(request):
         assert 'authorization' not in request.headers
         corpo = json.loads(request.content)
-        assert set(corpo) == {'message', 'session_id', 'conversation_id', 'request_id', 'instrucoes_agente'}
+        assert set(corpo) == {'message', 'session_id', 'conversation_id', 'request_id', 'instrucoes_agente', 'historico'}
+        assert corpo['historico'] == []
+        assert corpo['session_id'] == corpo['request_id']
         return httpx.Response(200, json={
             'resposta': 'Posso ajudar com suas dúvidas.', 'request_id': corpo['request_id'],
             'conversation_id': corpo['conversation_id'], 'acao': 'nenhuma',
