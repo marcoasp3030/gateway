@@ -11,7 +11,7 @@
 | Fase 0 — implantação simulada | ✅ Concluída (commit `aef6f26`) | `PROGRESS.md` |
 | Publicação no domínio | ✅ `https://painel.luxbrain.com.br/gateway/health` via **Caddy** do projeto `painel_koji` (rede `luxbrain_gateway_proxy`, `docker-compose.proxy.yml`) | `PROGRESS.md`, `docs/PUBLICACAO.md`, `docs/Caddyfile.painel.example` |
 | Fase 0.3 — descobertas no Skyone | 🟡 Quase concluída: probe no fluxo validado ✅ (commit `bf7651d`, 42 testes), memória ✅ (gateway é dono do histórico), histórico enviado pelo gateway ✅, comparação de modelos ✅. Faltam: **autenticação do Webhook** (bloqueia a *conclusão* da 0.5, não o início), simultâneas e tempo limite/callback (antes da 0.6), chamada direta à OpenAI para medir o custo do Skyone | `docs/SKYONE_RESULTADOS.md`, `docs/SKYONE.md`, `PROGRESS.md` |
-| Fase 0.5 | ▶️ **Liberada para começar** (autenticação Skyone implementada de forma genérica; ver tarefa SEG13) | — |
+| Fase 0.5 | ▶️ **Em andamento**: migrações e seed validados em banco isolado; API, pipeline e autenticação genérica ainda pendentes | `docs/MIGRACOES.md`, `PROGRESS.md` |
 | Fases 0.6 em diante | ⏳ Não iniciadas | — |
 
 **Ambiente real da VPS (prevalece sobre exemplos deste plano):**
@@ -221,8 +221,8 @@ docker compose logs gateway | grep -c "$UAZAPI_WEBHOOK_SECRET"     # 0 (SEG05)
 - [x] Probe alinhado ao contrato, com `historico` e `session_id = request_id` (commit `bf7651d`).
 - [x] Memória (respondido: gateway é dono do histórico).
 - [x] Agente "Teste Rápido" e comparação de modelos (respondido: ver tabela "Já respondido").
-- [ ] Ajustar `SKYONE_TIMEOUT_S=90` no `.env` e no `.env.example` (o `.env` real só pelo terminal; nada de segredo no chat ou no git).
-- [ ] Acrescentar ao `docs/SKYONE_RESULTADOS.md` a seção "Comparação de modelos" (texto em `docs/SKYONE_RESULTADOS_acrescimo.md` deste pacote), sem apagar a seção "Probe executado na VPS".
+- [x] Ajustar `SKYONE_TIMEOUT_S=90` no `.env` e no `.env.example` (o `.env` real só pelo terminal; nada de segredo no chat ou no git).
+- [x] Comparação de modelos presente em `docs/SKYONE_RESULTADOS.md`; seção "Probe executado na VPS" recuperada do Git e preservada. O arquivo `docs/SKYONE_RESULTADOS_acrescimo.md` não está neste checkout.
 - [ ] 🛑 **Pendentes do Marco no Skyone** (não bloqueiam o início da Fase 0.5):
   1. **Autenticação do Webhook** ("Solicitar autenticação": tipo, nome do cabeçalho, como gerar) e **limite máximo** de requisições/minuto → necessário para **concluir** a Fase 0.5 (SEG13).
   2. **Chamada direta à OpenAI** (Postman, mesmo prompt, GPT-4.1 mini) → decide a Fase 2.5.
@@ -252,8 +252,8 @@ docker compose logs gateway | grep -c "$UAZAPI_WEBHOOK_SECRET"     # 0 (SEG05)
 - **Estratégia Skyone** conforme a Fase 0.3: `por_agente` (cada agente com sua URL/token) ou `por_modelo` (agentes do mesmo modelo compartilham o fluxo e recebem `instrucoes_agente` no payload). O schema suporta as duas.
 
 ### Tarefas — banco
-- [ ] Criar o mecanismo de migrações (`app/migrations/NNN_*.sql` + `schema_migrations`). A migração `001_base.sql` é o `schema.sql` atual.
-- [ ] Migração `002_plataforma.sql`:
+- [x] Criar o mecanismo de migrações (`app/migrations/NNN_*.sql` + `schema_migrations`). A migração `001_base.sql` é o `schema.sql` atual. Validado em banco isolado `gateway_migrations_test`; ver `docs/MIGRACOES.md`.
+- [ ] Migração `002_plataforma.sql` (DDL criado e validado em banco isolado; conversão do legado e extração física do catálogo ainda pendentes):
   - `tenants` (id slug PK, nome, status `ativo|suspenso`, plano, limite_turnos_mes, timezone, `retencao_dias`, `tenant_teste` bool, criado_em)
   - `tenant_config` (padrões do tenant: os mesmos campos de comportamento de `agentes`, todos opcionais)
   - `modulos_tenant` (tenant_id, modulo, ativo, config jsonb) — quais módulos de capacidade a empresa contratou
