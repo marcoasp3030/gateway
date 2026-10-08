@@ -72,9 +72,9 @@ Todas as rotas desta seção são relativas a `/admin/v1`. Escritas confirmadas 
 | GET | `/tenants/{tenant}/auditoria` | ✅ Actor, ação, alvo, horário |
 | GET | `/tenants/{tenant}/conversas/{conv}/mensagens` | ✅ Últimas 100 mensagens |
 | GET | `/tenants/{tenant}/metricas?agente=` | ✅ Contagem/erros/p50/p95, acumulados |
-| GET | `/modulos` | ⏳ Fase 0.5 |
-| GET | `/tenants/{tenant}/modulos` | ⏳ Fase 0.5 |
-| PUT | `/tenants/{tenant}/modulos/{modulo}` | ⏳ Fase 0.5 |
+| GET | `/modulos` | ✅ Registro/configuração de módulos |
+| GET | `/tenants/{tenant}/modulos` | ✅ Registro/configuração de módulos |
+| PUT | `/tenants/{tenant}/modulos/{modulo}` | ✅ Registro/configuração de módulos |
 | GET, POST | `/modelos-agente` | ⏳ Fase 0.5 |
 | GET, PATCH | `/modelos-agente/{modelo}` | ⏳ Fase 0.5; versões imutáveis |
 | GET, POST | `/tenants/{tenant}/unidades` | ⏳ Fase 0.5 |
@@ -184,3 +184,13 @@ Base `/admin/v1`. Não implementar telas dependentes destas rotas como se já es
 | POST | `/tenants/{tenant}/pedidos/{numero}/recusar` | ⏳ Fase 4 |
 
 O contrato das ferramentas de pedidos/carrinho entra na Fase 4 em `docs/SKILLS.md`. Métricas comparativas, LGPD de retenção, circuit breaker e usuários internos não devem ser inferidos das tabelas futuras. A revisão deste contrato com o Marco precede as telas do painel.
+
+## Módulos implementados
+
+`GET /modulos` retorna nome, migrações, rotas e escopos. Registro atual: `catalogo` (busca/contexto) e `pedidos` (interface reservada, sem ferramentas até a Fase 4). PUT do módulo exige `{ "ativo":true, "config":{} }`; altera apenas o tenant indicado.
+
+| Método | Rota absoluta | Status |
+|---|---|---|
+| GET | `/api/v1/catalogo/busca?conversation_id=&q=` | ✅ Escopo `ferramentas:catalogo`, conversa do tenant/agente, módulo habilitado no tenant e no modelo. Até 50 itens ativos. |
+
+Módulo desabilitado retorna 404; preço vem do Postgres. O pacote ao agente contém `contexto_modulos` somente de capacidades habilitadas no tenant e no modelo. Migração 006 renomeia a tabela legada para `catalogo_itens` sem apagar dados.

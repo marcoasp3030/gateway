@@ -10,6 +10,7 @@ import redis.asyncio as aioredis
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+import migrar
 import limites
 import seguranca
 from nucleo.banco import Repositorio
@@ -64,7 +65,7 @@ def criar_app(infra,db=None,redis=None):
                 preparar(app)
             # Migrações nunca são automáticas.
             versao=await app.state.db.fetchval('SELECT max(versao) FROM schema_migrations')
-            if versao != 5:
+            if versao != len(migrar.arquivos()):
                 raise RuntimeError('Schema incompatível: aplique as migrações explicitamente')
             await app.state.pipeline.recuperar()
             agendador=asyncio.create_task(app.state.pipeline.agendador())
@@ -129,5 +130,8 @@ def criar_app(infra,db=None,redis=None):
         await app.state.db.fetchval('SELECT 1'); await app.state.redis.ping()
         return {'ok':True}
 
+    from admin.capacidades import router as capacidades
+    from modulos.catalogo.rotas import router as catalogo
+    app.include_router(capacidades);app.include_router(catalogo)
     app.include_router(canais_router);app.include_router(router);app.include_router(api)
     return app

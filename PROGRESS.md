@@ -311,3 +311,10 @@ PY
 - Proposta de conectar somente backend do painel à rede existente `luxbrain_gateway_proxy`, utilizando alias já configurado `luxbrain-gateway:8000`. Alteração do Compose do painel depende de confirmação e não foi feita.
 - Container temporário na rede, somente cliente HTTP: administração autenticada → 200; `X-Forwarded-For`, `X-Real-IP` e `Forwarded` → 404 cada, com chave válida. Nenhum servidor/agendador novo e nenhuma exposição de credenciais.
 - Suíte em banco `_test`: 65 testes aprovados. Serviço permanece mock/dry e não foi recriado.
+
+## Fase 0.5 — Módulos — 2026-10-08
+
+- Interface com nome, migrações, rotas, escopos e contexto; catálogo separado fisicamente por migração 006, sem apagar dados. Registro de pedidos reservado à Fase 4.
+- API de registro/habilitação por tenant e busca de catálogo com conversa, chave/escopo e modelo corretos; desabilitado → 404; contexto só de módulos contratados/habilitados.
+- Suíte isolada: **66 passed**. Teste INV08/SEG06 cobre dados de dois tenants, módulo desabilitado, conversa alheia e tenant inexistente. Corrigido valor padrão de config omitida encontrado no primeiro teste.
+- Código/migração preparados, ainda não aplicados no serviço. Nenhum modo live ativado.

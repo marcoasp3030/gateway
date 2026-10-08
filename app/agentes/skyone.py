@@ -22,7 +22,9 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
     fuso = ZoneInfo(tenant['timezone'])
     historico = await repo.historico(tenant_id,conversa_id,antes_id,cfg['history_turns'])
     rid = request_id or str(uuid.uuid4())
+    from modulos import contextos
     return {
+        'contexto_modulos':await contextos(repo,tenant_id,conversa_id,cfg),
         'conversation_id':conversa_id,'request_id':rid,'session_id':rid,'message':message,
         'instrucoes_agente':cfg['instrucoes_agente'],
         'historico':[{'role':'user' if h['direcao']=='entrada' else 'assistant',
