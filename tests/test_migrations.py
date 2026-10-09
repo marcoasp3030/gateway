@@ -36,7 +36,7 @@ def test_migracoes_seed_e_reaplicacao():
         assert await migrar.aplicar(conn) == []
         assert await conn.fetchval('SELECT count(*) FROM schema_migrations') == len(migrar.arquivos())
         agente = await conn.fetchrow("SELECT * FROM agentes WHERE id='bykoji_atendimento'")
-        assert (agente['timeout_s'],agente['provedor'],agente['send_mode'],agente['status']) == (90,'mock','dry','rascunho')
+        assert (agente['timeout_s'],agente['provedor'],agente['send_mode'],agente['status']) == (60,'mock','dry','rascunho')
         assert await conn.fetchval('SELECT count(*) FROM modelos_agente') == 2
         assert await conn.fetchval('SELECT count(*) FROM tenant_canais') == 0
     banco(cenario)
@@ -122,3 +122,30 @@ def test_SEG13_schema_auth_generica_e_timeout():
                     await conn.execute('UPDATE agentes SET '+patch)
         await conn.execute("UPDATE agentes SET skyone_auth_tipo='cabecalho',skyone_auth_cabecalho='X-Api-Key',skyone_auth_enc='fixture-cifrada'")
     banco(cenario)
+
+
+def test_013_timeout_padrao_60_e_agentes_de_fabrica(tmp_path):
+    """Só os agentes no valor de fábrica antigo (90) mudam; cada troca é auditada."""
+    for arquivo in migrar.PASTA.glob('*.sql'):
+        if arquivo.name < '013':
+            (tmp_path / arquivo.name).write_bytes(arquivo.read_bytes())
+    async def cenario(conn):
+        await migrar.aplicar(conn, tmp_path)
+        await conn.execute("INSERT INTO tenants(id,nome) VALUES ('bravo','Bravo')")
+        await conn.execute("""INSERT INTO agentes(id,tenant_id,modelo_id,nome) VALUES
+            ('ag_fabrica','bravo','assistente_generico','Fábrica'),
+            ('ag_proprio','bravo','assistente_generico','Próprio')""")
+        await conn.execute("UPDATE agentes SET timeout_s=45 WHERE id='ag_proprio'")
+        assert await conn.fetchval("SELECT timeout_s FROM agentes WHERE id='ag_fabrica'") == 90
+        antes = await conn.fetchval('SELECT count(*) FROM audit_log')
+        assert await migrar.aplicar(conn) == ['013_timeout_padrao_60.sql']
+        tempos = dict(await conn.fetch('SELECT id, timeout_s FROM agentes'))
+        assert tempos['ag_fabrica'] == 60 and tempos['ag_proprio'] == 45
+        assert tempos['bykoji_atendimento'] == 60  # agente do seed, criado com o padrão antigo
+        await conn.execute("INSERT INTO agentes(id,tenant_id,modelo_id,nome) VALUES ('ag_novo','bravo','assistente_generico','Novo')")
+        assert await conn.fetchval("SELECT timeout_s FROM agentes WHERE id='ag_novo'") == 60
+        auditoria = await conn.fetch("SELECT tenant_id, actor, acao, alvo FROM audit_log ORDER BY id OFFSET $1", antes)
+        assert {(r['tenant_id'], r['alvo']) for r in auditoria} == {('bravo','ag_fabrica'), ('bykoji','bykoji_atendimento')}
+        assert {(r['actor'], r['acao']) for r in auditoria} == {('migracao013','agentes.alterado')}
+    banco(cenario)
+

@@ -56,7 +56,7 @@ def test_SEG03_SEG13_contrato_headers_timeout(monkeypatch,tipo):
             assert chamadas==['dns']
             assert req.headers['Authorization' if tipo=='bearer' else 'X-Test-Key']==('Bearer ' if tipo=='bearer' else '')+'credencial-fixture'
             assert b'credencial-fixture' not in req.content
-            assert req.extensions['timeout']['read']==90
+            assert req.extensions['timeout']['read']==cfg['timeout_s']==60  # padrão desde a 013
             payload=json.loads(req.content)
             assert payload['message']=='Oi' and payload['session_id']==payload['request_id']
             return httpx.Response(200,json={'resposta':{'body':'Resposta'},'acao':'nenhuma','status':'success','tipo':'text',
