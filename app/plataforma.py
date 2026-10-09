@@ -10,7 +10,7 @@ import redis.asyncio as aioredis
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from erros_api import resposta as resposta_erro, campo_validacao, CAMPOS_LEGADOS
+from erros_api import resposta as resposta_erro, resposta_integridade, campo_validacao, CAMPOS_LEGADOS
 from fastapi.responses import JSONResponse
 import migrar
 import limites
@@ -127,7 +127,8 @@ def criar_app(infra,db=None,redis=None):
     async def invalido(request,exc): return resposta_erro(400)
     @app.exception_handler(asyncpg.PostgresError)
     async def banco_error(request,exc):
-        return resposta_erro(409 if isinstance(exc,asyncpg.IntegrityConstraintViolationError) else 503)
+        if isinstance(exc,asyncpg.IntegrityConstraintViolationError): return resposta_integridade(exc)
+        return resposta_erro(503)
     @app.exception_handler(CredencialInvalida)
     async def segredo_error(request,exc): return resposta_erro(503)
     @app.exception_handler(aioredis.RedisError)

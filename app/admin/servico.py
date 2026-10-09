@@ -27,12 +27,30 @@ def limpar(valor):
     return result
 
 
+# Campos que o banco exige (NOT NULL): null enviado pelo cliente vira 400 com o campo,
+# antes de chegar ao banco, em vez de um 409 genérico de integridade.
+OBRIGATORIOS = {
+    'Tenant': ('nome','timezone','status','retencao_dias','tenant_teste'),
+    'Agente': ('nome','status','provedor','skyone_estrategia','skyone_auth_tipo','timeout_s',
+               'instrucoes_agente','modo_resposta','modelo_id','modelo_versao'),
+    'Canal': ('nome','tipo','publico','ativo'),
+    'Chave': ('nome','escopos'),
+    'Unidade': ('nome','horarios','ativo'),
+    'Saida': ('url','eventos','ativo'),
+    'Modelo': ('nome','tipo','modulos','comportamento_padrao','desfechos','followups_padrao'),
+}
+
+
 def validar(modelo, dados):
     try:
-        return modelo.model_validate(dados).model_dump(exclude_unset=True)
+        result = modelo.model_validate(dados).model_dump(exclude_unset=True)
     except ValidationError as exc:
         from erros_api import campo_validacao
         raise HTTPException(400,{"campo":campo_validacao(exc.errors())}) from None
+    for campo in OBRIGATORIOS.get(modelo.__name__, ()):
+        if campo in result and result[campo] is None:
+            raise HTTPException(400,{"campo":campo})
+    return result
 
 
 async def auditar(conn, tenant, actor, acao, alvo):
