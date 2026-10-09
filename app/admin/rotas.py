@@ -95,10 +95,12 @@ async def revogar(request:Request,tenant_id:str,identidade:str,actor=Depends(pai
 
 
 @api.get('/conversas/{conversation_id}/mensagens')
-async def mensagens(request:Request,conversation_id:str,ctx=Depends(contexto_da_chave('eventos:ler'))):
+async def mensagens(request:Request,conversation_id:str,antes:int|None=None,limite:int=100,ctx=Depends(contexto_da_chave('eventos:ler'))):
     repo=Repositorio(request.app.state.db)
     conv=await repo.obter(ctx['tenant_id'],'conversas',conversation_id)
     if not conv or (ctx['agente_id'] and conv['agente_id']!=ctx['agente_id']): raise HTTPException(404,'NOT_FOUND')
+    if not 1<=limite<=100: raise HTTPException(400,{'campo':'limite'})
+    if antes is not None and not 1<=antes<=9223372036854775807: raise HTTPException(400,{'campo':'antes'})
     rows=await request.app.state.db.fetch('SELECT id,direcao,origem,conteudo,criado_em FROM mensagens '
-        'WHERE tenant_id=$1 AND conversation_id=$2 ORDER BY id DESC LIMIT 100',ctx['tenant_id'],conversation_id)
-    return {'itens':[dict(r) for r in reversed(rows)]}
+        'WHERE tenant_id=$1 AND conversation_id=$2 AND ($3::bigint IS NULL OR id<$3) ORDER BY id DESC LIMIT $4',ctx['tenant_id'],conversation_id,antes,limite+1)
+    return {'itens':[dict(r) for r in reversed(rows[:limite])],'tem_mais':len(rows)>limite}

@@ -76,10 +76,12 @@ async def simular(request:Request,tenant_id:str,agente_id:str,dados:EntradaAPI,a
 
 
 @router.get('/admin/v1/tenants/{tenant_id}/conversas/{conversa_id}/mensagens',dependencies=[Depends(painel)])
-async def mensagens_admin(request:Request,tenant_id:str,conversa_id:str):
+async def mensagens_admin(request:Request,tenant_id:str,conversa_id:str,antes:int|None=None,limite:int=100):
+    if not 1<=limite<=100: raise HTTPException(400,{"campo":"limite"})
+    if antes is not None and not 1<=antes<=9223372036854775807: raise HTTPException(400,{"campo":"antes"})
     if not await Repositorio(request.app.state.db).obter(tenant_id,'conversas',conversa_id): raise HTTPException(404,'NOT_FOUND')
-    rows=await request.app.state.db.fetch('SELECT id,conteudo,direcao,origem,enviada_em FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 ORDER BY id DESC LIMIT 100',tenant_id,conversa_id)
-    return {'itens':[dict(r) for r in reversed(rows)]}
+    rows=await request.app.state.db.fetch('SELECT id,conteudo,direcao,origem,enviada_em FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND ($3::bigint IS NULL OR id<$3) ORDER BY id DESC LIMIT $4',tenant_id,conversa_id,antes,limite+1)
+    return {'itens':[dict(r) for r in reversed(rows[:limite])],'tem_mais':len(rows)>limite}
 
 
 @router.get('/admin/v1/tenants/{tenant_id}/metricas',dependencies=[Depends(painel)])
