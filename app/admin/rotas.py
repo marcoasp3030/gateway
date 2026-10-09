@@ -1,6 +1,7 @@
+import json
 from fastapi import APIRouter, Depends, HTTPException, Request
 from nucleo.autenticacao import painel, contexto_da_chave
-from nucleo.banco import Repositorio
+from nucleo.banco import Repositorio, registro
 from .servico import ENTIDADES, limpar, auditar
 
 router = APIRouter(prefix='/admin/v1',dependencies=[Depends(painel)])
@@ -59,7 +60,16 @@ async def listar(request:Request,tenant_id:str,entidade:str,limite:int=50,cursor
     await tenant(request,tenant_id)
     # Repo limita a 100; buscar limite+1 com teto 100.
     if not 1<=limite<=99: raise HTTPException(400,'Limite deve ser 1–99')
-    rows=await Repositorio(request.app.state.db).listar(tenant_id,ENTIDADES[entidade][0],limite+1,cursor)
+    if entidade=='agentes':
+        rows=await request.app.state.db.fetch("""SELECT a.*,
+            CASE WHEN c.aberto_ate>now() THEN 'aberto' WHEN c.aberto_ate IS NOT NULL THEN 'meio_aberto' ELSE 'fechado' END AS circuito_estado,
+            COALESCE((SELECT jsonb_agg(jsonb_build_object('id',ch.id,'tipo',ch.tipo,'ativo',ch.ativo) ORDER BY ch.id)
+                FROM tenant_canais ch WHERE ch.tenant_id=a.tenant_id AND ch.agente_id=a.id),'[]'::jsonb) AS canais
+            FROM agentes a LEFT JOIN agente_circuitos c ON c.tenant_id=a.tenant_id AND c.agente_id=a.id
+            WHERE a.tenant_id=$1 AND ($2::text IS NULL OR a.id>$2) ORDER BY a.id LIMIT $3""",tenant_id,cursor,limite+1)
+        rows=[{**registro(r),'canais':json.loads(r['canais']) if isinstance(r['canais'],str) else r['canais']} for r in rows]
+    else:
+        rows=await Repositorio(request.app.state.db).listar(tenant_id,ENTIDADES[entidade][0],limite+1,cursor)
     return pagina(limpar(rows),limite)
 
 

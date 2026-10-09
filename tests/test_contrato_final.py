@@ -83,3 +83,27 @@ def test_INV08_historico_paginado_sem_lacunas_e_insercao_concorrente():
             result=await c.get('/api/v1/conversas/'+conv+'/mensagens',params={'limite':1},headers={'X-API-Key':key})
             assert result.status_code==200 and len(result.json()['itens'])==1 and result.json()['tem_mais']
     banco(cenario)
+
+
+def test_INV08_lista_agentes_canais_circuito_sem_n_mais_um():
+    async def cenario(conn):
+        await migrar.aplicar(conn);app,c=preparar(conn)
+        async with c:
+            a,can=await criar(c);b,cb=await criar(c,'bravo')
+            a2=(await c.post('/admin/v1/tenants/alpha/agentes',json={'nome':'Sem canal','modelo_id':'assistente_generico'})).json()['id']
+            await conn.execute("INSERT INTO agente_circuitos(tenant_id,agente_id,aberto_ate) VALUES ('alpha',$1,now()+interval '1 minute')",a)
+            class Contador(Pool):
+                def __init__(self,conn):super().__init__(conn);self.n=0
+                async def fetch(self,*args):self.n+=1;return await self.conn.fetch(*args)
+                async def fetchrow(self,*args):self.n+=1;return await self.conn.fetchrow(*args)
+            db=Contador(conn);app.state.db=db
+            r=await c.get('/admin/v1/tenants/alpha/agentes')
+            assert r.status_code==200,r.text
+            assert db.n==2  # uma validação de tenant e uma consulta agregada, independente do número de agentes
+            itens={x['id']:x for x in r.json()['itens']}
+            assert itens[a]['circuito_estado']=='aberto' and itens[a]['canais']==[{'id':can,'tipo':'api','ativo':False}]
+            assert itens[a2]['circuito_estado']=='fechado' and itens[a2]['canais']==[]
+            assert b not in r.text and cb not in r.text and 'segredo-fixture' not in r.text
+            await conn.execute("UPDATE agente_circuitos SET aberto_ate=now()-interval '1 second' WHERE tenant_id='alpha' AND agente_id=$1",a)
+            assert {x['id']:x for x in (await c.get('/admin/v1/tenants/alpha/agentes')).json()['itens']}[a]['circuito_estado']=='meio_aberto'
+    banco(cenario)
