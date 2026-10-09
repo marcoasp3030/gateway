@@ -201,3 +201,18 @@ Verificação de logs: examinados stdout/stderr disponíveis do container atual,
 Agente mantido intacto em **live/dry** para os próximos testes. Consulta da configuração efetiva confirmou **zero outros agentes live** e **zero agentes com envio live**. Não houve PATCH, alteração de credencial/configuração, reinício ou envio ao WhatsApp nesta verificação.
 
 Para fechar formalmente a 0.5 faltam somente a revisão de `docs/API_ADMIN.md` pelo Marco e a confirmação dos modelos iniciais `atendente_delivery` e `assistente_generico`. Simultâneas e timeout/callback continuam antes da 0.6; não são pendências de autenticação da 0.5.
+
+
+## Teste de carga direto no fluxo — 09/10/2026
+
+Executado pelo Marco na VPS com `.local/teste_skyone_carga.py` (biblioteca padrão do Python), direto no Webhook do fluxo **`k3iynwDoOU`** com **Basic Auth** (usuário `flow-k3iynwDoOU@luxtia`; senha digitada sem eco, não gravada). Mesmo pacote do gateway: `message`, `historico` com 2 turnos, `instrucoes_agente`, `session_id = request_id`. Resposta considerada correta quando HTTP 200, `request_id` devolvido igual e a resposta cita o processo `1234` (memória pelo `historico`). Resultado salvo sem senha em `.local/resultado_carga_20261009_181055.json` (600, fora do Git), conferido nesta entrada.
+
+| Teste | Corretas | Tempos | Observação |
+|---|---|---|---|
+| 3 chamadas em sequência | 3/3, HTTP 200 | 7,27 s · 5,10 s · 8,96 s (mediana 7,27 s) | Referência individual |
+| 10 chamadas simultâneas | **10/10**, todas HTTP 200 | 6,95–7,87 s (mediana 7,53 s) | **Lote inteiro em 7,89 s** |
+| OpenAI direta | — | — | Não executada (chave não informada); comparação da 2.5 continua pendente |
+
+**Conclusão:** o Skyone processou as 10 chamadas **em paralelo, sem fila**: o lote levou o mesmo que uma chamada isolada, e nenhuma resposta veio fora do contrato ou com 429/5xx. Para o gateway, a concorrência por agente pode ser dimensionada pela cota (240/min por URL) e pelo `timeout_s`, não por uma fila no provedor. Amostra única de 10, abaixo do limite configurado (300/min); não é ensaio de saturação nem mede o máximo do Skyone.
+
+Pendente antes da 0.6: comportamento com tempo limite/callback.

@@ -4,7 +4,7 @@ Banco `gateway`, Postgres próprio do gateway. O backend do painel autentica seu
 
 **Legenda:** ✅ implantado e em produção · ⏳ planejado, **não disponível** (a fase está indicada). Não construir telas sobre rotas ⏳.
 
-**Publicação atual (09/10/2026):** imagem `gateway:8f387be`, migrações 001–012, serviço em mock/dry. Tudo marcado ✅ abaixo foi conferido no serviço depois dessa implantação. Histórico em `PROGRESS.md`.
+**Publicação atual (09/10/2026):** imagem `gateway:50c22ca` (inclui `eventos/cursor`), migrações 001–012, serviço em mock/dry. Tudo marcado ✅ abaixo foi conferido no serviço em produção. Histórico em `PROGRESS.md`.
 
 Rotas relativas a `/admin/v1`, salvo indicação de rota absoluta. Escritas confirmadas gravam auditoria na mesma transação, sem corpos nem segredos. Suspender/pausar usa PATCH.
 
@@ -231,7 +231,7 @@ O pacote ao agente inclui só unidades ativas do tenant, com `id`, `nome`, `aber
 | POST | `/tenants/{tenant}/conversas/{conv}/devolver` | ✅ |
 | POST | `/tenants/{tenant}/conversas/{conv}/mensagens` | ✅ Mensagem humana |
 | GET | `/tenants/{tenant}/eventos?desde=` | ✅ Polling |
-| GET | `/tenants/{tenant}/eventos/cursor` | ⏳ Implantação pendente — último ID de evento confirmado do tenant, sem listar histórico |
+| GET | `/tenants/{tenant}/eventos/cursor` | ✅ Último ID de evento confirmado do tenant, sem listar histórico |
 
 **Lista:** filtros opcionais `agente`, `canal`, `status=ativa|pausada`, `busca` (substring literal de nome/telefone), `desde` (ISO com fuso; filtra `atualizado_em`). `limite` 1–100, `cursor=<conversation_id>`, ordem crescente por ID; resposta `itens`/`proximo_cursor`. Agente/canal de outro tenant → 404. `ativa` = bot sem pausa vigente; encerramento/desfecho na Fase 3. Itens trazem agente/canal, nome/telefone, última mensagem/horário e `bot_pausado_ate`.
 

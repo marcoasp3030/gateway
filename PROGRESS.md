@@ -469,3 +469,18 @@ PY
 - Completada em `docs/MIGRACOES.md` a documentação de volta da última implantação: somente código, mantendo banco/schema 012 e dados atuais. Os roteiros anteriores de restauração para schemas antigos não se aplicam a essa volta.
 - `git diff --check` aprovado. Alterações desta revisão somente documentais; nenhum agente, canal, credencial, banco ou serviço alterado. Não repetido benchmark no serviço nem chamadas ao Skyone.
 - **Fase 0.5 permanece concluída formalmente.** Fase 0.6 não iniciada: aguarda testes do Marco de 10 chamadas simultâneas e tempo limite/callback no Skyone.
+
+
+## Fase 0.5 — Cursor inicial de eventos e teste de carga do Skyone — 2026-10-09
+
+- Status: concluído; serviço em mock/dry. Pedido do painel, antes da 0.6.
+- Feito: `GET /admin/v1/tenants/{tenant}/eventos/cursor` → `{"ultimo_id": N}` (maior ID de evento confirmado do tenant; `0` sem eventos; tenant inexistente → 404 `NOT_FOUND`; sem corpo, sem listar histórico, sem alterar dados). Edições iniciadas pela sessão anterior (Codex), revisadas e assumidas: rota antes do roteador genérico (sem captura por `/{entidade}/{identidade}`), consulta só agregada, testes de isolamento/continuação/SEG02. Commit `50c22ca`. Contrato marcou ⏳ até a conferência em produção e depois ✅.
+- Implantação: **feita pela sessão anterior às 18:18 UTC**, antes do commit, com backup prévio em `/home/twadmin/backups/gateway/pre-cursor-20261009T181713Z/` (dump `pg_restore --list` OK, SHA-256 `58e24456aeeee79501163af29d0029a910ac766df67546d0eb945d3ee804b836`; `.env` e Composes, 600), mas **sem a tag de commit exigida pela regra 15**. Conferido que os 38 arquivos `.py` do container são idênticos, por SHA-256, aos do commit `50c22ca`; imagem em uso `sha256:480fd191…` marcada `gateway:50c22ca`. Não houve novo build/restart (seria a mesma imagem). Imagem de volta `gateway:8f387be` preservada.
+- Validações (comando → resultado):
+  - `sh scripts/test_suite.sh` → **97 passed**, somente bancos `_test`.
+  - Produção: schema 12, zero pendentes, zero envio live; agente live/dry apenas `postman_teste/ag_dba38a6fae985abf584d512f` (“[teste] Bench segundo agente” voltou à simulação pelo Marco).
+  - Cursor: bykoji 216, bench_passo5 162, postman_teste 145, iguais ao `MAX(id)` de cada tenant; tenant inexistente → 404 no envelope; interno com `X-Forwarded-For` → 404; sem chave → 401; público `/gateway/admin/.../eventos/cursor` → 404. Health interno/público OK.
+  - Isolamento ao vivo: benchmark bykoji (mock/dry, 4 clientes) **4/4, zero erros, p50 4,341 s, máx. 4,355 s**; cursor bykoji 216 → 240, bench_passo5 e postman_teste inalterados; `eventos?desde=216` → 24 eventos só de bykoji, `proximo_cursor` 240 = novo cursor, `tem_mais=false`.
+  - Logs gateway/Postgres/Redis/Caddy: **zero ocorrências** de 10 segredos pesquisados.
+- Teste de carga do Marco no fluxo `k3iynwDoOU` (Basic Auth, direto no Webhook): 3 em sequência 5,10 / 7,27 / 8,96 s; **10 simultâneas 10/10 corretas, HTTP 200, 6,95–7,87 s, lote em 7,89 s** — Skyone processa em paralelo, sem fila. OpenAI direta não executada. Resultado `.local/resultado_carga_20261009_181055.json`; registro em `docs/SKYONE_RESULTADOS.md`.
+- Pendências / decisões para o Marco: timeout/callback no Skyone antes da 0.6; comparação OpenAI direta (2.5). Fase 0.6 não iniciada.
