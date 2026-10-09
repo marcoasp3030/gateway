@@ -21,6 +21,23 @@ router = APIRouter(prefix='/admin/v1', dependencies=[Depends(painel)])
 
 class Teste(Estrito):
     message: Literal['teste do painel'] = 'teste do painel'
+    # Chama o provedor real só neste teste, mesmo com o agente em mock; o agente não muda.
+    usar_provedor_real: bool = False
+
+
+def conferir_provedor_real(agente, empresa):
+    """Provedor real exige Skyone, URL e credencial completa (SEG13); indica o campo que falta."""
+    if agente['provedor'] != 'skyone': raise HTTPException(400, {'campo': 'provedor'})
+    if not agente['skyone_webhook_url']: raise HTTPException(400, {'campo': 'skyone_webhook_url'})
+    tipo = agente['skyone_auth_tipo']
+    if tipo == 'nenhuma':
+        if not empresa['tenant_teste']: raise HTTPException(400, {'campo': 'skyone_auth'})
+        return
+    if tipo == 'basic' and not agente['skyone_auth_usuario_enc']:
+        raise HTTPException(400, {'campo': 'skyone_auth_usuario'})
+    if not agente['skyone_auth_enc']: raise HTTPException(400, {'campo': 'skyone_auth'})
+    if tipo == 'cabecalho' and not agente['skyone_auth_cabecalho']:
+        raise HTTPException(400, {'campo': 'skyone_auth_cabecalho'})
 
 
 class Pausa(Estrito):
@@ -45,9 +62,20 @@ async def exigir(request, tenant, tabela, identidade):
 
 @router.post('/tenants/{tenant}/agentes/{agente}/testar')
 async def testar(request: Request, tenant: str, agente: str, body: Teste | None = None, actor=Depends(painel)):
-    await exigir(request, tenant, 'agentes', agente)
+    linha = await exigir(request, tenant, 'agentes', agente)
     state = request.app.state
     cfg = await state.configuracoes.efetiva(tenant, agente)
+    real = bool(body and body.usar_provedor_real)
+    if real:
+        conferir_provedor_real(linha, await Repositorio(state.db).tenant(tenant))
+        # Só esta chamada usa o provedor real: cota por URL e circuito valem como no live.
+        cfg = {**cfg, 'agente_mode': 'live'}
+    sufixo = '_provedor_real' if real else ''
+
+    async def registrar(acao):
+        async with state.db.acquire() as conn, conn.transaction():
+            await auditar(conn, tenant, actor, acao, agente)
+
     rid = str(uuid.uuid4())
     payload = {'message': 'teste do painel', 'historico': [], 'session_id': rid,
                'request_id': rid, 'conversation_id': f'{tenant}:test:{rid}',
@@ -58,14 +86,14 @@ async def testar(request: Request, tenant: str, agente: str, body: Teste | None 
         resultado = await state.pipeline.chamar(
             state.http, Repositorio(state.db), state.cofre, tenant, cfg, payload)
     except (CredencialRecusada,CircuitoAberto) as erro:
+        await registrar(f'agente.teste{sufixo}_falhou')
         raise HTTPException(502,str(erro)) from None
     except Exception:
-        async with state.db.acquire() as conn, conn.transaction():
-            await auditar(conn, tenant, actor, 'agente.teste_falhou', agente)
+        await registrar(f'agente.teste{sufixo}_falhou')
         raise HTTPException(502, 'UPSTREAM_ERROR: teste do agente falhou') from None
-    async with state.db.acquire() as conn, conn.transaction():
-        await auditar(conn, tenant, actor, 'agente.testado', agente)
-    return {'ok': True, 'latencia_ms': round((time.monotonic()-inicio)*1000), 'resposta': resultado['resposta']}
+    await registrar(f'agente.testado{sufixo}')
+    return {'ok': True, 'latencia_ms': round((time.monotonic()-inicio)*1000), 'resposta': resultado['resposta'],
+            'provedor_real': real}
 
 
 @router.post('/tenants/{tenant}/canais/{canal}/rotacionar-segredo')
