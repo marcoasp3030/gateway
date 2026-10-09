@@ -32,6 +32,8 @@ services:
       interval: 5s
       retries: 10
 
+  # Recepção/API: valida, grava e agenda. Com FILA_DURAVEL=off, também processa
+  # pelo agendador em processo (caminho atual); com on, não processa nada.
   gateway:
     build: ./app
     restart: unless-stopped
@@ -47,6 +49,74 @@ services:
       - /tmp
     security_opt:
       - no-new-privileges:true
+    mem_limit: 192m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Fila durável (Fase 0.6): mesma imagem da recepção. Com FILA_DURAVEL=off sobem,
+  # dão sinal de vida e mostram indicadores, mas não consomem nem agendam nada.
+  worker:
+    image: gateway-gateway
+    pull_policy: never
+    command: ["python", "processos.py", "worker"]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+    deploy:
+      replicas: ${WORKERS:-2}
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,sys,time;sys.exit(0 if time.time()-os.path.getmtime('/tmp/gateway-vivo')<30 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  agendador:
+    image: gateway-gateway
+    pull_policy: never
+    command: ["python", "processos.py", "agendador"]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    cpus: 0.25
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,sys,time;sys.exit(0 if time.time()-os.path.getmtime('/tmp/gateway-vivo')<30 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     depends_on:
       postgres:
         condition: service_healthy

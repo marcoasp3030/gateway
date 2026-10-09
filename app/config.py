@@ -31,7 +31,7 @@ UAZAPI_BASE_URL = os.getenv("UAZAPI_BASE_URL", "").rstrip("/")
 UAZAPI_TOKEN = os.getenv("UAZAPI_TOKEN", "")
 
 AVISO_DEMORA = "Só um instante, estou verificando aqui 😊"
-FALLBACK = "Tive uma instabilidade agora. Já vou te responder, tudo bem? 🙏"
+FALLBACK = "Tive uma instabilidade agora. Pode repetir sua mensagem em instantes? 🙏"
 
 # --- segurança ---
 DOCS_ENABLED = os.getenv("DOCS_ENABLED", "false").lower() == "true"  # SEG08

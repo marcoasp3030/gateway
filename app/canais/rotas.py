@@ -90,8 +90,14 @@ async def metricas(request:Request,tenant_id:str,agente:str|None=None):
     repo=Repositorio(request.app.state.db)
     if not await repo.tenant(tenant_id): raise HTTPException(404,'NOT_FOUND')
     if agente and not await repo.obter(tenant_id,'agentes',agente): raise HTTPException(404,'NOT_FOUND')
-    return dict(await request.app.state.db.fetchrow('''SELECT count(*) AS turnos,
+    from admin.fila import fila_da_empresa
+    linha=await request.app.state.db.fetchrow('''SELECT count(*) AS turnos,
         count(*) FILTER (WHERE status='erro') AS erros,
         percentile_cont(0.5) WITHIN GROUP(ORDER BY total_ms) AS total_p50_ms,
         percentile_cont(0.95) WITHIN GROUP(ORDER BY total_ms) AS total_p95_ms
-        FROM turnos WHERE tenant_id=$1 AND ($2::text IS NULL OR agente_id=$2)''',tenant_id,agente))
+        FROM turnos WHERE tenant_id=$1 AND etapa='concluido' AND ($2::text IS NULL OR agente_id=$2)''',tenant_id,agente)
+    # Indicadores da fila durável da empresa (zerados enquanto ela estiver desligada).
+    try: fila=await fila_da_empresa(request,tenant_id)
+    except HTTPException: raise
+    except Exception: fila={'ligada':request.app.state.infra.fila_duravel,'indisponivel':True}
+    return {**dict(linha),'fila':fila}

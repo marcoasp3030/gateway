@@ -22,6 +22,7 @@ from admin.servico import Administracao
 from admin.rotas import router, api
 from canais.rotas import router as canais_router
 from nucleo.pipeline import Pipeline
+from nucleo.fila import FilaDuravel, ligada_no_ambiente
 
 
 @dataclass(repr=False)
@@ -35,12 +36,15 @@ class Infra:
     public_url: str = 'https://painel.luxbrain.com.br/gateway'
     max_body_bytes: int = 2097152
     skyone_rpm: int = 240
+    fila_duravel: bool = False
+    concorrencia_por_worker: int = 20
 
     def validar(self):
         segredos={'PANEL_SERVICE_KEY':self.panel_key,'API_KEY_PEPPER':self.pepper}
         if self.panel_next: segredos['PANEL_SERVICE_KEY_NEXT']=self.panel_next
         if seguranca.validar_segredos(segredos): raise ValueError('Chaves de infraestrutura inválidas')
         if not 1<=self.skyone_rpm<=100000: raise ValueError("SKYONE_REQUESTS_PER_MINUTE inválido")
+        if not 1<=self.concorrencia_por_worker<=200: raise ValueError("CONCORRENCIA_POR_WORKER inválido")
         Cofre(self.encryption_key)
         seguranca.validar_formato_url(self.public_url)
 
@@ -49,7 +53,9 @@ class Infra:
         return cls(os.getenv('PANEL_SERVICE_KEY',''),os.getenv('PANEL_SERVICE_KEY_NEXT',''),
             os.getenv('API_KEY_PEPPER',''),os.getenv('ENCRYPTION_KEY',''),os.getenv('DATABASE_URL',''),
             os.getenv('REDIS_URL',''),os.getenv('GATEWAY_PUBLIC_URL','https://painel.luxbrain.com.br/gateway'),
-            skyone_rpm=int(os.getenv('SKYONE_REQUESTS_PER_MINUTE','240')))
+            skyone_rpm=int(os.getenv('SKYONE_REQUESTS_PER_MINUTE','240')),
+            fila_duravel=ligada_no_ambiente(),
+            concorrencia_por_worker=int(os.getenv('CONCORRENCIA_POR_WORKER','20')))
 
 
 def criar_app(infra,db=None,redis=None):
@@ -73,7 +79,9 @@ def criar_app(infra,db=None,redis=None):
             if versao != len(migrar.arquivos()):
                 raise RuntimeError('Schema incompatível: aplique as migrações explicitamente')
             await app.state.pipeline.recuperar()
-            agendador=asyncio.create_task(app.state.pipeline.agendador())
+            # Exclusividade: com a fila durável ligada, quem processa são os workers.
+            if not infra.fila_duravel:
+                agendador=asyncio.create_task(app.state.pipeline.agendador())
             yield
         finally:
             if agendador:
@@ -94,7 +102,9 @@ def criar_app(infra,db=None,redis=None):
         app.state.configuracoes=Configuracoes(Repositorio(app.state.db))
         app.state.admin=Administracao(app.state.db,app.state.cofre,app.state.configuracoes,infra)
         app.state.http=httpx.AsyncClient(follow_redirects=False)
-        app.state.pipeline=Pipeline(app.state.db,app.state.redis,app.state.configuracoes,app.state.cofre,app.state.http,skyone_rpm=infra.skyone_rpm)
+        app.state.pipeline=Pipeline(app.state.db,app.state.redis,app.state.configuracoes,app.state.cofre,app.state.http,
+                                    skyone_rpm=infra.skyone_rpm,fila_duravel=infra.fila_duravel)
+        app.state.fila=FilaDuravel(app.state.pipeline,infra.fila_duravel,infra.concorrencia_por_worker)
     if db is not None: preparar(app)
     app.add_middleware(limites.LimiteCorpo,max_bytes=infra.max_body_bytes)
 
@@ -135,9 +145,14 @@ def criar_app(infra,db=None,redis=None):
     async def redis_error(request,exc): return resposta_erro(503)
 
     @app.get('/health')
-    async def health():
+    async def health(request:Request):
         await app.state.db.fetchval('SELECT 1'); await app.state.redis.ping()
-        return {'ok':True}
+        # Pelo proxy público só {"ok":true} (SEG08); chamada interna recebe o resumo da fila.
+        if not seguranca.chamada_interna(request.client.host if request.client else None,request.headers):
+            return {'ok':True}
+        try: fila=app.state.fila.resumo(await app.state.fila.indicadores())
+        except Exception: fila={'ligada':infra.fila_duravel,'indisponivel':True}
+        return {'ok':True,'fila':fila}
 
     from admin.capacidades import router as capacidades
     from modulos.catalogo.rotas import router as catalogo
@@ -147,7 +162,9 @@ def criar_app(infra,db=None,redis=None):
     from admin.contatos import router as contatos
     from admin.gestao import router as gestao
     from agentes.controle import router as circuito
+    from admin.fila import router as fila
     app.include_router(circuito)
+    app.include_router(fila)
     app.include_router(gestao)
     app.include_router(contatos)
     app.include_router(unidades)

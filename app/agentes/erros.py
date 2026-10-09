@@ -6,3 +6,7 @@ class CredencialRecusada(FalhaAgente):
 
 class CircuitoAberto(FalhaAgente):
     def __str__(self): return 'circuito do Skyone aberto'
+
+class TempoEsgotado(FalhaAgente):
+    """Agente não respondeu dentro do timeout_s (espera de cota + chamada)."""
+    def __str__(self): return 'tempo limite do agente esgotado'

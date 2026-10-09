@@ -4,3 +4,9 @@ services:
   gateway:
     environment:
       DATABASE_URL: ${GATEWAY_DATABASE_URL:?Configure a conexão do banco gateway no .env}
+  worker:
+    environment:
+      DATABASE_URL: ${GATEWAY_DATABASE_URL:?Configure a conexão do banco gateway no .env}
+  agendador:
+    environment:
+      DATABASE_URL: ${GATEWAY_DATABASE_URL:?Configure a conexão do banco gateway no .env}

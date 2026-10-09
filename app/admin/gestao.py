@@ -111,6 +111,7 @@ async def rotacionar(request: Request, tenant: str, canal: str, actor=Depends(pa
 @router.get('/tenants/{tenant}/conversas')
 async def conversas(request: Request, tenant: str, agente: str | None = None, canal: str | None = None,
                     status: Literal['ativa','pausada'] | None = None, busca: str | None = None,
+                    aguardando: bool | None = None,
                     desde: datetime | None = None, limite: int = 50, cursor: str | None = None):
     repo = Repositorio(request.app.state.db)
     if not await repo.tenant(tenant): raise HTTPException(404, 'TENANT_NOT_FOUND')
@@ -119,7 +120,7 @@ async def conversas(request: Request, tenant: str, agente: str | None = None, ca
     if not 1 <= limite <= 100 or (busca and len(busca)>200) or (desde and desde.tzinfo is None):
         raise HTTPException(400, 'VALIDATION_ERROR')
     rows = await request.app.state.db.fetch('''SELECT c.conversation_id,c.agente_id,c.canal_id,c.canal,c.nome,
-        c.telefone,c.bot_pausado_ate,c.atualizado_em,
+        c.telefone,c.bot_pausado_ate,c.atualizado_em,c.aguardando_atendente_desde,c.aguardando_motivo,
         CASE WHEN c.bot_pausado_ate>now() THEN 'pausada' ELSE 'ativa' END AS status,
         m.conteudo AS ultima_mensagem,m.enviada_em AS ultima_em
         FROM conversas c LEFT JOIN LATERAL (
@@ -131,7 +132,8 @@ async def conversas(request: Request, tenant: str, agente: str | None = None, ca
         AND ($5::text IS NULL OR strpos(lower(coalesce(c.nome,'')||' '||coalesce(c.telefone,'')),lower($5))>0)
         AND ($6::timestamptz IS NULL OR c.atualizado_em>=$6)
         AND ($7::text IS NULL OR c.conversation_id>$7)
-        ORDER BY c.conversation_id LIMIT $8''', tenant, agente, canal, status, busca, desde, cursor, limite+1)
+        AND ($9::boolean IS NULL OR (c.aguardando_atendente_desde IS NOT NULL)=$9)
+        ORDER BY c.conversation_id LIMIT $8''', tenant, agente, canal, status, busca, desde, cursor, limite+1, aguardando)
     return {'itens': [dict(r) for r in rows[:limite]],
             'proximo_cursor': rows[limite-1]['conversation_id'] if len(rows)>limite else None}
 
@@ -139,8 +141,10 @@ async def conversas(request: Request, tenant: str, agente: str | None = None, ca
 async def pausar(request, tenant, conv, minutos, actor, acao):
     async with request.app.state.db.acquire() as conn, conn.transaction():
         await conn.execute('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', conv)
+        # Atendente agiu (assumir, devolver, responder): sai de "aguardando atendente".
         row = await conn.fetchrow('''UPDATE conversas SET bot_pausado_ate=
             CASE WHEN $3::integer IS NULL THEN NULL ELSE now()+make_interval(mins=>$3) END,
+            aguardando_atendente_desde=NULL,aguardando_motivo=NULL,
             atualizado_em=now() WHERE tenant_id=$1 AND conversation_id=$2
             RETURNING bot_pausado_ate,agente_id''', tenant, conv, minutos)
         if not row: raise HTTPException(404, 'NOT_FOUND')

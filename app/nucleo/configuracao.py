@@ -2,6 +2,9 @@ import copy
 import json
 import time
 
+# Texto sem promessa de retorno: o cliente sabe que precisa repetir (Fase 0.6, item A).
+FALLBACK_PADRAO="Tive uma instabilidade agora. Pode repetir sua mensagem em instantes? 🙏"
+
 COMPORTAMENTO = {
     'debounce_s','max_wait_s','media_wait_s','pause_minutes','history_turns','slow_notice_s',
     'aviso_demora','fallback','alerta_telefone','send_mode','agente_mode','modo_piloto',
@@ -9,7 +12,7 @@ COMPORTAMENTO = {
     'skyone_dominios_permitidos',
 }
 PADROES = dict(debounce_s=4,max_wait_s=12,media_wait_s=30,pause_minutes=60,history_turns=20,
-    slow_notice_s=15,aviso_demora='Só um instante, estou verificando.',fallback='Tive uma instabilidade. Por favor, tente novamente.',
+    slow_notice_s=15,aviso_demora='Só um instante, estou verificando.',fallback=FALLBACK_PADRAO,
     send_mode='dry',agente_mode='mock',modo_piloto=True,contatos_permitidos=[],
     encerrar_vazia_min=30,max_lotes_simultaneos=5,max_concorrencia=5,skyone_dominios_permitidos=[])
 

@@ -11,7 +11,7 @@ from nucleo.banco import Repositorio
 from nucleo.credenciais import CredencialInvalida
 
 
-from .erros import FalhaAgente
+from .erros import FalhaAgente, TempoEsgotado
 
 
 async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None):
@@ -109,6 +109,8 @@ async def _chamar(client,repo,cofre,tenant_id,cfg,payload):
         if any(s in json.dumps(result,ensure_ascii=False) for s in protegidos):
             raise FalhaAgente('Resposta contém credencial')
         return result
+    except (httpx.TimeoutException,TimeoutError):
+        raise TempoEsgotado() from None
     except (httpx.HTTPError,TimeoutError,ValueError,TypeError,CredencialInvalida):
         raise FalhaAgente('Falha na comunicação com o agente') from None
 
@@ -130,6 +132,7 @@ async def chamar(client,repo,cofre,tenant_id,cfg,payload,controle=None):
         if geracao is not None:
             await controle.terminar(tenant_id,cfg['id'],geracao,erro)
         if isinstance(erro,(CredencialRecusada,CircuitoAberto,FalhaAgente)): raise
-        raise FalhaAgente('Tempo limite ou controle do Skyone indisponível') from None
+        if isinstance(erro,TimeoutError): raise TempoEsgotado() from None
+        raise FalhaAgente('Controle do Skyone indisponível') from None
     await controle.terminar(tenant_id,cfg['id'],geracao)
     return result

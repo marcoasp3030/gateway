@@ -19,7 +19,7 @@ async def consulta(db,t,mes=None):
     empresa=await Repositorio(db).tenant(t)
     if not empresa: raise LookupError('Tenant inexistente')
     mes,inicio,fim=intervalo(empresa['timezone'],mes)
-    rows=await db.fetch('SELECT agente_id,count(*) AS turnos FROM turnos WHERE tenant_id=$1 AND agente_inicio >= $2 AND agente_inicio < $3 GROUP BY agente_id ORDER BY agente_id',t,inicio,fim)
+    rows=await db.fetch('SELECT agente_id,count(*) AS turnos FROM turnos WHERE tenant_id=$1 AND etapa=\'concluido\' AND agente_inicio >= $2 AND agente_inicio < $3 GROUP BY agente_id ORDER BY agente_id',t,inicio,fim)
     total=sum(r['turnos'] for r in rows)
     avisos=await db.fetch('SELECT percentual,turnos,limite,criado_em FROM consumo_avisos WHERE tenant_id=$1 AND mes=$2 ORDER BY percentual',t,mes)
     return {'mes':mes,'turnos':total,'limite':empresa['limite_turnos_mes'],'agentes':[dict(r) for r in rows],'avisos':[dict(r) for r in avisos]}
@@ -27,7 +27,7 @@ async def consulta(db,t,mes=None):
 async def registrar(c,t):
     empresa=await Repositorio(c).tenant(t);mes,inicio,fim=intervalo(empresa['timezone'])
     await c.execute('SELECT pg_advisory_xact_lock(hashtextextended($1,0))','consumo:'+t+':'+mes)
-    total=await c.fetchval('SELECT count(*) FROM turnos WHERE tenant_id=$1 AND agente_inicio >= $2 AND agente_inicio < $3',t,inicio,fim)
+    total=await c.fetchval('SELECT count(*) FROM turnos WHERE tenant_id=$1 AND etapa=\'concluido\' AND agente_inicio >= $2 AND agente_inicio < $3',t,inicio,fim)
     limite=empresa['limite_turnos_mes']
     if limite is not None:
         for p in (80,100):
