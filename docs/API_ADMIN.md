@@ -84,9 +84,9 @@ Todas as rotas desta seção são relativas a `/admin/v1`. Escritas confirmadas 
 | POST | `/tenants/{tenant}/webhooks-saida/{webhook}/testar` | ✅ Outbox assinada, escopo do tenant |
 | GET | `/tenants/{tenant}/webhooks-saida/{webhook}/entregas` | ✅ Outbox assinada, escopo do tenant |
 | GET | `/tenants/{tenant}/consumo?mes=AAAA-MM` | ✅ Contagem e avisos mensais |
-| GET | `/tenants/{tenant}/contatos?busca=` | ⏳ Fase 0.5 |
-| GET | `/tenants/{tenant}/contatos/{contato}/exportar` | ⏳ Fase 0.5; exige actor, registra auditoria |
-| DELETE | `/tenants/{tenant}/contatos/{contato}` | ⏳ Fase 0.5; anonimização auditada |
+| GET | `/tenants/{tenant}/contatos?busca=` | ✅ LGPD03 |
+| GET | `/tenants/{tenant}/contatos/{contato}/exportar` | ✅ LGPD03; exige actor, registra auditoria |
+| DELETE | `/tenants/{tenant}/contatos/{contato}` | ✅ LGPD03; anonimização auditada |
 
 ### Tenants e configuração
 
@@ -228,3 +228,11 @@ Ao alcançar 80% e 100%, um aviso persistente por tenant/mês/patamar é registr
 POST de unidade exige `nome`; aceita `telefone_whatsapp` (8–16 dígitos), `ativo` (padrão true) e `horarios`, por exemplo `{ "seg":[["11:30","15:00"],["18:00","23:00"]], "dom":[] }`. Dias: seg/ter/qua/qui/sex/sab/dom; HH:MM de 00:00 a 23:59, até 12 faixas por dia, início e fim distintos. Fim anterior ao início indica funcionamento pela madrugada seguinte. Horários ausentes significam fechado, não 24 horas. PATCH altera campos enviados; DELETE desativa preservando histórico/auditoria.
 
 Pacote ao agente inclui somente unidades ativas do tenant, com `id`, `nome`, `aberta_agora` e `proxima_abertura` ISO no fuso do tenant (nulo se aberta ou sem próxima faixa). O instante de fechamento já conta como fechado. Nenhum horário comercial real foi presumido/cadastrado na implantação.
+
+## Dados do contato (LGPD03)
+
+Contatos são vinculados às conversas na recepção; migração 011 vincula conversas existentes sem descartar dados. Busca retorna até 100 contatos do tenant, por nome/telefone/e-mail. Exportação exige `X-Actor` mesmo sendo GET e devolve contato, conversas, mensagens, turnos, brutos e entregas associadas, auditoria e `pedidos:[]` (módulo de pedidos completo ainda na Fase 4); exportação é auditada.
+
+DELETE exige corpo `{ "confirmacao":"<telefone ou e-mail atual>" }`. Faz **anonimização**, não remoção de métricas: apaga telefone/e-mail/nome/perfil/resumo, substitui conteúdo das mensagens, retira resposta/erro dos turnos, troca IDs de conversa que continham identificadores pessoais por IDs aleatórios, limpa payloads brutos associados e entregas que carregam esses identificadores, cancela entregas pendentes e retira agendamentos Redis antigos. Auditoria mantém ação/horário, com identificadores pessoais substituídos. Retorno `{ "ok":true, "anonimizado":true }`. Repetição em contato já anonimizado → 409.
+
+Conversa em processamento → 409, sem alterações parciais; repetir após terminar. Verificações de referências entre tenants continuam imediatas normalmente; só a transação de anonimização as adia e verifica antes de concluir. Outro tenant permanece intacto, mesmo contendo o mesmo telefone. Mensagens futuras constituem novo contato/atendimento, não recuperam histórico apagado. Payloads antigos sem vínculo são localizados pelos identificadores conhecidos, inclusive telefone formatado; fixtures reais dos provedores ainda são necessárias na Fase 1 para validar formatos novos. Backups e dados já entregues a terceiros não são alterados por esta API; retenção/restauração é tratada na Fase 9.

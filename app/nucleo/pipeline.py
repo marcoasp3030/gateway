@@ -65,6 +65,7 @@ return 1
         mensagem_id=f'{canal_id}:{m["message_id"]}' if m.get('message_id') else None
         async with self.db.acquire() as conn,conn.transaction():
             await conn.execute('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',conversa)
+            contato=await conn.fetchval('INSERT INTO contatos(id,tenant_id,telefone,nome) VALUES ($1,$2,$3,$4) ON CONFLICT(tenant_id,telefone) DO UPDATE SET atualizado_em=now() RETURNING id','ct_'+uuid.uuid4().hex,tenant,identificador,m.get('nome'))
             anterior=await Repositorio(conn).obter(tenant,'conversas',conversa)
             if anterior and anterior['agente_id']!=cfg['id']:
                 await auditar(conn,tenant,'sistema','conversa.roteada',conversa)
@@ -72,6 +73,7 @@ return 1
                 VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(conversation_id) DO UPDATE
                 SET agente_id=EXCLUDED.agente_id,atualizado_em=now()
                 WHERE conversas.tenant_id=EXCLUDED.tenant_id''',tenant,conversa,canal['tipo'],canal_id,cfg['id'],identificador,m.get('nome'))
+            await conn.execute('UPDATE conversas SET contato_id=$3 WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa,contato)
             msgid=await conn.fetchval('''INSERT INTO mensagens(tenant_id,conversation_id,direcao,origem,conteudo,message_id,enviada_em)
                 VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(tenant_id,message_id) DO NOTHING RETURNING id''',
                 tenant,conversa,'saida' if humano else 'entrada','humano' if humano else 'cliente',m['texto'],

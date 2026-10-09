@@ -38,7 +38,7 @@ async def webhook(request:Request,tipo:str,canal_id:str,s:str=''):
     try: bruto=await request.json()
     except ValueError: raise HTTPException(400,'JSON inválido') from None
     if not isinstance(bruto,dict): raise HTTPException(400,'Objeto JSON obrigatório')
-    await request.app.state.db.execute('INSERT INTO webhook_raw(tenant_id,fonte,payload) VALUES ($1,$2,$3::jsonb)',
+    raw_id=await request.app.state.db.fetchval('INSERT INTO webhook_raw(tenant_id,fonte,payload) VALUES ($1,$2,$3::jsonb) RETURNING id',
         tenant,tipo,json.dumps(sanitizar(bruto)))
     if tipo=='api':
         m=Entrada.model_validate(bruto).model_dump()
@@ -49,7 +49,9 @@ async def webhook(request:Request,tipo:str,canal_id:str,s:str=''):
         m=Entrada.model_validate({'identificador':norm['telefone'],
             'texto':norm['texto'] or '[mídia ainda não interpretada]', 'message_id':norm['message_id']}).model_dump()
         m.update(humano=norm['from_me'],via_api=norm['via_api'],nome=norm['nome'])
-    return await request.app.state.pipeline.receber(tenant,canal_id,m)
+    result=await request.app.state.pipeline.receber(tenant,canal_id,m)
+    await request.app.state.db.execute('UPDATE webhook_raw SET contato_id=(SELECT contato_id FROM conversas WHERE tenant_id=$1 AND conversation_id=$3) WHERE tenant_id=$1 AND id=$2',tenant,raw_id,f'{tenant}:{canal_id}:{m["identificador"]}')
+    return result
 
 
 @router.post('/api/v1/conversas/mensagens')

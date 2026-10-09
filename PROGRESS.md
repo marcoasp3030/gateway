@@ -349,3 +349,10 @@ PY
 
 - CRUD isolado/auditado de unidades, DELETE como desativação, validação de faixas semanais e telefone. Pacote ao agente inclui apenas unidades ativas do tenant, aberta agora/próxima abertura no fuso local.
 - Suíte isolada: **72 passed**. Cobertura de madrugada, limite exato de fechamento, semana sem horários, URLs de unidade alheia recusadas e exclusão de unidades inativas do pacote. Não cadastrados horários reais nem alterado serviço.
+
+## Fase 0.5 — LGPD03 — 2026-10-09
+
+- Contatos vinculados na recepção; migração 011 associa conversas existentes. Busca isolada, exportação auditada com actor obrigatório e anonimização confirmada por telefone/e-mail.
+- Anonimização transacional de contato, conversa/ID pessoal, mensagens, respostas dos turnos, brutos, entregas pendentes e identificadores da auditoria. Métricas preservadas; outro tenant preservado. Agendamentos antigos retirados após confirmação da transação; conversa em processamento retorna 409 sem alteração parcial.
+- Suíte isolada: **73 passed**. LGPD03 verifica ausência do telefone em todas as tabelas afetadas do tenant, inclusive IDs e brutos, manutenção das métricas e do mesmo telefone em outro tenant. Corrigida a primeira versão da migração para manter FKs imediatas no uso normal e adiar somente na transação LGPD.
+- Exportação inclui brutos/entregas/auditoria associados e campos JSON estruturados. Backups/dados já enviados a terceiros e formatos reais ainda não capturados continuam com as limitações documentadas. Nenhum dado do banco de serviço foi anonimizado.

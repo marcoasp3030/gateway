@@ -7,7 +7,7 @@ TABELAS = {
     'mensagens': 'id', 'turnos': 'id', 'contatos': 'id',
     'audit_log': 'id', 'modulos_tenant': 'modulo',
 }
-JSON = {'credenciais_enc', 'triagem', 'dados', 'config', 'resposta', 'perfil'}
+JSON = {'credenciais_enc', 'triagem', 'dados', 'config', 'resposta', 'perfil', 'evento', 'payload', 'uso', 'horarios', 'followups_padrao'}
 # Colunas de escrita são declaradas pelo serviço, nunca por SQL enviado pelo cliente.
 COLUNAS = {
     'nome','modelo_id','modelo_versao','status','provedor','skyone_estrategia','skyone_webhook_url',
