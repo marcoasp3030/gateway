@@ -77,8 +77,8 @@ Todas as rotas desta seção são relativas a `/admin/v1`. Escritas confirmadas 
 | PUT | `/tenants/{tenant}/modulos/{modulo}` | ✅ Registro/configuração de módulos |
 | GET, POST | `/modelos-agente` | ✅ Lista/cria versões |
 | GET, PATCH | `/modelos-agente/{modelo}` | ✅ Detalhe/PATCH cria nova versão |
-| GET, POST | `/tenants/{tenant}/unidades` | ⏳ Fase 0.5 |
-| GET, PATCH, DELETE | `/tenants/{tenant}/unidades/{unidade}` | ⏳ Fase 0.5 |
+| GET, POST | `/tenants/{tenant}/unidades` | ✅ Gestão e horários locais |
+| GET, PATCH, DELETE | `/tenants/{tenant}/unidades/{unidade}` | ✅ Gestão e horários locais |
 | GET, POST | `/tenants/{tenant}/webhooks-saida` | ✅ Outbox assinada, escopo do tenant |
 | GET, PATCH, DELETE | `/tenants/{tenant}/webhooks-saida/{webhook}` | ✅ Outbox assinada, escopo do tenant |
 | POST | `/tenants/{tenant}/webhooks-saida/{webhook}/testar` | ✅ Outbox assinada, escopo do tenant |
@@ -222,3 +222,9 @@ Chave deve ter escopo `notificar` e pertencer ao tenant/agente da conversa. Paus
 `GET /tenants/{tenant}/consumo?mes=AAAA-MM` retorna `mes`, `turnos`, `limite`, `agentes` (agente_id/turnos) e `avisos` (percentual/turnos/limite/criado_em). Mês é calculado no fuso do tenant; padrão mês atual. Contam todos os turnos registrados, inclusive sistema/erro/ignorados; não equivale a cobrança por tokens. `uso` do provedor é opcional e preservado no turno quando contém contagens inteiras não negativas.
 
 Ao alcançar 80% e 100%, um aviso persistente por tenant/mês/patamar é registrado na auditoria e enfileirado para webhooks ativos inscritos em `consumo.limite`. **Não corta atendimento**. `limite_turnos_mes=null` desativa os avisos; zero aciona ambos no primeiro turno. Alterar limite durante o mês não reenvia patamar já registrado. Postgres é fonte da verdade, Redis guarda contador reconstruível; falha do cache não corta respostas. A API consulta Postgres. Entrega a WhatsApp/e-mail interno depende dos canais de alertas da Fase 9.
+
+## Unidades e horários
+
+POST de unidade exige `nome`; aceita `telefone_whatsapp` (8–16 dígitos), `ativo` (padrão true) e `horarios`, por exemplo `{ "seg":[["11:30","15:00"],["18:00","23:00"]], "dom":[] }`. Dias: seg/ter/qua/qui/sex/sab/dom; HH:MM de 00:00 a 23:59, até 12 faixas por dia, início e fim distintos. Fim anterior ao início indica funcionamento pela madrugada seguinte. Horários ausentes significam fechado, não 24 horas. PATCH altera campos enviados; DELETE desativa preservando histórico/auditoria.
+
+Pacote ao agente inclui somente unidades ativas do tenant, com `id`, `nome`, `aberta_agora` e `proxima_abertura` ISO no fuso do tenant (nulo se aberta ou sem próxima faixa). O instante de fechamento já conta como fechado. Nenhum horário comercial real foi presumido/cadastrado na implantação.
