@@ -503,3 +503,23 @@ PY
   - Logs gateway/Postgres/Redis/Caddy: **zero ocorrências** de 10 segredos.
 - Volta: a imagem `gateway:50c22ca` funciona sobre o schema 13 (só mudou o padrão da coluna); voltar o valor dos agentes exigiria PATCH explícito ou restaurar o dump acima.
 - Próximo bloco (aguarda validação do Marco): fila durável e workers da 0.6.
+
+
+## Fase 0.6 — Bloco 1: schema e estados (migração 014) — 2026-10-09
+
+- Status: concluído e implantado; serviço em mock/dry, nenhum modo de agente alterado. Desenho da fila durável aprovado pelo Marco (2 workers, até 3 no teste de carga; parte incerta nunca reenviada; uma nova tentativa só para conexão/502/503/504; circuito aberto → fallback).
+- Feito (`219d71a`): migração **014**, só acréscimos com padrão compatível:
+  - `turnos.etapa` (`processando|respondido|aguardando_callback|concluido|abandonado`, padrão `concluido`), `turnos.mensagem_ids`, índice único em `request_id` (44/44 distintos em produção antes da migração) e índice de turnos em andamento.
+  - `mensagens.turno_request_id`, `parte`, `entrega` (`enviando|enviada|incerta`), coerência turno/parte e **chave única por (tenant, turno, parte)**; índice de entregas incertas.
+  - `conversas.aguardando_atendente_desde` e `aguardando_motivo` (`erro_agente|tempo_esgotado|circuito_aberto|entrega_incerta`), coerentes entre si.
+  - Tabela `agente_callbacks` (token só em hash, uso único por `recebido_em`, prazo > criação, FK para agente do mesmo tenant; sem FK para conversa porque a LGPD troca o ID). A anonimização LGPD03 passou a trocar também o `conversation_id` dos callbacks; teste estendido e verificado por mutação (sem a linha, o teste falha).
+  - Ainda **não usados** pelo código: entram nos blocos 2–4.
+- Validações (comando → resultado):
+  - `sh scripts/test_suite.sh` → **102 passed**, somente `_test` (4 testes novos da 014; LGPD com callbacks).
+  - Pré-implantação: `gateway:f5a1c22` = imagem em uso (volta); schema 13; zero pendentes, `due` vazio, sem buffers. Backup `/home/twadmin/backups/gateway/gateway-pre014-20261009T193800Z.dump` (600, `pg_restore --list` OK), SHA-256 `996092eca623555f4057f012cb19b6a9cb21011a55f6d0b1d0ebce3a8997b315`; `.env.antes014-20261009T193800Z` (600).
+  - Build `gateway:219d71a`; `migrar.py --apply` → só a 014. **Compatibilidade em produção:** com a imagem antiga ainda no ar sobre o schema 14, health OK e benchmark **4/4, zero erros, p50 4,379 s**; turnos gravados como `concluido`. Depois, recriado só o gateway com `gateway:219d71a`; postgres/redis/painel com os mesmos IDs.
+  - Imagem nova: benchmark bykoji **4/4, zero erros, p50 4,352 s, máx. 4,44 s**. Schema 14; 52 turnos `concluido`; zero partes, aguardando e callbacks (ainda sem uso); modos: só `postman_teste/ag_dba38…` em live/dry, todos com `timeout_s` 60.
+  - Health interno/público OK; admin/docs/openapi/métricas públicos → 404; interno com `X-Forwarded-For` → 404; sem chave → 401.
+  - Logs gateway/Postgres/Redis/Caddy: **zero ocorrências** de 10 segredos.
+- Volta: recriar o gateway com `gateway:f5a1c22` sobre o mesmo schema 14 (registrado em `docs/MIGRACOES.md`).
+- Próximo bloco (aguarda validação do Marco): 2 — fila por empresa, workers, agendador com trava de liderança, reconciliação, fallback sem promessa falsa (A), recepção resiliente (B) e capacidade/indicadores/alertas (E1–E3).

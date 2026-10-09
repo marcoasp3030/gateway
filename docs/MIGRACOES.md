@@ -251,3 +251,10 @@ Postgres, Redis, painel, dados e credenciais permanecem intactos. Se uma futura
 implantação alterar o schema, este procedimento deixa de ser suficiente: preparar
 uma base nova restaurada do backup compatível, nunca rebaixar migrações ou
 restaurar sobre a base em uso. Nenhuma volta foi executada nesta revisão.
+
+## Migrações 013 e 014 — Fase 0.6 — 09/10/2026
+
+- **013 `timeout_padrao_60`:** padrão de `agentes.timeout_s` 90 → 60; agentes ainda em 90 → 60, auditados (`migracao013`). Backup `gateway-pre013-20261009T192140Z.dump`. Volta de código: `gateway:50c22ca` funciona sobre 013; os valores dos agentes voltariam só por PATCH explícito ou restauração do dump.
+- **014 `estados_fila`:** só acréscimos compatíveis — `turnos.etapa` (padrão `concluido`) e `mensagem_ids`, `request_id` único; `mensagens.turno_request_id/parte/entrega` com chave única por parte; `conversas.aguardando_atendente_desde/aguardando_motivo`; tabela `agente_callbacks` (token só em hash). Backup `gateway-pre014-20261009T193800Z.dump`.
+- **Compatibilidade comprovada em produção:** depois de aplicar a 014, a imagem anterior `gateway:f5a1c22` processou o benchmark (4/4, zero erros) com todos os turnos gravados como `concluido`; só então o gateway foi recriado com `gateway:219d71a`.
+- **Volta do bloco 1:** recriar o gateway com `gateway:f5a1c22` (mesmo schema 14); não é preciso desfazer a 014. Restaurar o dump só se for necessário voltar dados.
