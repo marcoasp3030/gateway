@@ -2,7 +2,7 @@
 import hashlib
 import ipaddress
 
-from starlette.responses import JSONResponse
+from erros_api import resposta
 
 from seguranca import REDES_INTERNAS
 
@@ -46,8 +46,7 @@ class LimiteCorpo:
         await self.app(scope, receber, send)
 
     async def recusar(self, scope, receive, send):
-        resposta = JSONResponse({"detail": "corpo grande demais"}, status_code=413)
-        await resposta(scope, receive, send)
+        await resposta(413,campo="corpo")(scope, receive, send)
 
 
 def ip_cliente(host: str | None, headers) -> str:

@@ -30,8 +30,9 @@ def limpar(valor):
 def validar(modelo, dados):
     try:
         return modelo.model_validate(dados).model_dump(exclude_unset=True)
-    except ValidationError:
-        raise HTTPException(400,'VALIDATION_ERROR') from None
+    except ValidationError as exc:
+        from erros_api import campo_validacao
+        raise HTTPException(400,{"campo":campo_validacao(exc.errors())}) from None
 
 
 async def auditar(conn, tenant, actor, acao, alvo):

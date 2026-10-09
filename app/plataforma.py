@@ -9,6 +9,8 @@ import asyncpg
 import redis.asyncio as aioredis
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from erros_api import resposta as resposta_erro, campo_validacao, CAMPOS_LEGADOS
 from fastapi.responses import JSONResponse
 import migrar
 import limites
@@ -100,33 +102,36 @@ def criar_app(infra,db=None,redis=None):
     async def protecoes(request,call_next):
         if seguranca.rota_interna(request.url.path) and not seguranca.chamada_interna(
                 request.client.host if request.client else None,request.headers):
-            return JSONResponse({'detail':'Not Found'},status_code=404)
+            return resposta_erro(404)
         grupo=request.url.path.split('/',2)[1]
         if grupo in ('api','webhooks'):
             try:
                 permitido=await limites.permitir(app.state.redis,grupo,limites.ip_cliente(
                     request.client.host if request.client else None,request.headers))
             except aioredis.RedisError:
-                return JSONResponse({'detail':'Serviço indisponível'},status_code=503)
-            if not permitido: return JSONResponse({'detail':'Limite excedido'},status_code=429,headers={'Retry-After':'1'})
+                return resposta_erro(503)
+            if not permitido: return resposta_erro(429,headers={'Retry-After':'1'})
         r=await call_next(request)
         r.headers['X-Content-Type-Options']='nosniff';r.headers['Cache-Control']='no-store'
         return r
 
-    def erro(status,codigo):
-        return JSONResponse({'erro':{'codigo':codigo,'mensagem':codigo,'detalhes':{}}},status_code=status)
-    @app.exception_handler(HTTPException)
+    @app.exception_handler(StarletteHTTPException)
     async def http_error(request,exc):
-        return erro(exc.status_code,exc.detail if isinstance(exc.detail,str) else 'REQUEST_ERROR')
+        codigo='CREDENTIAL_REJECTED' if exc.status_code==502 and exc.detail=='credencial do Skyone recusada' else None
+        campo=exc.detail.get('campo') if isinstance(exc.detail,dict) else None
+        if isinstance(exc.detail,str): campo=CAMPOS_LEGADOS.get(exc.detail,campo)
+        return resposta_erro(exc.status_code,codigo,campo,exc.headers)
     @app.exception_handler(RequestValidationError)
-    async def validacao(request,exc): return erro(400,'VALIDATION_ERROR')
+    async def validacao(request,exc): return resposta_erro(400,campo=campo_validacao(exc.errors()))
     @app.exception_handler(ValueError)
-    async def invalido(request,exc): return erro(400,'VALIDATION_ERROR')
+    async def invalido(request,exc): return resposta_erro(400)
     @app.exception_handler(asyncpg.PostgresError)
     async def banco_error(request,exc):
-        return erro(409,'CONFLICT') if isinstance(exc,asyncpg.IntegrityConstraintViolationError) else erro(503,'DATABASE_ERROR')
+        return resposta_erro(409 if isinstance(exc,asyncpg.IntegrityConstraintViolationError) else 503)
     @app.exception_handler(CredencialInvalida)
-    async def segredo_error(request,exc): return erro(503,'CREDENTIAL_ERROR')
+    async def segredo_error(request,exc): return resposta_erro(503)
+    @app.exception_handler(aioredis.RedisError)
+    async def redis_error(request,exc): return resposta_erro(503)
 
     @app.get('/health')
     async def health():

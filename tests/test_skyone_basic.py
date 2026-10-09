@@ -128,7 +128,7 @@ def test_limite_espera_sem_erro_e_timeout_com_fallback(monkeypatch):
                 async def recusar(*args):raise CredencialRecusada()
                 monkeypatch.setattr(skyone,'_chamar',recusar)
                 r=await c.post(f'/admin/v1/tenants/alpha/agentes/{a}/testar')
-                assert r.status_code==502 and 'credencial do Skyone recusada' in r.text
+                assert r.status_code==502 and 'credencial do skyone recusada' in r.text.lower()
                 state=(await c.get(f'/admin/v1/tenants/alpha/agentes/{a}/circuito')).json()
                 assert state['falhas']==1
                 assert (await c.get(f'/admin/v1/tenants/bravo/agentes/{a}/circuito')).status_code==404
