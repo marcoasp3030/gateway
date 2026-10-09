@@ -132,6 +132,8 @@ def criar_app(infra,db=None,redis=None):
 
     from admin.capacidades import router as capacidades
     from modulos.catalogo.rotas import router as catalogo
+    from admin.saidas import router as saidas
+    app.include_router(saidas)
     app.include_router(capacidades);app.include_router(catalogo)
     app.include_router(canais_router);app.include_router(router);app.include_router(api)
     return app

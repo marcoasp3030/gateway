@@ -324,3 +324,11 @@ PY
 - API de modelos globais/privados, leitura de versão e PATCH que cria versão imutável; agentes mantêm a versão fixada. Escopo/ID imutáveis, validação de capacidades e configuração.
 - Auditoria global explícita (tenant nulo, migração 007) e consulta administrativa de plataforma; modelos privados auditados no proprietário.
 - Suíte isolada: **67 passed**, incluindo acesso privado cruzado recusado, atualização de versão sem mudar agentes existentes e auditoria global. Ainda sem aplicar ao serviço.
+
+## Fase 0.5 — Webhooks de saída — 2026-10-09
+
+- CRUD administrativo isolado, segredo Fernet mostrado uma vez, outbox persistente por tenant (migração 008), HMAC sobre timestamp + corpo bruto, ID estável de entrega e três tentativas com backoff. DELETE desativa sem apagar histórico.
+- URL/DNS verificados a cada tentativa, sem redirects; timeout limitado; resposta/erros de terceiros não são logados. Tarefa separada do processamento de conversas, cancelada na parada.
+- Eventos do agente enfileirados junto ao turno; API de teste 202 e consulta de entregas. Nenhuma saída real configurada/ativada.
+- Suíte isolada: **68 passed**. Receptor HTTP em memória verifica HMAC, rejeita corpo adulterado, recebe o mesmo delivery ID nas retentativas; DNS privado não toca no receptor; três falhas encerram entrega; rotas recusam IDs de outro tenant.
+- Ainda sem implantar código/migração no serviço.

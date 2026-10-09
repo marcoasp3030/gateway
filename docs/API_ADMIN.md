@@ -79,10 +79,10 @@ Todas as rotas desta seção são relativas a `/admin/v1`. Escritas confirmadas 
 | GET, PATCH | `/modelos-agente/{modelo}` | ✅ Detalhe/PATCH cria nova versão |
 | GET, POST | `/tenants/{tenant}/unidades` | ⏳ Fase 0.5 |
 | GET, PATCH, DELETE | `/tenants/{tenant}/unidades/{unidade}` | ⏳ Fase 0.5 |
-| GET, POST | `/tenants/{tenant}/webhooks-saida` | ⏳ Fase 0.5 |
-| GET, PATCH, DELETE | `/tenants/{tenant}/webhooks-saida/{webhook}` | ⏳ Fase 0.5 |
-| POST | `/tenants/{tenant}/webhooks-saida/{webhook}/testar` | ⏳ Fase 0.5 |
-| GET | `/tenants/{tenant}/webhooks-saida/{webhook}/entregas` | ⏳ Fase 0.5 |
+| GET, POST | `/tenants/{tenant}/webhooks-saida` | ✅ Outbox assinada, escopo do tenant |
+| GET, PATCH, DELETE | `/tenants/{tenant}/webhooks-saida/{webhook}` | ✅ Outbox assinada, escopo do tenant |
+| POST | `/tenants/{tenant}/webhooks-saida/{webhook}/testar` | ✅ Outbox assinada, escopo do tenant |
+| GET | `/tenants/{tenant}/webhooks-saida/{webhook}/entregas` | ✅ Outbox assinada, escopo do tenant |
 | GET | `/tenants/{tenant}/consumo?mes=AAAA-MM` | ⏳ Fase 0.5 |
 | GET | `/tenants/{tenant}/contatos?busca=` | ⏳ Fase 0.5 |
 | GET | `/tenants/{tenant}/contatos/{contato}/exportar` | ⏳ Fase 0.5; exige actor, registra auditoria |
@@ -202,3 +202,11 @@ POST exige `id`, `nome`; aceita `tenant_id` opcional (ausente/nulo = global), `t
 | Método | Rota administrativa | Status |
 |---|---|---|
 | GET | `/auditoria/plataforma` | ✅ Últimas 100 operações globais; chave de serviço |
+
+## Webhooks de saída
+
+POST exige `url`; aceita `eventos` (lista de nomes) e `ativo` (padrão false). Retorna `segredo` uma vez; leituras nunca retornam credencial/ciphertext. PATCH altera URL/eventos/ativo; DELETE desativa preservando entregas e auditoria. `/testar` exige webhook ativo e retorna 202 `{ "entrega_id":123, "status":"pendente" }`; `/entregas` retorna as últimas 100 tentativas consolidadas, sem corpo nem segredo.
+
+Corpo assinado: `{ "evento":"conversa.transferida", "tenant_id":"bykoji", "dados":{...} }`. Headers: `X-Gateway-Event`, `X-Gateway-Delivery` (ID estável para deduplicar), `X-Gateway-Timestamp` (Unix em segundos) e `X-Gateway-Signature: sha256=<HMAC-SHA256(segredo, timestamp + "." + corpo_bruto)>`. Receptor deve comparar assinatura em tempo constante, recusar timestamp distante (>5 min) e deduplicar delivery ID. Três tentativas no máximo, intervalos de 2 e 4 segundos após as falhas (execução depende do agendador); URL/DNS revalidados em cada tentativa, sem redirects, timeout total de 12 s. Entrega é pelo menos uma vez: uma falha após o receptor aceitar pode provocar repetição.
+
+Eventos de transferência/encerramento retornados pelo agente são enfileirados na transação do turno; capacidades usam a função `emitir`. Isso não antecipa toda a semântica de encerramento da Fase 3. Entregas usam tarefa separada do processamento de conversas. Nenhum webhook externo foi cadastrado/ativado nesta implementação; os testes usam receptor local em memória.

@@ -29,6 +29,7 @@ class Pipeline:
         self.repo=Repositorio(db);self.prefixo=prefixo
         self.tarefas={};self.ativos={}
         self.chamar=skyone.chamar
+        self.saida_task=None
 
     def chave(self,tenant,conversa):
         return json.dumps([tenant,conversa],separators=(',',':'))
@@ -159,6 +160,9 @@ return 1
                     tenant,conversa,cfg['id'],conv['canal_id'],uuid.UUID(rid),len(itens),itens[0]['criado_em'],itens[-1]['criado_em'],inicio,fim_agente,
                     int((inicio-itens[-1]['criado_em']).total_seconds()*1000),int((fim_agente-inicio).total_seconds()*1000),
                     int((fim-itens[-1]['criado_em']).total_seconds()*1000),cfg['agente_mode'],status,erro,json.dumps(resultado) if resultado else None,fim if entregue else None,aviso)
+                if status=='ok' and resultado and resultado.get('acao') in ('transferir_humano','encerrar'):
+                    from nucleo.webhooks import emitir
+                    await emitir(conn,tenant,'conversa.transferida' if resultado['acao']=='transferir_humano' else 'conversa.encerrada',{'conversation_id':conversa,'agente_id':cfg['id']})
                 await conn.execute('UPDATE mensagens SET processada_em=now() WHERE tenant_id=$1 AND conversation_id=$2 AND id=ANY($3::bigint[])',tenant,conversa,ids)
         finally:
             await self.redis.eval("if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end",1,lock,token)
@@ -184,6 +188,10 @@ return 1
             try:
                 if time.monotonic()>=proxima_limpeza:
                     await self.limpeza();proxima_limpeza=time.monotonic()+21600
+                from nucleo.webhooks import despachar
+                if self.saida_task is None or self.saida_task.done():
+                    if self.saida_task and not self.saida_task.cancelled() and self.saida_task.exception(): log.warning('Entrega externa temporariamente indisponível')
+                    self.saida_task=asyncio.create_task(despachar(self.db,self.http,self.cofre))
                 for chave in await self.redis.zrangebyscore(self.prefixo+':due',0,time.time(),start=0,num=100):
                     if chave not in self.tarefas:
                         tenant,conversa=json.loads(chave)
@@ -206,5 +214,8 @@ return 1
             await asyncio.sleep(.25)
 
     async def fechar(self):
+        if self.saida_task:
+            self.saida_task.cancel()
+            await asyncio.gather(self.saida_task,return_exceptions=True)
         for tarefa in self.tarefas.values(): tarefa.cancel()
         await asyncio.gather(*self.tarefas.values(),return_exceptions=True)
