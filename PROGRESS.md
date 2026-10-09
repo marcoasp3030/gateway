@@ -378,3 +378,17 @@ PY
   - Marco: autenticação real Skyone (401/403 sem credencial, 200 com credencial), limite/minuto, revisão do contrato/modelos iniciais; confirmação para conectar backend do painel à rede interna, se for iniciar a integração.
   - Gestão ainda planejada no contrato da 0.5, fora dos oito blocos solicitados: `/agentes/{id}/testar`, rotação do segredo de canal, lista/filtros de conversas, assumir/devolver/envio humano e polling de eventos. Não foram implementados por inferência nem declarados concluídos.
   - Simultâneas e timeout/callback antes da 0.6 continuam com o Marco. Nenhuma fase posterior iniciada.
+
+
+## Fase 0.5 — Implantação dos complementos 006–011 — 2026-10-09
+
+- Status: concluída; serviço permanece mock/dry. Imagem anterior identificada por 24 hashes Python, preservada como `gateway:ccb261b` (`sha256:a9bfabd15be399adb0df5784f36f3b6236007a66952f978f810333b0c44c2156`); nova imagem também marcada `gateway:9bcc828`.
+- Suíte antes da troca: **75 passed em 20,37 s**, somente banco `_test`.
+- Antes da parada: zero `buf:*`, lotes `gw05:due`, travas e mensagens pendentes no Postgres; zero agentes live. Nenhuma chave removida.
+- Backup: `/home/twadmin/backups/gateway/gateway-pre011-20261009T003648Z.dump`, permissão 600, `pg_restore --list` aprovado; SHA-256 `b56a246156f4f49a8609b495b6ec714d7b2043c85c694688dbdb315171d35204`. Cópia do ambiente `/home/twadmin/gateway/.env.antes011-20261009T003648Z` (600). Backups anteriores preservados.
+- Dump restaurado em `gateway_pre011_20261009t003648z` e schema 005 conferido, preparando a volta com imagem antiga sem rebaixar migrações. Banco principal preservado; procedimento em `docs/MIGRACOES.md`.
+- Aplicadas explicitamente 006–011; recriado somente gateway. IDs de Postgres/Redis/painel inalterados.
+- Health interno/público 200 com somente `{"ok":true}`; pelo domínio admin, métricas antigas e docs 404 com chave válida.
+- `bench.py`: **2 tenants / 3 agentes / 3 canais / 6 conversas / 12 entradas, 6/6 respondidas, zero erros**, p50 **4,3685 s**, máximo **4,390 s**. Cada agente acrescentou dois turnos e zero erros. Conteúdo e leituras isolados; SQL com zero cruzamentos e zero entradas pendentes. Zero agentes em live.
+- Busca de segredos nos logs de gateway/Postgres/Redis/Caddy: zero ocorrências. Relatório sanitizado: `docs/VALIDACAO_IMPLANTACAO011.json`. Nenhuma validação falhou; volta não necessária.
+- Próximo bloco: rotas de gestão solicitadas. Autenticação real Skyone e demais checkpoints externos continuam pendentes.

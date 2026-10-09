@@ -146,3 +146,29 @@ Implementados no checkout e testados, **ainda não aplicados no banco do serviç
 Não reconstruir/recriar o serviço sem aplicar a sequência explicitamente e conferir a versão esperada. A aplicação nova verifica a última versão do diretório de migrações no startup. A imagem anterior do passo 5 exige versão 005: **não basta voltar àquela imagem sobre o schema 011**. Uma implantação deve preservar imagem com tag do commit, backup do banco `gateway` e ambiente, e preparar a volta antes de aplicar as novas migrações. O procedimento antigo de volta à Fase 0 usa `bykoji_test` preservado; não recupera automaticamente conversas criadas em `gateway`.
 
 `tests/smoke_runtime.py` agora cria um schema aleatório dentro de `gateway_migrations_test` e um namespace Redis exclusivo, impedindo que seu agendador consuma lotes do serviço publicado. Usa chaves sintéticas e deve publicar porta só em loopback. Em 09/10/2026 o smoke com servidor/Redis/Postgres reais passou: 6/6 conversas, zero erros, dois tenants/três agentes, exportação e anonimização confirmadas. Container temporário encerrado; schema `smoke_482e3057accb41c3a06b81d11dfd0afe` preservado para inspeção, sem comandos destrutivos.
+
+
+## Implantação 006–011 e volta compatível — 09/10/2026
+
+Complementos agora implantados. Imagem anterior verificada por hashes de 24 arquivos Python contra o commit `ccb261b`, tag `gateway:ccb261b`, ID `sha256:a9bfabd15be399adb0df5784f36f3b6236007a66952f978f810333b0c44c2156`. Imagem nova marcada `gateway:9bcc828`. Somente o gateway foi parado/recriado; Postgres, Redis e painel mantiveram seus IDs.
+
+- Dump `pg_dump -Fc`: `/home/twadmin/backups/gateway/gateway-pre011-20261009T003648Z.dump`, modo 600, fora do Git; SHA-256 `b56a246156f4f49a8609b495b6ec714d7b2043c85c694688dbdb315171d35204`. `pg_restore --list` aprovado.
+- Ambiente preservado: `/home/twadmin/gateway/.env.antes011-20261009T003648Z`, modo 600.
+- Após fila vazia e parada do gateway, o dump foi restaurado integralmente na **nova base** `gateway_pre011_20261009t003648z`, pertencente ao usuário gateway. Verificada versão 005 nessa cópia antes de aplicar 006–011 em `gateway`. Não houve rebaixamento, exclusão ou sobrescrita de banco.
+- Banco principal agora na versão 011; `bykoji_test` intacto. Verificações e métricas em `VALIDACAO_IMPLANTACAO011.json`.
+
+### Volta desta implantação
+
+A base restaurada acima contém o estado imediatamente anterior à migração. Ela é compatível com `gateway:ccb261b`; o banco `gateway` na versão 011 deve ser preservado para diagnóstico. Mensagens posteriores ao dump permanecem nesse banco e exigem reconciliação antes de outra troca; não serão apagadas nem estarão automaticamente na cópia antiga.
+
+O roteiro local `.local/rollback011.py` está preparado e lê `.local/implantacao011.json`. Ele restaura as configurações salvas **substituindo somente o nome da base** em `GATEWAY_DATABASE_URL` pela base restaurada, preserva usuário/senha, acrescenta o override `.local/compose.rollback011.yml` com `image: gateway:ccb261b` e `pull_policy: never`, e executa `docker compose up -d --no-deps --no-build gateway`. Não imprime ambiente. Não usar `.env.antes-gateway` nem `gateway:fase0` para esta volta.
+
+```bash
+cd /home/twadmin/gateway
+docker image inspect gateway:ccb261b --format '{{.Id}}'
+python3 .local/rollback011.py
+curl --fail --silent http://127.0.0.1:8100/health
+curl --fail --silent https://painel.luxbrain.com.br/gateway/health
+```
+
+Se for necessário restaurar novamente, criar **outro banco vazio**, com dono gateway, e usar `pg_restore --exit-on-error --no-owner --role=gateway` com esse dump; conferir versões 001–005 antes de apontar a imagem antiga. Nunca executar downgrade, `--clean`, restauração sobre `gateway`/`bykoji_test`, remoção de volumes ou limpeza do Redis. Conferir filas antes de uma volta posterior; preservar mensagens novas para reconciliação. Esta implantação não precisou de rollback.

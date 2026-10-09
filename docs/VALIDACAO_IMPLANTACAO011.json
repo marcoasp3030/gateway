@@ -1,0 +1,124 @@
+{
+  "health_e_rotas": "OK",
+  "bench": {
+    "respondidos": 6,
+    "esperados": 6,
+    "erros": 0,
+    "p50_s": 4.3685,
+    "max_s": 4.39,
+    "conversas": [
+      {
+        "tenant": "bykoji",
+        "agente": "bykoji_atendimento",
+        "canal": "can_6128998aa8cbfd1b9dc59812",
+        "conversation_id": "bykoji:can_6128998aa8cbfd1b9dc59812:bench-fbcf8550846741d18ee2498242e1e8ee",
+        "tempo_s": 4.39
+      },
+      {
+        "tenant": "bykoji",
+        "agente": "bykoji_atendimento",
+        "canal": "can_6128998aa8cbfd1b9dc59812",
+        "conversation_id": "bykoji:can_6128998aa8cbfd1b9dc59812:bench-9e236781517948b1a592b2d9b0c64dc0",
+        "tempo_s": 4.389
+      },
+      {
+        "tenant": "bykoji",
+        "agente": "ag_7e8683a49b68e615aa4e2101",
+        "canal": "can_d24b96536d72e8e37fcc6934",
+        "conversation_id": "bykoji:can_d24b96536d72e8e37fcc6934:bench-780e3458f5ad41c89ae7135d83599a1c",
+        "tempo_s": 4.324
+      },
+      {
+        "tenant": "bykoji",
+        "agente": "ag_7e8683a49b68e615aa4e2101",
+        "canal": "can_d24b96536d72e8e37fcc6934",
+        "conversation_id": "bykoji:can_d24b96536d72e8e37fcc6934:bench-59c45f7834b941e38d2478d21ffdfe11",
+        "tempo_s": 4.336
+      },
+      {
+        "tenant": "bench_passo5",
+        "agente": "ag_0e4cabdea1793a645e60944c",
+        "canal": "can_61ebcc5e836a361ed7fc46ea",
+        "conversation_id": "bench_passo5:can_61ebcc5e836a361ed7fc46ea:bench-fe1a78bc42b541b2914b4a417afb493b",
+        "tempo_s": 4.366
+      },
+      {
+        "tenant": "bench_passo5",
+        "agente": "ag_0e4cabdea1793a645e60944c",
+        "canal": "can_61ebcc5e836a361ed7fc46ea",
+        "conversation_id": "bench_passo5:can_61ebcc5e836a361ed7fc46ea:bench-2c44c211254e489ab41dc6ad2e20a6d6",
+        "tempo_s": 4.371
+      }
+    ],
+    "metricas": [
+      {
+        "tenant": "bykoji",
+        "agente": "bykoji_atendimento",
+        "delta": {
+          "turnos": 2,
+          "erros": 0
+        },
+        "acumulado": {
+          "turnos": 4,
+          "erros": 0,
+          "total_p50_ms": 4188.0,
+          "total_p95_ms": 4250.0
+        }
+      },
+      {
+        "tenant": "bykoji",
+        "agente": "ag_7e8683a49b68e615aa4e2101",
+        "delta": {
+          "turnos": 2,
+          "erros": 0
+        },
+        "acumulado": {
+          "turnos": 4,
+          "erros": 0,
+          "total_p50_ms": 4192.5,
+          "total_p95_ms": 4272.15
+        }
+      },
+      {
+        "tenant": "bench_passo5",
+        "agente": "ag_0e4cabdea1793a645e60944c",
+        "delta": {
+          "turnos": 2,
+          "erros": 0
+        },
+        "acumulado": {
+          "turnos": 4,
+          "erros": 0,
+          "total_p50_ms": 4248.5,
+          "total_p95_ms": 4297.2
+        }
+      }
+    ]
+  },
+  "banco": {
+    "schema": 11,
+    "cruzamentos": 0,
+    "live": 0,
+    "pendentes": 0
+  },
+  "segredos_logs": {
+    "gateway-gateway-1": 0,
+    "gateway-postgres-1": 0,
+    "gateway-redis-1": 0,
+    "painel_koji-proxy-1": 0
+  },
+  "metricas_tenants": {
+    "bykoji": {
+      "turnos": 8,
+      "erros": 0,
+      "total_p50_ms": 4189.5,
+      "total_p95_ms": 4275.25
+    },
+    "bench_passo5": {
+      "turnos": 4,
+      "erros": 0,
+      "total_p50_ms": 4248.5,
+      "total_p95_ms": 4297.2
+    }
+  }
+}

@@ -11,13 +11,13 @@
 | Fase 0 — implantação simulada | ✅ Concluída (commit `aef6f26`) | `PROGRESS.md` |
 | Publicação no domínio | ✅ `https://painel.luxbrain.com.br/gateway/health` via **Caddy** do projeto `painel_koji` (rede `luxbrain_gateway_proxy`, `docker-compose.proxy.yml`) | `PROGRESS.md`, `docs/PUBLICACAO.md`, `docs/Caddyfile.painel.example` |
 | Fase 0.3 — descobertas no Skyone | 🟡 Quase concluída: probe no fluxo validado ✅ (commit `bf7651d`, 42 testes), memória ✅ (gateway é dono do histórico), histórico enviado pelo gateway ✅, comparação de modelos ✅. Faltam: **autenticação do Webhook** (bloqueia a *conclusão* da 0.5, não o início), simultâneas e tempo limite/callback (antes da 0.6), chamada direta à OpenAI para medir o custo do Skyone | `docs/SKYONE_RESULTADOS.md`, `docs/SKYONE.md`, `PROGRESS.md` |
-| Fase 0.5 | ▶️ **Em andamento**: blocos 1–4 publicados em mock/dry no banco `gateway`; complementos solicitados implementados e testados (módulos, modelos versionados, saídas HMAC, notificar, consumo, unidades, LGPD03 e bench). **Migrações 006–011 e complementos ainda não implantados no serviço**. Fechamento depende de autenticação/limite Skyone, revisão do contrato e pendências abaixo | `docs/MIGRACOES.md`, `PROGRESS.md` |
+| Fase 0.5 | ▶️ **Em andamento**: blocos 1–4 publicados em mock/dry no banco `gateway`; complementos solicitados implementados e testados (módulos, modelos versionados, saídas HMAC, notificar, consumo, unidades, LGPD03 e bench). **Migrações 006–011 e complementos implantados e validados no serviço em mock/dry**. Fechamento depende de autenticação/limite Skyone, revisão do contrato e pendências abaixo | `docs/MIGRACOES.md`, `PROGRESS.md` |
 | Fases 0.6 em diante | ⏳ Não iniciadas | — |
 
 **Entrega dos complementos (09/10/2026):** cada bloco possui commit e suíte verde. `docs/API_ADMIN.md` é o contrato único, com ✅ implementado no checkout e ⏳ planejado por fase. Teste do backend pela rede Docker: alias `http://luxbrain-gateway:8000/admin/v1`, IP privado aceito com chave e headers de proxy recusados. Conexão do backend do painel a essa rede **não foi alterada**; exige confirmação do Marco.
 
 **Para fechar a 0.5:**
-- Implantar os complementos/migrações 006–011 de modo controlado e repetir validações no serviço (hoje só 001–005 estão aplicadas nele). Testes e servidor temporário usam exclusivamente banco `_test`, schema/fila próprios.
+- Implantação 006–011 concluída: benchmark 6/6, zero erros; testes automatizados continuam exclusivamente em banco `_test`.
 - Marco confirmar autenticação real Skyone (401/403 sem credencial, 200 com credencial) e limite por minuto, sem presumir formato.
 - Revisar este contrato com o Marco antes das telas e confirmar modelos iniciais; aprovar alteração da rede do backend do painel se essa integração for iniciada.
 - O contrato ainda marca como planejados na 0.5: teste direto do agente (`/testar`), rotação de segredo do canal, lista/filtros de conversas, assumir/devolver/envio humano e polling de eventos. Esses itens estavam fora dos oito complementos solicitados e não foram declarados implementados.
