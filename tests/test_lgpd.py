@@ -21,6 +21,8 @@ def test_LGPD03_INV08_exportar_anonimizar_preserva_metricas_e_outro_tenant():
    assert export['contato']['telefone']==telefone and len(export['mensagens'])==2
    conv=export['conversas'][0]['conversation_id']
    await c.execute("INSERT INTO webhook_raw(tenant_id,fonte,payload) VALUES ('alpha','api',$1::jsonb)",json.dumps({'telefone':telefone,'nome':'Nome'}))
+   # Callback pendente (Fase 0.6) guarda o conversation_id, que contém o telefone.
+   await c.execute("INSERT INTO agente_callbacks(request_id,tenant_id,agente_id,conversation_id,token_hash,expira_em) VALUES (gen_random_uuid(),'alpha',$1,$2,'hash',now()+interval '5 minutes')",a,conv)
    wh=await h.post('/admin/v1/tenants/alpha/webhooks-saida',json={'url':'https://exemplo.example/receber','ativo':True,'eventos':['x']})
    await c.execute("INSERT INTO webhook_entregas(tenant_id,webhook_id,evento,corpo) VALUES ('alpha',$1,'x',$2)",wh.json()['id'],json.dumps({'conversation_id':conv}))
    assert (await h.request('DELETE',url,json={'confirmacao':'errado'})).status_code==400
@@ -31,7 +33,7 @@ def test_LGPD03_INV08_exportar_anonimizar_preserva_metricas_e_outro_tenant():
    assert (await h.get(url+'/exportar')).json()['contato']['telefone']==telefone
    fila.dados.pop(lock)
    response=await h.request('DELETE',url,json={'confirmacao':telefone});assert response.status_code==200,response.text
-   for tabela in ('contatos','conversas','mensagens','turnos','webhook_raw','webhook_entregas','audit_log'):
+   for tabela in ('contatos','conversas','mensagens','turnos','webhook_raw','webhook_entregas','audit_log','agente_callbacks'):
     rows=await c.fetch(f'SELECT row_to_json(t)::text AS dado FROM {tabela} t WHERE tenant_id=$1','alpha')
     assert all(telefone not in r['dado'] for r in rows),tabela
    assert await c.fetchval("SELECT count(*) FROM turnos WHERE tenant_id='alpha'")==1

@@ -138,7 +138,7 @@ def test_013_timeout_padrao_60_e_agentes_de_fabrica(tmp_path):
         await conn.execute("UPDATE agentes SET timeout_s=45 WHERE id='ag_proprio'")
         assert await conn.fetchval("SELECT timeout_s FROM agentes WHERE id='ag_fabrica'") == 90
         antes = await conn.fetchval('SELECT count(*) FROM audit_log')
-        assert await migrar.aplicar(conn) == ['013_timeout_padrao_60.sql']
+        assert (await migrar.aplicar(conn))[0] == '013_timeout_padrao_60.sql'  # e as seguintes
         tempos = dict(await conn.fetch('SELECT id, timeout_s FROM agentes'))
         assert tempos['ag_fabrica'] == 60 and tempos['ag_proprio'] == 45
         assert tempos['bykoji_atendimento'] == 60  # agente do seed, criado com o padrão antigo
