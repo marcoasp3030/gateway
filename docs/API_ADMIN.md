@@ -132,7 +132,7 @@ Canal: `{ "tipo":"api", "nome":"Diagnóstico", "agente_id":"ag_...", "ativo":fal
 
 Credenciais de canal: objeto `credenciais`, por exemplo `{ "base_url":"https://instancia.uazapi.com", "token":"..." }`, cifrado por tenant. Campo omitido preserva; leitura devolve `credenciais_configurado`. Na criação, `webhook_url` inclui segredo e aparece uma vez: `https://painel.luxbrain.com.br/gateway/webhooks/api/can_...?s=...`. Proteger esse retorno como credencial.
 
-Chave: `{ "nome":"integracao", "escopos":["conversar","eventos:ler"], "agente_id":"ag_...", "expira_em":"2027-10-01T00:00:00Z", "ips_permitidos":["200.10.20.0/24"] }`. Criação retorna `chave` uma vez; banco guarda hash com pepper. PATCH aceita nome/escopos/agente/validade/IPs; DELETE revoga. Restrição de agente opcional, sempre dentro do tenant. Escopos `ferramentas:<modulo>`, `notificar`, `callback` podem ser cadastrados antes de suas rotas estarem disponíveis; isso não as implementa.
+Chave: `{ "nome":"integracao", "escopos":["conversar","eventos:ler"], "agente_id":"ag_...", "expira_em":"2027-10-01T00:00:00Z", "ips_permitidos":["200.10.20.0/24"] }`. Criação retorna `chave` uma vez; banco guarda hash com pepper. PATCH aceita nome/escopos/agente/validade/IPs; DELETE revoga. Restrição de agente opcional, sempre dentro do tenant. `ferramentas:<modulo>` depende da capacidade habilitada; `callback` pode ser cadastrado, mas sua rota permanece planejada.
 
 URLs configuráveis: HTTPS, 443, sem credenciais na URL, destinos privados/locais recusados ao salvar; DNS revalidado antes da chamada, sem redirects. Limite de corpo 2 MiB e token bucket por IP em `/api` e `/webhooks`. Limites por chave administrativa/tenant não estão implementados.
 
@@ -151,10 +151,10 @@ Rotas absolutas; API usa `X-API-Key`, nunca chave do painel. Webhooks usam segre
 | POST | `/webhooks/{outro_tipo}/{canal}?s=...` | ⏳ Fases 6/6.5/7; tipo cadastrado não implementado → 501 após autenticação |
 | POST | `/api/v1/conversas/mensagens` | ✅ Corpo da simulação; escopo `conversar` |
 | GET | `/api/v1/conversas/{conv}/mensagens` | ✅ Escopo `eventos:ler`; últimos 100 itens |
-| POST | `/api/v1/conversas/{conv}/notificar` | ⏳ Fase 0.5; escopo `notificar` |
+| POST | `/api/v1/conversas/{conv}/notificar` | ✅ Escopo `notificar`; resposta 202 |
 | POST | `/api/v1/agentes/callback/{request_id}` | ⏳ Fase 0.6; escopo `callback` |
 
-Canal inativo, agente pausado/rascunho ou tenant suspenso: recepção retorna 200 ignorado após autenticação. Mensagens de clientes são gravadas antes de agendar. Histórico e dados são filtrados por tenant e restrição de agente da chave; acesso cruzado → 404. `/notificar` planejado: `{ "evento":"pedido_saiu", "dados":{"pedido":"K-1042"}, "instrucao":"Avise o cliente" }`, respeitando pausa humana.
+Canal inativo, agente pausado/rascunho ou tenant suspenso: recepção retorna 200 ignorado após autenticação. Mensagens de clientes são gravadas antes de agendar. Histórico e dados são filtrados por tenant e restrição de agente da chave; acesso cruzado → 404. `/notificar`: `{ "evento":"pedido_saiu", "dados":{"pedido":"K-1042"}, "instrucao":"Avise o cliente" }`, respeitando pausa humana.
 
 ## Rotas planejadas para o painel
 
@@ -210,3 +210,9 @@ POST exige `url`; aceita `eventos` (lista de nomes) e `ativo` (padrão false). R
 Corpo assinado: `{ "evento":"conversa.transferida", "tenant_id":"bykoji", "dados":{...} }`. Headers: `X-Gateway-Event`, `X-Gateway-Delivery` (ID estável para deduplicar), `X-Gateway-Timestamp` (Unix em segundos) e `X-Gateway-Signature: sha256=<HMAC-SHA256(segredo, timestamp + "." + corpo_bruto)>`. Receptor deve comparar assinatura em tempo constante, recusar timestamp distante (>5 min) e deduplicar delivery ID. Três tentativas no máximo, intervalos de 2 e 4 segundos após as falhas (execução depende do agendador); URL/DNS revalidados em cada tentativa, sem redirects, timeout total de 12 s. Entrega é pelo menos uma vez: uma falha após o receptor aceitar pode provocar repetição.
 
 Eventos de transferência/encerramento retornados pelo agente são enfileirados na transação do turno; capacidades usam a função `emitir`. Isso não antecipa toda a semântica de encerramento da Fase 3. Entregas usam tarefa separada do processamento de conversas. Nenhum webhook externo foi cadastrado/ativado nesta implementação; os testes usam receptor local em memória.
+
+## Notificações na voz do agente
+
+`POST /api/v1/conversas/{conv}/notificar` exige `evento` (1–100 caracteres), `instrucao` (1–20000), `dados` opcional (objeto). Retorna **202** `{ "ok":true, "mensagem_id":123, "status":"enfileirada" }`, não uma confirmação de entrega. Cria entrada persistente de origem `sistema`; o agendador chama o agente com `tarefa=notificar` e `evento`, sem misturar esse evento a mensagens do cliente. Turno registra origem, resultado e uso opcional do provedor. Consultar histórico/métricas depois.
+
+Chave deve ter escopo `notificar` e pertencer ao tenant/agente da conversa. Pausa humana, piloto e status são reavaliados antes da chamada e envio: notificação bloqueada fica em turno ignorado e gera auditoria `notificacao.nao_enviada`, sem resposta automática. Alertas externos para atendentes dependem dos canais da Fase 9. Campos de segredo conhecidos nos dados estruturados são mascarados; não colocar credenciais em texto livre. Escrita registra o ID da chave como actor. Meta/janela de 24 h permanecem na Fase 7.

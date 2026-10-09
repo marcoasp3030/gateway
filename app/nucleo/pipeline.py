@@ -118,8 +118,14 @@ return 1
         try:
             await self.redis.zrem(self.prefixo+':due',chave)
             await self.redis.delete(self.prefixo+':first:'+chave)
-            itens=await self.db.fetch("SELECT id,conteudo,criado_em FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND processada_em IS NULL AND direcao='entrada' AND origem='cliente' ORDER BY id LIMIT 100",tenant,conversa)
+            itens=await self.db.fetch("SELECT id,conteudo,criado_em,origem,evento FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND processada_em IS NULL AND direcao='entrada' AND origem IN ('cliente','sistema') ORDER BY id LIMIT 100",tenant,conversa)
             if not itens: return
+            # Não misturar eventos de sistema com mensagens do cliente nem entre si.
+            origem=itens[0]['origem']
+            if origem=='sistema': itens=itens[:1]
+            else:
+                corte=next((i for i,m in enumerate(itens) if m['origem']=='sistema'),len(itens))
+                itens=itens[:corte]
             ids=[i['id'] for i in itens]
             inicio=datetime.now(timezone.utc);rid=str(uuid.uuid4())
             resultado=None;erro=None;status='ok';entregue=False;aviso=False;fim_agente=inicio
@@ -128,6 +134,8 @@ return 1
             else:
                 try:
                     payload=await skyone.pacote(self.repo,tenant,conversa,min(ids),'\n'.join(i['conteudo'] for i in itens),cfg,rid)
+                    if origem=='sistema':
+                        payload.update(tarefa='notificar',evento=json.loads(itens[0]['evento']) if isinstance(itens[0]['evento'],str) else itens[0]['evento'])
                     tarefa=asyncio.create_task(self.chamar(self.http,self.repo,self.cofre,tenant,cfg,payload))
                     try:
                         feito,_=await asyncio.wait({tarefa},timeout=cfg['slow_notice_s'])
@@ -160,18 +168,21 @@ return 1
                     tenant,conversa,cfg['id'],conv['canal_id'],uuid.UUID(rid),len(itens),itens[0]['criado_em'],itens[-1]['criado_em'],inicio,fim_agente,
                     int((inicio-itens[-1]['criado_em']).total_seconds()*1000),int((fim_agente-inicio).total_seconds()*1000),
                     int((fim-itens[-1]['criado_em']).total_seconds()*1000),cfg['agente_mode'],status,erro,json.dumps(resultado) if resultado else None,fim if entregue else None,aviso)
+                await conn.execute('UPDATE turnos SET origem=$3,uso=$4::jsonb WHERE tenant_id=$1 AND request_id=$2',tenant,uuid.UUID(rid),origem,json.dumps(resultado.get('uso')) if resultado and resultado.get('uso') else None)
+                if origem=='sistema' and status=='ignorado':
+                    await auditar(conn,tenant,'sistema','notificacao.nao_enviada',conversa)
                 if status=='ok' and resultado and resultado.get('acao') in ('transferir_humano','encerrar'):
                     from nucleo.webhooks import emitir
                     await emitir(conn,tenant,'conversa.transferida' if resultado['acao']=='transferir_humano' else 'conversa.encerrada',{'conversation_id':conversa,'agente_id':cfg['id']})
                 await conn.execute('UPDATE mensagens SET processada_em=now() WHERE tenant_id=$1 AND conversation_id=$2 AND id=ANY($3::bigint[])',tenant,conversa,ids)
         finally:
             await self.redis.eval("if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end",1,lock,token)
-            if await self.db.fetchval("SELECT EXISTS(SELECT 1 FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND processada_em IS NULL AND direcao='entrada' AND origem='cliente')",tenant,conversa):
+            if await self.db.fetchval("SELECT EXISTS(SELECT 1 FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND processada_em IS NULL AND direcao='entrada' AND origem IN ('cliente','sistema'))",tenant,conversa):
                 await self.enfileirar(tenant,conversa,cfg)
 
     async def recuperar(self):
         # Enumeração de trabalho com tenant retornado explicitamente; cada processamento usa o escopo.
-        rows=await self.db.fetch("SELECT DISTINCT tenant_id,conversation_id FROM mensagens WHERE processada_em IS NULL AND direcao='entrada' AND origem='cliente'")
+        rows=await self.db.fetch("SELECT DISTINCT tenant_id,conversation_id FROM mensagens WHERE processada_em IS NULL AND direcao='entrada' AND origem IN ('cliente','sistema')")
         for row in rows:
             conv=await self.repo.obter(row['tenant_id'],'conversas',row['conversation_id'])
             cfg=await self.cfg.efetiva(row['tenant_id'],conv['agente_id'])

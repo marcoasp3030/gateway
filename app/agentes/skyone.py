@@ -90,6 +90,8 @@ async def chamar(client,repo,cofre,tenant_id,cfg,payload):
         result={'resposta':textos,'acao':acao}
         for campo in ('motivo','desfecho'):
             if isinstance(corpo.get(campo),str): result[campo]=corpo[campo]
+        uso=corpo.get('uso')
+        if isinstance(uso,dict) and all(isinstance(k,str) and type(v) is int and v>=0 for k,v in uso.items()): result['uso']=uso
         # Não permitir eco da credencial mesmo dentro de campos do contrato.
         if headers and segredo in json.dumps(result,ensure_ascii=False):
             raise FalhaAgente('Resposta contém credencial')

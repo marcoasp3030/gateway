@@ -55,5 +55,5 @@ def contexto_da_chave(escopo):
             if not valido: raise HTTPException(403,'FORBIDDEN')
         await request.app.state.db.execute(
             'UPDATE tenant_api_keys SET ultimo_uso_em=now() WHERE tenant_id=$1 AND id=$2',chave['tenant_id'],chave['id'])
-        return {'tenant_id':chave['tenant_id'],'agente_id':chave['agente_id']}
+        return {'tenant_id':chave['tenant_id'],'agente_id':chave['agente_id'],'actor':'api-key:'+chave['id']}
     return contexto

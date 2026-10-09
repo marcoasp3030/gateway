@@ -332,3 +332,9 @@ PY
 - Eventos do agente enfileirados junto ao turno; API de teste 202 e consulta de entregas. Nenhuma saída real configurada/ativada.
 - Suíte isolada: **68 passed**. Receptor HTTP em memória verifica HMAC, rejeita corpo adulterado, recebe o mesmo delivery ID nas retentativas; DNS privado não toca no receptor; três falhas encerram entrega; rotas recusam IDs de outro tenant.
 - Ainda sem implantar código/migração no serviço.
+
+## Fase 0.5 — Notificações — 2026-10-09
+
+- `/api/v1/conversas/{conv}/notificar` aceita evento/dados/instrução com escopo `notificar`; entrada persistente de sistema e resposta 202. Processamento separado de lotes do cliente, `tarefa=notificar`, origem/uso no turno (migração 009).
+- Tenant/agente da chave conferidos; auditoria com ID da chave. Pausa/piloto/status impedem chamada/envio; turno ignorado e auditoria explicam notificação não enviada.
+- Suíte isolada: **69 passed**, incluindo chave catálogo → 403, outro tenant → 404, payload sanitizado, origem sistema, pausa sem chamada/envio adicional. Nenhum live ou implantação nesta etapa.
