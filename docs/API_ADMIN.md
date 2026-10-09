@@ -83,7 +83,7 @@ Todas as rotas desta seção são relativas a `/admin/v1`. Escritas confirmadas 
 | GET, PATCH, DELETE | `/tenants/{tenant}/webhooks-saida/{webhook}` | ✅ Outbox assinada, escopo do tenant |
 | POST | `/tenants/{tenant}/webhooks-saida/{webhook}/testar` | ✅ Outbox assinada, escopo do tenant |
 | GET | `/tenants/{tenant}/webhooks-saida/{webhook}/entregas` | ✅ Outbox assinada, escopo do tenant |
-| GET | `/tenants/{tenant}/consumo?mes=AAAA-MM` | ⏳ Fase 0.5 |
+| GET | `/tenants/{tenant}/consumo?mes=AAAA-MM` | ✅ Contagem e avisos mensais |
 | GET | `/tenants/{tenant}/contatos?busca=` | ⏳ Fase 0.5 |
 | GET | `/tenants/{tenant}/contatos/{contato}/exportar` | ⏳ Fase 0.5; exige actor, registra auditoria |
 | DELETE | `/tenants/{tenant}/contatos/{contato}` | ⏳ Fase 0.5; anonimização auditada |
@@ -216,3 +216,9 @@ Eventos de transferência/encerramento retornados pelo agente são enfileirados 
 `POST /api/v1/conversas/{conv}/notificar` exige `evento` (1–100 caracteres), `instrucao` (1–20000), `dados` opcional (objeto). Retorna **202** `{ "ok":true, "mensagem_id":123, "status":"enfileirada" }`, não uma confirmação de entrega. Cria entrada persistente de origem `sistema`; o agendador chama o agente com `tarefa=notificar` e `evento`, sem misturar esse evento a mensagens do cliente. Turno registra origem, resultado e uso opcional do provedor. Consultar histórico/métricas depois.
 
 Chave deve ter escopo `notificar` e pertencer ao tenant/agente da conversa. Pausa humana, piloto e status são reavaliados antes da chamada e envio: notificação bloqueada fica em turno ignorado e gera auditoria `notificacao.nao_enviada`, sem resposta automática. Alertas externos para atendentes dependem dos canais da Fase 9. Campos de segredo conhecidos nos dados estruturados são mascarados; não colocar credenciais em texto livre. Escrita registra o ID da chave como actor. Meta/janela de 24 h permanecem na Fase 7.
+
+## Consumo mensal
+
+`GET /tenants/{tenant}/consumo?mes=AAAA-MM` retorna `mes`, `turnos`, `limite`, `agentes` (agente_id/turnos) e `avisos` (percentual/turnos/limite/criado_em). Mês é calculado no fuso do tenant; padrão mês atual. Contam todos os turnos registrados, inclusive sistema/erro/ignorados; não equivale a cobrança por tokens. `uso` do provedor é opcional e preservado no turno quando contém contagens inteiras não negativas.
+
+Ao alcançar 80% e 100%, um aviso persistente por tenant/mês/patamar é registrado na auditoria e enfileirado para webhooks ativos inscritos em `consumo.limite`. **Não corta atendimento**. `limite_turnos_mes=null` desativa os avisos; zero aciona ambos no primeiro turno. Alterar limite durante o mês não reenvia patamar já registrado. Postgres é fonte da verdade, Redis guarda contador reconstruível; falha do cache não corta respostas. A API consulta Postgres. Entrega a WhatsApp/e-mail interno depende dos canais de alertas da Fase 9.

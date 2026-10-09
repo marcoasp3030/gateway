@@ -98,3 +98,9 @@ async def alterar_modelo(request:Request,modelo_id:str,dados:dict,tenant:str|Non
 async def auditoria_global(request:Request):
     rows=await request.app.state.db.fetch('SELECT * FROM audit_log WHERE tenant_id IS NULL ORDER BY id DESC LIMIT 100')
     return {'itens':[registro(r) for r in rows]}
+
+@router.get('/tenants/{tenant_id}/consumo')
+async def consumo(request:Request,tenant_id:str,mes:str|None=None):
+    from nucleo.consumo import consulta
+    await empresa(request.app.state.db,tenant_id)
+    return await consulta(request.app.state.db,tenant_id,mes)

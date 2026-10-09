@@ -338,3 +338,9 @@ PY
 - `/api/v1/conversas/{conv}/notificar` aceita evento/dados/instrução com escopo `notificar`; entrada persistente de sistema e resposta 202. Processamento separado de lotes do cliente, `tarefa=notificar`, origem/uso no turno (migração 009).
 - Tenant/agente da chave conferidos; auditoria com ID da chave. Pausa/piloto/status impedem chamada/envio; turno ignorado e auditoria explicam notificação não enviada.
 - Suíte isolada: **69 passed**, incluindo chave catálogo → 403, outro tenant → 404, payload sanitizado, origem sistema, pausa sem chamada/envio adicional. Nenhum live ou implantação nesta etapa.
+
+## Fase 0.5 — Consumo mensal — 2026-10-09
+
+- Contagem por tenant/mês no fuso local, detalhamento por agente, avisos persistentes únicos em 80%/100% (migração 010), auditoria e evento `consumo.limite` para webhooks inscritos. Não corta atendimento; cache Redis reconstruível e Postgres como fonte.
+- API de consumo com validação de mês e isolamento. Turnos guardam uso opcional do provedor desde o bloco de notificações.
+- Suíte isolada: **70 passed**. Sete turnos com limite cinco: sete respostas, avisos somente nos turnos quatro/cinco, nenhum vazamento ao segundo tenant; mês local conferido na borda UTC. Sem alteração do serviço.
