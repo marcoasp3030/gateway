@@ -1,5 +1,7 @@
 """Recepção com tenant/canal e debounce; um agendador até a Fase 0.6."""
 import asyncio
+from functools import partial
+from agentes.controle import Controle, CredencialRecusada, CircuitoAberto
 import hashlib
 import json
 import logging
@@ -25,11 +27,12 @@ def sanitizar(valor):
 
 
 class Pipeline:
-    def __init__(self,db,redis,configuracoes,cofre,http,prefixo='gw05'):
+    def __init__(self,db,redis,configuracoes,cofre,http,prefixo='gw05',skyone_rpm=240):
         self.db,self.redis,self.cfg,self.cofre,self.http=db,redis,configuracoes,cofre,http
         self.repo=Repositorio(db);self.prefixo=prefixo
         self.tarefas={};self.ativos={}
-        self.chamar=skyone.chamar
+        self.controle=Controle(db,redis,skyone_rpm,prefixo)
+        self.chamar=partial(skyone.chamar,controle=self.controle)
         self.saida_task=None
 
     def chave(self,tenant,conversa):
@@ -159,6 +162,10 @@ return 1
                         if not tarefa.done():
                             tarefa.cancel()
                             await asyncio.gather(tarefa,return_exceptions=True)
+                except (CredencialRecusada,CircuitoAberto) as falha:
+                    erro='SKYONE_CREDENTIAL_REJECTED' if isinstance(falha,CredencialRecusada) else 'SKYONE_CIRCUIT_OPEN'
+                    status='erro'
+                    resultado={'resposta':[cfg['fallback']],'acao':'nenhuma'}
                 except Exception:
                     # O tipo e a mensagem de exceções de terceiros não são logados.
                     erro='AGENT_ERROR';status='erro'

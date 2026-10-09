@@ -1,6 +1,6 @@
 # API administrativa — contrato com o painel
 
-Banco: `gateway`, Postgres próprio do gateway. O backend do painel autentica seus usuários e aplica papéis/tenant; a chave de serviço tem acesso administrativo global. O navegador nunca recebe essa chave nem acessa o banco. ✅ indica código implementado; ⏳ indica contrato planejado, **não disponível**. **Publicação atual:** complementos, rotas de gestão e migrações 001–011 implantados em 09/10/2026, mantendo mock/dry. Consulte `PROGRESS.md`.
+Banco: `gateway`, Postgres próprio do gateway. O backend do painel autentica seus usuários e aplica papéis/tenant; a chave de serviço tem acesso administrativo global. O navegador nunca recebe essa chave nem acessa o banco. ✅ indica código implementado; ⏳ indica contrato planejado, **não disponível**. **Publicação atual:** complementos, rotas de gestão e migrações 001–012 implantados em 09/10/2026, mantendo mock/dry. Consulte `PROGRESS.md`.
 
 ## Acesso interno e autenticação
 
@@ -60,6 +60,7 @@ Todas as rotas desta seção são relativas a `/admin/v1`. Escritas confirmadas 
 | GET, PATCH | `/tenants/{tenant}/agentes/{agente}` | ✅ Detalhe/config efetiva; `status=rascunho|ativo|pausado` |
 | POST | `/tenants/{tenant}/agentes/{agente}/simular` | ✅ Pipeline mock/dry; corpo abaixo |
 | POST | `/tenants/{tenant}/agentes/{agente}/testar` | ✅ Pacote sintético; resposta ou erro 502 sanitizado |
+| GET | `/tenants/{tenant}/agentes/{agente}/circuito` | ✅ Estado persistente, falhas, aberto_ate e ultimo_alerta; isolado por tenant |
 | POST | `/tenants/{tenant}/agentes/{agente}/circuito/fechar` | ⏳ Fase 0.6 |
 | GET, POST | `/tenants/{tenant}/canais` | ✅ Lista/cria; segredo mostrado uma vez |
 | GET, PATCH | `/tenants/{tenant}/canais/{canal}` | ✅ Detalhe/edição |
@@ -106,16 +107,16 @@ Exemplo de configuração Skyone (não ativa live):
   "send_mode": "dry",
   "skyone_estrategia": "por_modelo",
   "skyone_webhook_url": "https://luxtia.api.integrasky.cloud/FLUXO",
-  "skyone_auth_tipo": "cabecalho",
-  "skyone_auth_cabecalho": "X-Credencial-EXEMPLO",
-  "skyone_auth": "<somente escrita; formato real pendente do Marco>",
+  "skyone_auth_tipo": "basic",
+  "skyone_auth_usuario": "<usuário gerado pelo Skyone; somente escrita>",
+  "skyone_auth": "<senha cadastrada pelo Marco; somente escrita>",
   "timeout_s": 90,
   "instrucoes_agente": "Instruções complementares",
   "modo_resposta": "sync"
 }
 ```
 
-`provedor=mock|skyone`; `llm_direto` reservado à Fase 2.5. `timeout_s` 1–600, padrão 90. Só sync aceito; async/callback na 0.6. `skyone_auth_tipo=nenhuma|cabecalho|bearer`; leitura retorna `skyone_auth_configurado`, nunca valor/ciphertext. `skyone_token` e `callback_timeout_s` **não são aceitos**. Live sem credencial é recusado fora de tenant de teste (SEG13). O fluxo Skyone deve ser **criado do zero pelo Marco**, nunca clonado/duplicado; gateway não cria fluxos.
+`provedor=mock|skyone`; `llm_direto` reservado à Fase 2.5. `timeout_s` 1–600, padrão 90. Só sync aceito; async/callback na 0.6. `skyone_auth_tipo=nenhuma|cabecalho|bearer|basic`; leitura retorna `skyone_auth_configurado` e `skyone_auth_usuario_configurado`, nunca valores/ciphertexts. Basic exige usuário e senha; os dois são somente escrita, cifrados separadamente com Fernet e vinculados ao tenant. Omitir um campo preserva o valor existente; apagar um deles enquanto Basic estiver selecionado retorna 400, inclusive em tenant de teste. Usuário não aceita `:` nem caracteres de controle. `skyone_token` e `callback_timeout_s` **não são aceitos**. Live sem credencial é recusado fora de tenant de teste (SEG13). O fluxo Skyone deve ser **criado do zero pelo Marco**, nunca clonado/duplicado; gateway não cria fluxos.
 
 Simulação real:
 
@@ -266,3 +267,16 @@ python scripts/bench.py --tenant bykoji --agente bykoji_atendimento \
 ```
 
 Exige agentes ativos mock/dry, piloto desligado e canais API existentes. Não cria nem ativa tenants/agentes. Envia duas mensagens por conversa e consulta o histórico; relatório traz latências observadas, erros e métricas acumuladas/delta de cada agente. Exit diferente de zero em falha/timeout/erro de turno. Não usa mais `/test/*`, `/metricas` global ou `--admin-key`. Configure URL interna; a chave nunca deve chegar ao navegador.
+
+
+## Skyone: Basic, limite por URL e credencial recusada
+
+No fluxo validado, o Skyone gera o usuário no formato `flow-<id-do-fluxo>@luxtia`; o Marco define a senha. Pelo túnel, usar o PATCH do agente com `skyone_auth_tipo:"basic"`, `skyone_auth_usuario` e `skyone_auth` (senha). O adaptador envia `Authorization: Basic base64(usuario:senha)` com UTF-8; nada vai no corpo. Não colocar senha em chat, URL ou argumentos do shell. O operador pode enviar um arquivo local protegido pelo cliente HTTP. Para `/testar` consultar o provedor, o agente precisa de `provedor:"skyone"`, `agente_mode:"live"`, URL e credenciais completas; manter `send_mode:"dry"`. Em mock, `/testar` retorna o mock sem gastar quota nem chamar Skyone.
+
+`SKYONE_REQUESTS_PER_MINUTE` é um teto global de infraestrutura, padrão **240**, aplicado separadamente a cada URL em janela móvel de **60 segundos no Redis**. Todos os agentes e tenants com a mesma URL compartilham esse teto; não existe multiplicação de quota por agente. Configurar o mesmo valor em todas as instâncias e recriar somente o gateway após uma mudança. A configuração de 300/min pertence ao Webhook do Skyone; o teto local usa 80%. Chaves Redis guardam somente hash da URL; host/porta HTTPS padrão são normalizados e caminho/query preservados.
+
+Quando não há vaga, a chamada aguarda sem registrar falha só por estar esperando. `timeout_s` limita o conjunto **espera + chamada**; se esgotar, o pipeline registra erro e entrega fallback (simulado em dry). Espera por quota que expira antes de chamar o provedor não conta como falha do circuito. Redis indisponível falha fechado, sem enviar acima do teto. O controle usa Redis, cuja restauração/perda total ainda faz parte da robustez da Fase 0.6; não substitui o limite do provedor.
+
+401/403 nunca são repetidos: `/testar` retorna 502 com **“credencial do Skyone recusada”**, e o pipeline usa fallback com `turnos.erro=SKYONE_CREDENTIAL_REJECTED`. Alerta `agente.credencial_recusada` fica em auditoria/polling e em log sem credenciais/URL; pode ir pela outbox HMAC a webhooks já inscritos nesse evento. Não foi cadastrado nem ativado destino externo nesta entrega. Alertas da mesma causa são agrupados por agente por 3 horas; falhas continuam sendo contadas.
+
+Proteção antecipada do circuito: estado persistente por agente, três falhas consecutivas na janela de cinco minutos abrem por 60 segundos; depois somente uma chamada de prova é permitida. Sucesso fecha; falha da prova reabre. Chamadas bloqueadas não alcançam Skyone e usam fallback (`SKYONE_CIRCUIT_OPEN`). `GET .../circuito` mostra `estado=fechado|aberto|meio_aberto`, `falhas`, `aberto_ate`, `ultimo_alerta`. Após corrigir a credencial, aguardar o período aberto antes de testar novamente. Fechamento manual, workers, justiça de filas e garantias completas de INV15 continuam na Fase 0.6. Não há retry automático nesta implementação.

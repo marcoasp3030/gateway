@@ -46,9 +46,10 @@ class Agente(Comportamento):
     provedor: Literal['skyone','mock'] | None = None
     skyone_estrategia: Literal['por_modelo','por_agente'] | None = None
     skyone_webhook_url: str | None = None
-    skyone_auth_tipo: Literal['nenhuma','cabecalho','bearer'] | None = None
+    skyone_auth_tipo: Literal['nenhuma','cabecalho','bearer','basic'] | None = None
     skyone_auth_cabecalho: str | None = None
     skyone_auth: str | None = None
+    skyone_auth_usuario: str | None = None
     timeout_s: int | None = Field(None,gt=0,le=600)
     instrucoes_agente: str | None = None
     modo_resposta: Literal['sync'] | None = None

@@ -1,6 +1,6 @@
 # Migrações do gateway
 
-**Estado atual — 09/10/2026:** complementos e rotas de gestão implantados no banco/usuário `gateway`, migrações 001–011, agentes mock/dry. `bykoji_test` preservado. Volta dos complementos usa `gateway:ccb261b` com dump restaurado numa base nova de schema 005; volta apenas das rotas de gestão usa `gateway:9bcc828` no schema 011 atual. Os registros anteriores são históricos; procedimentos atuais ao final.
+**Estado atual — 09/10/2026:** serviço mock/dry, banco `gateway`, migrações 001–012. Basic Auth, quota por URL e circuito implantados. Volta desta entrega: `gateway:a528a8c` com dump restaurado em base nova de schema 011; procedimento ao final. Registros anteriores são históricos.
 
 O executor `app/migrar.py` aplica `app/migrations/NNN_*.sql` em ordem, com uma transação por arquivo e registro em `schema_migrations` (versão, nome, SHA-256, data). Uma trava consultiva do Postgres serializa executores concorrentes. Arquivo já aplicado não pode ser alterado; adicione uma versão nova. Lacunas, versões desconhecidas e checksums diferentes interrompem a execução.
 
@@ -181,3 +181,24 @@ Implantadas sem migração adicional. Antes do build foi conferida a tag de volt
 Para voltar **somente o código deste bloco**, a imagem `gateway:9bcc828` aceita o mesmo banco 011: `.local/rollback-gestao.py` acrescenta ao `COMPOSE_FILE` o override `.local/compose.volta-gestao.yml` com essa imagem e `pull_policy: never`, recria apenas gateway sem build e confirma health. Não restaura banco nem altera mensagens/dados. O roteiro anterior `.local/rollback011.py` é exclusivo da volta ao schema 005 numa base restaurada, não da volta deste bloco. Nenhum rollback foi necessário.
 
 Suíte 82 testes; validação operacional em `VALIDACAO_GESTAO05.json`. Imagem desta entrega: `sha256:8365cc6253988d6a8ac9ef1225b5ec65b402d15602a170ea504399e41cdd46e4`; marcada com a tag do commit ao registrar o bloco.
+
+
+## Migração 012 — Basic e circuito — 09/10/2026
+
+Usuário Basic cifrado, tipo de autenticação ampliado e tabela `agente_circuitos` com FK composta tenant/agente. Nenhuma migração anterior alterada e nenhum agente ativado em live. Teto por URL: infraestrutura `SKYONE_REQUESTS_PER_MINUTE`, padrão 240.
+
+- Imagem de volta: `gateway:a528a8c`, `sha256:8365cc6253988d6a8ac9ef1225b5ec65b402d15602a170ea504399e41cdd46e4`.
+- Ambiente anterior: `/home/twadmin/gateway/.env.antes012-20261009T133216Z`, modo 600.
+- Dump: `/home/twadmin/backups/gateway/gateway-pre012-20261009T133216Z.dump`, modo 600, SHA-256 `428dab9dd6fb383d2e17572382f2e3a36796b2a9a7ede6dac9d85f7fc6f72531`, validado com `pg_restore --list`.
+- Dump já restaurado em **nova base** `gateway_pre012_20261009t133216z`, dono gateway, schema 011 conferido antes da migração. Principal `gateway` no schema 012 preservado em caso de volta.
+
+Roteiro local `.local/rollback012.py`: lê `.local/implantacao012.json`, restaura ambiente salvo alterando somente o nome da base para a cópia restaurada, acrescenta override `.local/compose.rollback012.yml` com a imagem anterior e recria somente gateway sem build. Confere health interno; conferir público também. Os roteiros anteriores apontam para outros schemas e não devem ser usados nesta entrega.
+
+```bash
+cd /home/twadmin/gateway
+docker image inspect gateway:a528a8c --format '{{.Id}}'
+python3 .local/rollback012.py
+curl --fail --silent https://painel.luxbrain.com.br/gateway/health
+```
+
+Executar somente se necessário. Nunca downgrade, restauração sobre banco existente ou limpeza de volumes/Redis. Alterações posteriores ao dump permanecem no banco 012 para reconciliação; não estarão automaticamente na cópia restaurada. Nenhum rollback necessário. Relatório `VALIDACAO_SKYONE_BASIC.json`; senha real do Skyone exclusivamente sob controle do Marco.

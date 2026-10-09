@@ -1,0 +1,148 @@
+{
+  "health_e_rotas": "OK",
+  "diagnostico_mock": {
+    "bykoji_atendimento": {
+      "ok": true,
+      "latencia_ms": 4,
+      "resposta": [
+        "Resposta simulada."
+      ]
+    },
+    "ag_7e8683a49b68e615aa4e2101": {
+      "ok": true,
+      "latencia_ms": 2,
+      "resposta": [
+        "Resposta simulada."
+      ]
+    },
+    "ag_0e4cabdea1793a645e60944c": {
+      "ok": true,
+      "latencia_ms": 3,
+      "resposta": [
+        "Resposta simulada."
+      ]
+    }
+  },
+  "skyone_rpm": 240,
+  "bench": {
+    "respondidos": 6,
+    "esperados": 6,
+    "erros": 0,
+    "p50_s": 4.4,
+    "max_s": 4.436,
+    "conversas": [
+      {
+        "tenant": "bykoji",
+        "agente": "bykoji_atendimento",
+        "canal": "can_6128998aa8cbfd1b9dc59812",
+        "conversation_id": "bykoji:can_6128998aa8cbfd1b9dc59812:bench-4bc098181af14af1b418bee6b1f18c28",
+        "tempo_s": 4.347
+      },
+      {
+        "tenant": "bykoji",
+        "agente": "bykoji_atendimento",
+        "canal": "can_6128998aa8cbfd1b9dc59812",
+        "conversation_id": "bykoji:can_6128998aa8cbfd1b9dc59812:bench-0a71d50ce1154c9eab11b3d27b6a2380",
+        "tempo_s": 4.436
+      },
+      {
+        "tenant": "bykoji",
+        "agente": "ag_7e8683a49b68e615aa4e2101",
+        "canal": "can_d24b96536d72e8e37fcc6934",
+        "conversation_id": "bykoji:can_d24b96536d72e8e37fcc6934:bench-682e9879f40748eb9fc7f679fe0c9619",
+        "tempo_s": 4.425
+      },
+      {
+        "tenant": "bykoji",
+        "agente": "ag_7e8683a49b68e615aa4e2101",
+        "canal": "can_d24b96536d72e8e37fcc6934",
+        "conversation_id": "bykoji:can_d24b96536d72e8e37fcc6934:bench-7c7bf425c1ad440cbbab0c8dde6d4f83",
+        "tempo_s": 4.374
+      },
+      {
+        "tenant": "bench_passo5",
+        "agente": "ag_0e4cabdea1793a645e60944c",
+        "canal": "can_61ebcc5e836a361ed7fc46ea",
+        "conversation_id": "bench_passo5:can_61ebcc5e836a361ed7fc46ea:bench-088294b80a9b42eeb2f4916adffdbf24",
+        "tempo_s": 4.375
+      },
+      {
+        "tenant": "bench_passo5",
+        "agente": "ag_0e4cabdea1793a645e60944c",
+        "canal": "can_61ebcc5e836a361ed7fc46ea",
+        "conversation_id": "bench_passo5:can_61ebcc5e836a361ed7fc46ea:bench-8b072afa4fb94f96b59619f61b5aa10f",
+        "tempo_s": 4.434
+      }
+    ],
+    "metricas": [
+      {
+        "tenant": "bykoji",
+        "agente": "bykoji_atendimento",
+        "delta": {
+          "turnos": 2,
+          "erros": 0
+        },
+        "acumulado": {
+          "turnos": 8,
+          "erros": 0,
+          "total_p50_ms": 4188.0,
+          "total_p95_ms": 4308.4
+        }
+      },
+      {
+        "tenant": "bykoji",
+        "agente": "ag_7e8683a49b68e615aa4e2101",
+        "delta": {
+          "turnos": 2,
+          "erros": 0
+        },
+        "acumulado": {
+          "turnos": 8,
+          "erros": 0,
+          "total_p50_ms": 4261.0,
+          "total_p95_ms": 4302.85
+        }
+      },
+      {
+        "tenant": "bench_passo5",
+        "agente": "ag_0e4cabdea1793a645e60944c",
+        "delta": {
+          "turnos": 2,
+          "erros": 0
+        },
+        "acumulado": {
+          "turnos": 8,
+          "erros": 0,
+          "total_p50_ms": 4268.0,
+          "total_p95_ms": 4295.5
+        }
+      }
+    ]
+  },
+  "banco": {
+    "schema": 12,
+    "cruzamentos": 0,
+    "live": 0,
+    "pendentes": 0
+  },
+  "segredos_logs": {
+    "gateway-gateway-1": 0,
+    "gateway-postgres-1": 0,
+    "gateway-redis-1": 0,
+    "painel_koji-proxy-1": 0
+  },
+  "metricas_tenants": {
+    "bykoji": {
+      "turnos": 16,
+      "erros": 0,
+      "total_p50_ms": 4230.5,
+      "total_p95_ms": 4318.5
+    },
+    "bench_passo5": {
+      "turnos": 8,
+      "erros": 0,
+      "total_p50_ms": 4268.0,
+      "total_p95_ms": 4295.5
+    }
+  }
+}

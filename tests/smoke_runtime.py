@@ -27,6 +27,7 @@ async def main():
     infra=Infra('a'*32,'b'*32,'c'*32,Fernet.generate_key().decode(),url,os.environ['REDIS_URL'])
     app=criar_app(infra,pool,redis)
     app.state.pipeline.prefixo=schema
+    app.state.pipeline.controle.prefixo=schema
     print('Schema/fila exclusivos:',schema,flush=True)
     try:
         await uvicorn.Server(uvicorn.Config(app,host='0.0.0.0',port=8000,access_log=False)).serve()

@@ -167,3 +167,18 @@ docker compose run --rm --no-deps -v /home/twadmin/gateway:/workspace:ro gateway
 `--caso tempo --espera-s 60|120|300` permanece disponível para diagnóstico futuro; o Delay deverá ser configurado manualmente no fluxo pelo Marco. O probe não envia `probe_delay_s` fora do contrato validado.
 
 **Ponto de parada:** aguardando os testes do Marco de memória, autenticação e limite de requisições. Estratégias de sessão e autenticação não consolidadas; Fase 0.5 não iniciada. Simultâneas, Delay/callback e agente "Teste Rápido" não foram executados nesta rodada. Atendimento mantido em `mock/dry`.
+
+
+## Autenticação Basic e limite — resultado informado pelo Marco em 09/10/2026
+
+Fluxo “gateway”: `https://luxtia.api.integrasky.cloud/k3iynwDoOU`.
+
+- Autenticação do Webhook: **Basic Auth**. Usuário fixo gerado pelo Skyone, formato `flow-<id-do-fluxo>@luxtia`; senha definida pelo Marco na tela do Webhook.
+- Sem credencial: **401**, corpo `{"message":"Unauthorized"}`, duração **1,88 s**. Senha errada: **401**.
+- Credencial correta: **200**, contrato completo (`resposta`, `request_id`, `conversation_id`, `status: success`, `tipo: text`, `acao: nenhuma`); histórico enviado respeitado.
+- Limite **configurado** no Webhook: **300 requisições/minuto**. Esse resultado informa o valor adotado, não uma medição do máximo comercial/técnico do provedor.
+- Estas evidências foram fornecidas pelo Marco; o Codex não recebeu a senha nem repetiu as chamadas reais. Substituem a pendência de descobrir o formato de autenticação dos registros anteriores.
+
+Gateway: tipo `basic`, usuário/senha cifrados separadamente com Fernet; cabeçalho Basic montado somente no envio. Tipos Bearer e cabeçalho customizado preservados. Limite local padrão **240/minuto por URL**, compartilhado entre agentes/tenants, com espera incluída em `timeout_s`. HTTP 401/403 gera “credencial do Skyone recusada”, alerta persistente e contagem do circuito, sem retry. Detalhes operacionais e PATCH em `API_ADMIN.md`.
+
+Próxima validação real: Marco cadastra as credenciais pelo túnel com `PATCH` e executa `/testar`. Para chamar o Skyone nesse teste, configurar `provedor=skyone`, `agente_mode=live`, mantendo `send_mode=dry`. A implantação pelo Codex mantém todos os agentes mock/dry; nenhuma senha real é cadastrada ou lida. O probe antigo não foi convertido para Basic nesta tarefa; usar `/testar` para essa validação.

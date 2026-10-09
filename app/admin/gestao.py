@@ -14,6 +14,7 @@ from nucleo.autenticacao import painel
 from nucleo.banco import Repositorio
 from nucleo.configuracao import Configuracoes
 from canais import uazapi
+from agentes.controle import CredencialRecusada, CircuitoAberto
 
 router = APIRouter(prefix='/admin/v1', dependencies=[Depends(painel)])
 
@@ -54,8 +55,10 @@ async def testar(request: Request, tenant: str, agente: str, body: Teste | None 
                'instrucoes_agente': cfg['instrucoes_agente'] or ''}
     inicio = time.monotonic()
     try:
-        resultado = await asyncio.wait_for(state.pipeline.chamar(
-            state.http, Repositorio(state.db), state.cofre, tenant, cfg, payload), timeout=cfg['timeout_s'])
+        resultado = await state.pipeline.chamar(
+            state.http, Repositorio(state.db), state.cofre, tenant, cfg, payload)
+    except (CredencialRecusada,CircuitoAberto) as erro:
+        raise HTTPException(502,str(erro)) from None
     except Exception:
         async with state.db.acquire() as conn, conn.transaction():
             await auditar(conn, tenant, actor, 'agente.teste_falhou', agente)

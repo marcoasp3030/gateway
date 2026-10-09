@@ -32,11 +32,13 @@ class Infra:
     redis_url: str = ''
     public_url: str = 'https://painel.luxbrain.com.br/gateway'
     max_body_bytes: int = 2097152
+    skyone_rpm: int = 240
 
     def validar(self):
         segredos={'PANEL_SERVICE_KEY':self.panel_key,'API_KEY_PEPPER':self.pepper}
         if self.panel_next: segredos['PANEL_SERVICE_KEY_NEXT']=self.panel_next
         if seguranca.validar_segredos(segredos): raise ValueError('Chaves de infraestrutura inválidas')
+        if not 1<=self.skyone_rpm<=100000: raise ValueError("SKYONE_REQUESTS_PER_MINUTE inválido")
         Cofre(self.encryption_key)
         seguranca.validar_formato_url(self.public_url)
 
@@ -44,7 +46,8 @@ class Infra:
     def ambiente(cls):
         return cls(os.getenv('PANEL_SERVICE_KEY',''),os.getenv('PANEL_SERVICE_KEY_NEXT',''),
             os.getenv('API_KEY_PEPPER',''),os.getenv('ENCRYPTION_KEY',''),os.getenv('DATABASE_URL',''),
-            os.getenv('REDIS_URL',''),os.getenv('GATEWAY_PUBLIC_URL','https://painel.luxbrain.com.br/gateway'))
+            os.getenv('REDIS_URL',''),os.getenv('GATEWAY_PUBLIC_URL','https://painel.luxbrain.com.br/gateway'),
+            skyone_rpm=int(os.getenv('SKYONE_REQUESTS_PER_MINUTE','240')))
 
 
 def criar_app(infra,db=None,redis=None):
@@ -89,7 +92,7 @@ def criar_app(infra,db=None,redis=None):
         app.state.configuracoes=Configuracoes(Repositorio(app.state.db))
         app.state.admin=Administracao(app.state.db,app.state.cofre,app.state.configuracoes,infra)
         app.state.http=httpx.AsyncClient(follow_redirects=False)
-        app.state.pipeline=Pipeline(app.state.db,app.state.redis,app.state.configuracoes,app.state.cofre,app.state.http)
+        app.state.pipeline=Pipeline(app.state.db,app.state.redis,app.state.configuracoes,app.state.cofre,app.state.http,skyone_rpm=infra.skyone_rpm)
     if db is not None: preparar(app)
     app.add_middleware(limites.LimiteCorpo,max_bytes=infra.max_body_bytes)
 
@@ -137,6 +140,8 @@ def criar_app(infra,db=None,redis=None):
     from admin.unidades import router as unidades
     from admin.contatos import router as contatos
     from admin.gestao import router as gestao
+    from agentes.controle import router as circuito
+    app.include_router(circuito)
     app.include_router(gestao)
     app.include_router(contatos)
     app.include_router(unidades)

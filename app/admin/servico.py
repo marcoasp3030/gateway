@@ -131,10 +131,16 @@ class Administracao:
                 if not modelo_reg: raise HTTPException(404,'NOT_FOUND')
                 habilitados = await conn.fetch('SELECT modulo FROM modulos_tenant WHERE tenant_id=$1 AND ativo',tenant_id)
                 if not set(modelo_reg['modulos']) <= {r['modulo'] for r in habilitados}: raise HTTPException(400,'Módulos não habilitados')
-                if 'skyone_auth' in dados:
-                    valor = dados.pop('skyone_auth')
-                    if valor is not None and ('\r' in valor or '\n' in valor): raise HTTPException(400,'Credencial inválida')
-                    dados['skyone_auth_enc'] = self.cofre.cifrar(tenant_id,valor) if valor else None
+                for campo in ('skyone_auth','skyone_auth_usuario'):
+                    if campo in dados:
+                        valor = dados.pop(campo)
+                        if valor is not None and (any(ord(c)<32 or ord(c)==127 for c in valor) or (campo=='skyone_auth_usuario' and ':' in valor)):
+                            raise HTTPException(400,'Credencial inválida')
+                        dados[campo+'_enc'] = self.cofre.cifrar(tenant_id,valor) if valor else None
+                combinado = {**(anterior or {}),**dados}
+                if combinado.get('skyone_auth_tipo')=='basic' and (
+                    not combinado.get('skyone_auth_enc') or not combinado.get('skyone_auth_usuario_enc')):
+                    raise HTTPException(400,'Basic exige usuário e senha')
                 if dados.get('skyone_webhook_url'): validar_formato_url(dados['skyone_webhook_url'])
             if entidade=='canais':
                 if novo and (not dados.get('tipo') or not dados.get('agente_id')): raise HTTPException(400,'Tipo e agente obrigatórios')

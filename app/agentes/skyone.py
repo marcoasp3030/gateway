@@ -1,5 +1,7 @@
 """Contrato Skyone e credenciais isolados do pipeline."""
 import asyncio
+import base64
+from .controle import CredencialRecusada, CircuitoAberto
 import json
 import uuid
 from zoneinfo import ZoneInfo
@@ -9,8 +11,7 @@ from nucleo.banco import Repositorio
 from nucleo.credenciais import CredencialInvalida
 
 
-class FalhaAgente(Exception):
-    """Mensagem fixa: não propaga corpo, URL ou credencial de terceiros."""
+from .erros import FalhaAgente
 
 
 async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None):
@@ -36,7 +37,7 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
     }
 
 
-async def chamar(client,repo,cofre,tenant_id,cfg,payload):
+async def _chamar(client,repo,cofre,tenant_id,cfg,payload):
     if cfg['tenant_id']!=tenant_id or payload['tenant_id']!=tenant_id or payload['agente_id']!=cfg['id']:
         raise FalhaAgente('Contexto inválido')
     if cfg['agente_mode']=='mock':
@@ -48,6 +49,7 @@ async def chamar(client,repo,cofre,tenant_id,cfg,payload):
     if not tenant or not agente: raise FalhaAgente('Agente indisponível')
     try:
         headers = {}
+        protegidos = []
         tipo = agente['skyone_auth_tipo']
         if tipo=='nenhuma':
             if not tenant['tenant_teste']: raise FalhaAgente('Autenticação obrigatória')
@@ -55,7 +57,15 @@ async def chamar(client,repo,cofre,tenant_id,cfg,payload):
             segredo = cofre.abrir(tenant_id,agente['skyone_auth_enc'])
             if not isinstance(segredo,str) or not segredo or '\r' in segredo or '\n' in segredo:
                 raise FalhaAgente('Credencial inválida')
-            if tipo=='bearer': headers['Authorization']='Bearer '+segredo
+            protegidos.append(segredo)
+            if tipo=='basic':
+                usuario=cofre.abrir(tenant_id,agente['skyone_auth_usuario_enc'])
+                if not isinstance(usuario,str) or not usuario or ':' in usuario or any(ord(c)<32 or ord(c)==127 for c in usuario):
+                    raise FalhaAgente('Usuário Basic inválido')
+                codificado=base64.b64encode((usuario+':'+segredo).encode('utf-8')).decode('ascii')
+                headers['Authorization']='Basic '+codificado
+                protegidos.extend([usuario,codificado])
+            elif tipo=='bearer': headers['Authorization']='Bearer '+segredo
             elif tipo=='cabecalho':
                 nome=agente['skyone_auth_cabecalho']
                 import re
@@ -67,6 +77,7 @@ async def chamar(client,repo,cofre,tenant_id,cfg,payload):
             await seguranca.validar_url_saida(cfg['skyone_webhook_url'],cfg['skyone_dominios_permitidos'])
             async with client.stream('POST',cfg['skyone_webhook_url'],json=payload,headers=headers,
                                      timeout=cfg['timeout_s'],follow_redirects=False) as response:
+                if response.status_code in (401,403): raise CredencialRecusada()
                 if not 200<=response.status_code<300: raise FalhaAgente('HTTP do agente recusado')
                 partes=[]; tamanho=0
                 async for parte in response.aiter_bytes():
@@ -95,8 +106,30 @@ async def chamar(client,repo,cofre,tenant_id,cfg,payload):
         uso=corpo.get('uso')
         if isinstance(uso,dict) and all(isinstance(k,str) and type(v) is int and v>=0 for k,v in uso.items()): result['uso']=uso
         # Não permitir eco da credencial mesmo dentro de campos do contrato.
-        if headers and segredo in json.dumps(result,ensure_ascii=False):
+        if any(s in json.dumps(result,ensure_ascii=False) for s in protegidos):
             raise FalhaAgente('Resposta contém credencial')
         return result
     except (httpx.HTTPError,TimeoutError,ValueError,TypeError,CredencialInvalida):
         raise FalhaAgente('Falha na comunicação com o agente') from None
+
+
+async def chamar(client,repo,cofre,tenant_id,cfg,payload,controle=None):
+    if cfg['tenant_id']!=tenant_id or payload['tenant_id']!=tenant_id or payload['agente_id']!=cfg['id']:
+        raise FalhaAgente('Contexto inválido')
+    if cfg['agente_mode']=='mock' or controle is None:
+        return await _chamar(client,repo,cofre,tenant_id,cfg,payload)
+    geracao=None
+    async def executar():
+        nonlocal geracao
+        await controle.esperar(cfg['skyone_webhook_url'])
+        geracao=await controle.iniciar(tenant_id,cfg['id'],cfg['timeout_s'])
+        return await _chamar(client,repo,cofre,tenant_id,cfg,payload)
+    try:
+        result=await asyncio.wait_for(executar(),timeout=cfg['timeout_s'])
+    except Exception as erro:
+        if geracao is not None:
+            await controle.terminar(tenant_id,cfg['id'],geracao,erro)
+        if isinstance(erro,(CredencialRecusada,CircuitoAberto,FalhaAgente)): raise
+        raise FalhaAgente('Tempo limite ou controle do Skyone indisponível') from None
+    await controle.terminar(tenant_id,cfg['id'],geracao)
+    return result
