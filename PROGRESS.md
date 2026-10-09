@@ -447,7 +447,7 @@ PY
   - `82f8e2e` `docs/API_ADMIN.md` reorganizado por assunto; ✅ só para o conferido em produção.
   - `429dff4` `scripts/test_suite.sh` fixado no compose base (`bykoji_test`): o `COMPOSE_FILE` do `.env` aponta o gateway para o banco de produção.
 - Validações (comando → resultado):
-  - Suíte `scripts/test_suite.sh` → **96 passed**, somente `bykoji_test`.
+  - Suíte `scripts/test_suite.sh` → **96 passed**, somente bancos `_test`: ambiente do executor em `bykoji_test`, testes de integração em schemas isolados de `gateway_migrations_test`.
   - Pré-implantação: `gateway:39e1a53` = imagem em uso (volta); schema 012, nenhuma migração alterada; zero entradas pendentes, `gw05:due` vazio, sem buffers/travas.
   - Backup `/home/twadmin/backups/gateway/gateway-pre-contrato-20261009T173104Z.dump` (600, `pg_restore --list` OK), SHA-256 `ac83c3bdff517f3c4c5b932fe3c1c2a33b3356aec194876c7240242840ff71d6`; ambiente em `.env.antes-contrato-20261009T173104Z` (600, fora do Git).
   - Build → nova imagem `sha256:978a03be…` marcada `gateway:8f387be`; recriado só o gateway; postgres/redis/painel com os mesmos IDs.
@@ -459,3 +459,13 @@ PY
 - Estado preservado: agentes live/dry `postman_teste/ag_dba38a6fae985abf584d512f` e `bykoji/ag_7e8683a49b68e615aa4e2101` (“[teste] Bench segundo agente”), por escolha do Marco; nenhum agente com envio live. Nenhum Compose do painel alterado, nenhuma chamada real ao Skyone, nenhum prune.
 - Nome publicado do parâmetro do `/testar`: **`usar_provedor_real`**.
 - Pendências / decisões para o Marco: simultâneas e timeout/callback antes da 0.6; comparação OpenAI direta (2.5). Próxima fase: 0.6.
+
+## Fase 0.5 — Conferência após fechamento — 2026-10-09
+
+- Revisão da entrega já implantada: os 38 arquivos Python do checkout correspondem exatamente, por SHA-256, aos do container atual (`gateway:8f387be`). Nenhuma nova implantação necessária.
+- `sh scripts/test_suite.sh` → **96 passed em 25,80 s**; executor no ambiente `bykoji_test`, integração em schemas isolados de `gateway_migrations_test`. Corrigida a descrição imprecisa do banco no registro anterior. Nenhum teste contra `gateway`.
+- Health interno e público → `{"ok":true}`; pelo domínio, `/gateway/admin/v1/tenants`, `/gateway/metricas`, `/gateway/docs` e `/gateway/openapi.json` → **404**.
+- Imagem de volta `gateway:39e1a53` existe. Backup pré-contrato e cópia do ambiente seguem com permissão 600; SHA-256 do dump confere com o registro e `pg_restore --list` → exit 0.
+- Completada em `docs/MIGRACOES.md` a documentação de volta da última implantação: somente código, mantendo banco/schema 012 e dados atuais. Os roteiros anteriores de restauração para schemas antigos não se aplicam a essa volta.
+- `git diff --check` aprovado. Alterações desta revisão somente documentais; nenhum agente, canal, credencial, banco ou serviço alterado. Não repetido benchmark no serviço nem chamadas ao Skyone.
+- **Fase 0.5 permanece concluída formalmente.** Fase 0.6 não iniciada: aguarda testes do Marco de 10 chamadas simultâneas e tempo limite/callback no Skyone.

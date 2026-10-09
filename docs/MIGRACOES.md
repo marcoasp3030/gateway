@@ -202,3 +202,52 @@ curl --fail --silent https://painel.luxbrain.com.br/gateway/health
 ```
 
 Executar somente se necessário. Nunca downgrade, restauração sobre banco existente ou limpeza de volumes/Redis. Alterações posteriores ao dump permanecem no banco 012 para reconciliação; não estarão automaticamente na cópia restaurada. Nenhum rollback necessário. Relatório `VALIDACAO_SKYONE_BASIC.json`; senha real do Skyone exclusivamente sob controle do Marco.
+
+
+## Ajustes finais do contrato — volta sobre schema 012 — 09/10/2026
+
+A implantação dos ajustes finais não alterou migrações. Imagem publicada
+`gateway:8f387be`, ID `sha256:978a03beb8d5acf270c29fe73ca014cd53a550d6643538caf1b1fde6cab59f0e`.
+Imagem de volta conferida: `gateway:39e1a53`, ID
+`sha256:6502ac083a8f098a15c8ee41f32195922e0784a12d9d805a779d77ae4afeb590`.
+As duas usam o schema 012.
+
+- Backup: `/home/twadmin/backups/gateway/gateway-pre-contrato-20261009T173104Z.dump`, permissão 600; `pg_restore --list` aprovado.
+- SHA-256: `ac83c3bdff517f3c4c5b932fe3c1c2a33b3356aec194876c7240242840ff71d6`.
+- Ambiente anterior: `.env.antes-contrato-20261009T173104Z`, permissão 600, fora do Git.
+
+Para voltar somente o código desta implantação, manter o banco `gateway` e o
+ambiente atual. Não restaurar o dump nem usar os roteiros das migrações 011/012:
+eles voltam para outras bases e schemas. Primeiro conferir ausência de lotes em
+processamento, entradas pendentes e buffers/travas Redis; não apagar chaves.
+Confirmar também que o banco continua no schema 012. Se houver trabalho pendente,
+aguardar sua conclusão antes da recriação.
+
+Comandos de recuperação, **somente se a volta for necessária**, executados em
+sequência e parando em qualquer erro:
+
+```bash
+cd /home/twadmin/gateway
+docker image inspect gateway:39e1a53 --format '{{.Id}}'
+mkdir -p .local
+chmod 700 .local
+cat > .local/compose.volta-contrato.yml <<'YAML'
+services:
+  gateway:
+    image: gateway:39e1a53
+    pull_policy: never
+YAML
+docker compose --env-file .env \
+  -f docker-compose.yml -f docker-compose.proxy.yml \
+  -f docker-compose.database.yml -f .local/compose.volta-contrato.yml \
+  up -d --no-deps --no-build gateway
+curl --fail --silent http://127.0.0.1:8100/health
+curl --fail --silent https://painel.luxbrain.com.br/gateway/health
+```
+
+Conferir health `{"ok":true}`, rotas administrativas públicas 404 e modos de
+agentes preservados. Registrar a causa e parar. Somente o gateway é recriado;
+Postgres, Redis, painel, dados e credenciais permanecem intactos. Se uma futura
+implantação alterar o schema, este procedimento deixa de ser suficiente: preparar
+uma base nova restaurada do backup compatível, nunca rebaixar migrações ou
+restaurar sobre a base em uso. Nenhuma volta foi executada nesta revisão.
