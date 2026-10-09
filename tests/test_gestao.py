@@ -162,7 +162,7 @@ def test_SEG02_SEG12_gestao_protegida_e_actor_obrigatorio():
         async with c:
             a,ca=await criar(c)
             routes=[('POST',f'/agentes/{a}/testar'),('POST',f'/canais/{ca}/rotacionar-segredo'),('GET','/conversas'),
-                    ('POST','/conversas/ausente/assumir'),('POST','/conversas/ausente/devolver'),('POST','/conversas/ausente/mensagens'),('GET','/eventos')]
+                    ('POST','/conversas/ausente/assumir'),('POST','/conversas/ausente/devolver'),('POST','/conversas/ausente/mensagens'),('GET','/eventos'),('GET','/eventos/cursor')]
             for method,path in routes:
                 url='/admin/v1/tenants/alpha'+path
                 assert (await c.request(method,url,headers={'X-Forwarded-For':'127.0.0.1'})).status_code==404
@@ -194,4 +194,28 @@ def test_INV03_INV13_envio_humano_recusado_mantem_pausa_sem_entrega_falsa(monkey
             assert await conn.fetchval("SELECT count(*) FROM mensagens WHERE tenant_id='alpha' AND origem='humano'")==0
             eventos=(await c.get('/admin/v1/tenants/alpha/eventos',params={'limite':100})).json()['itens']
             assert any(e['tipo']=='mensagem.humana_falhou' for e in eventos)
+    banco(cenario)
+
+
+def test_INV08_cursor_eventos_isolado_vazio_inexistente_e_continuacao():
+    async def cenario(conn):
+        await migrar.aplicar(conn); app,c=preparar(conn)
+        async with c:
+            # Tenant inserido sem auditoria para cobrir cursor inicial zero.
+            await conn.execute("INSERT INTO tenants(id,nome) VALUES ('vazio','Vazio')")
+            assert (await c.get('/admin/v1/tenants/vazio/eventos/cursor')).json()=={'ultimo_id':0}
+            await criar(c,'alpha'); await criar(c,'bravo')
+            url='/admin/v1/tenants/alpha/eventos/cursor'
+            r=await c.get(url); assert r.status_code==200
+            ultimo=r.json()['ultimo_id']
+            assert r.json()=={'ultimo_id':await conn.fetchval("SELECT max(id) FROM audit_log WHERE tenant_id='alpha'")}
+            assert (await c.get('/admin/v1/tenants/bravo/eventos/cursor')).json()['ultimo_id']>ultimo
+            await c.patch('/admin/v1/tenants/bravo',json={'nome':'Outro tenant'})
+            assert (await c.get(url)).json()=={'ultimo_id':ultimo}
+            await c.patch('/admin/v1/tenants/alpha',json={'nome':'Nome atualizado'})
+            eventos=(await c.get('/admin/v1/tenants/alpha/eventos',params={'desde':ultimo})).json()
+            assert len(eventos['itens'])==1 and eventos['itens'][0]['alvo']=='alpha'
+            assert (await c.get(url)).json()=={'ultimo_id':eventos['proximo_cursor']}
+            ausente=await c.get('/admin/v1/tenants/ausente/eventos/cursor')
+            assert ausente.status_code==404 and ausente.json()['erro']['codigo']=='NOT_FOUND'
     banco(cenario)

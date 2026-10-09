@@ -194,6 +194,16 @@ async def mensagem(request: Request, tenant: str, conv: str, body: MensagemHuman
     return {'ok': True, 'mensagem_id': msgid, 'origem': 'humano', 'send_mode': cfg['send_mode']}
 
 
+@router.get('/tenants/{tenant}/eventos/cursor')
+async def cursor_eventos(request: Request, tenant: str):
+    db = request.app.state.db
+    if not await Repositorio(db).tenant(tenant):
+        raise HTTPException(404, 'NOT_FOUND')
+    # Apenas o agregado; nenhum evento/conteúdo é carregado ou serializado.
+    ultimo = await db.fetchval('SELECT COALESCE(MAX(id), 0) FROM audit_log WHERE tenant_id=$1', tenant)
+    return {'ultimo_id': ultimo}
+
+
 @router.get('/tenants/{tenant}/eventos')
 async def eventos(request: Request, tenant: str, desde: int = 0, limite: int = 50):
     if not await Repositorio(request.app.state.db).tenant(tenant): raise HTTPException(404, 'TENANT_NOT_FOUND')

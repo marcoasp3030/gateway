@@ -231,6 +231,7 @@ O pacote ao agente inclui só unidades ativas do tenant, com `id`, `nome`, `aber
 | POST | `/tenants/{tenant}/conversas/{conv}/devolver` | ✅ |
 | POST | `/tenants/{tenant}/conversas/{conv}/mensagens` | ✅ Mensagem humana |
 | GET | `/tenants/{tenant}/eventos?desde=` | ✅ Polling |
+| GET | `/tenants/{tenant}/eventos/cursor` | ⏳ Implantação pendente — último ID de evento confirmado do tenant, sem listar histórico |
 
 **Lista:** filtros opcionais `agente`, `canal`, `status=ativa|pausada`, `busca` (substring literal de nome/telefone), `desde` (ISO com fuso; filtra `atualizado_em`). `limite` 1–100, `cursor=<conversation_id>`, ordem crescente por ID; resposta `itens`/`proximo_cursor`. Agente/canal de outro tenant → 404. `ativa` = bot sem pausa vigente; encerramento/desfecho na Fase 3. Itens trazem agente/canal, nome/telefone, última mensagem/horário e `bot_pausado_ate`.
 
@@ -239,6 +240,10 @@ O pacote ao agente inclui só unidades ativas do tenant, com `id`, `nome`, `aber
 **Assumir/devolver:** `assumir` aceita corpo opcional `{ "minutos":60 }` (inteiro 1–10080) e pausa ao confirmar a transação. `devolver` (sem corpo) remove a pausa e reagenda só entradas ainda pendentes, sem repetir turnos ignorados. Ambos retornam `{ "ok":true,"bot_pausado_ate":"… ou null" }`. Pausa e envio final do bot usam a mesma trava por conversa: resposta ainda em geração é descartada se a pausa confirmar antes do envio.
 
 **Envio humano:** `{ "texto":"Olá, sou o atendente" }` (1–20000 caracteres não vazios). Pausa pelo `pause_minutes` efetivo e grava saída `origem=humano`; em dry registra a simulação sem chamar o provedor. Retorna 201 `{ "ok":true,"mensagem_id":123,"origem":"humano","send_mode":"dry" }`. Erro do provedor → 502 sanitizado, mantém a pausa e não registra entrega. Canal inativo/tenant suspenso → 409; envio live de canal não implementado → 501. Sem retry automático.
+
+**Cursor inicial:** `GET /admin/v1/tenants/{tenant}/eventos/cursor` → `{"ultimo_id":123}`. Retorna `0` quando o tenant existe mas ainda não tem eventos; tenant inexistente → 404 `NOT_FOUND`. Mesma autenticação de painel e restrição de rede interna das demais rotas administrativas. O ID é o maior evento confirmado **desse tenant**, não um cursor global; a leitura não cria evento nem altera dados. Não recebe corpo ou parâmetros.
+
+Ao abrir Conversas, obtenha esse cursor **antes** de carregar a lista/histórico inicial e comece o polling com `desde=ultimo_id`. Assim, mudanças confirmadas durante a carga inicial também aparecem no polling. Não reinicialize o cursor a cada consulta. Para retomar eventos antigos, continue usando o cursor salvo e o polling paginado existente; este endpoint não retorna nem reconstrói o histórico. Dispensa percorrer o histórico paginado para descobrir o ponto de partida. O marcador de leitura por usuário no navegador continua independente.
 
 **Polling:** `GET /tenants/{tenant}/eventos?desde=0&limite=50` → `{ "itens":[{"id":123,"tipo":"mensagem.recebida","alvo":"tenant:canal:contato","criado_em":"..."}],"proximo_cursor":123,"tem_mais":false }`. Reutilizar `proximo_cursor` como `desde`; consumir páginas enquanto `tem_mais=true`, depois consultar a cada 2–3 s. IDs vêm da auditoria persistente, alocados em série por tenant até o commit. Inclui mudanças administrativas, mensagens recebidas/enviadas/humanas, resultado de turnos e consumo; nunca conteúdo ou credenciais. Use `alvo` para atualizar a conversa/lista e refaça a leitura inicial ao conectar. Eventos de mensagens anteriores a esta implementação não são reconstruídos.
 
