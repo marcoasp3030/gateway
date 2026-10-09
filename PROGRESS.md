@@ -484,3 +484,22 @@ PY
   - Logs gateway/Postgres/Redis/Caddy: **zero ocorrências** de 10 segredos pesquisados.
 - Teste de carga do Marco no fluxo `k3iynwDoOU` (Basic Auth, direto no Webhook): 3 em sequência 5,10 / 7,27 / 8,96 s; **10 simultâneas 10/10 corretas, HTTP 200, 6,95–7,87 s, lote em 7,89 s** — Skyone processa em paralelo, sem fila. OpenAI direta não executada. Resultado `.local/resultado_carga_20261009_181055.json`; registro em `docs/SKYONE_RESULTADOS.md`.
 - Pendências / decisões para o Marco: timeout/callback no Skyone antes da 0.6; comparação OpenAI direta (2.5). Fase 0.6 não iniciada.
+
+
+## Fase 0.6 — Bloco 1: tempo limite padrão de 60 s — 2026-10-09
+
+- Status: concluído e implantado; serviço em mock/dry. **Fase 0.6 iniciada.**
+- Base: teste de tempo do Marco no fluxo `k3iynwDoOU` (espera artificial em “Normalizar Entrada”, campo `segundos_teste` já removido): 0 s → 200 em 7,0 s; 30 s → 200 em 36,9 s; 60 s → 200 em 66,2 s; 120 s → nenhuma resposta nem código até o cliente desistir aos 210,9 s. Síncrono comprovado até ~66 s; teto entre ~66 e ~127 s em que o Skyone segura a conexão (possível limite do módulo JavaScript, não confirmado no Logger). Resultado `.local/resultado_tempo_20261009_191510.json`; registro em `docs/SKYONE_RESULTADOS.md`.
+- Feito (`f5a1c22`): migração **013** — padrão de `agentes.timeout_s` 90 → **60 s**; agentes no valor de fábrica antigo (90) → 60, por decisão do Marco, cada um auditado (`migracao013`, `agentes.alterado`) sob a trava por tenant. Máximo aceito continua 600 s. `.env.example`: `SKYONE_TIMEOUT_S=60`, marcado como legado (só `app/pipeline.py` da Fase 0, fora do serviço; o `.env` em produção não foi alterado). Contrato: atendimento usa 60 s; acima disso, só modo assíncrono.
+- Plano: callback assíncrono será implementado/testado na 0.6 com provedor simulado; **validação com callback real do Skyone marcada para a Fase 6.5**. Comparação OpenAI direta (2.5) continua pendente e não bloqueia a 0.6.
+- Validações (comando → resultado):
+  - `sh scripts/test_suite.sh` → **98 passed** (novo teste da 013: só 90 → 60, valor próprio preservado, novos agentes com 60, auditoria por agente), somente `_test`.
+  - Pré-implantação: `gateway:50c22ca` = imagem em uso (volta); zero pendentes, `gw05:due` vazio, sem buffers.
+  - Backup `/home/twadmin/backups/gateway/gateway-pre013-20261009T192140Z.dump` (600, `pg_restore --list` OK), SHA-256 `2cffcedb7fa7edd6c2864a72ffa77ffe711b03d4fea2179f1b4438d43463db51`; `.env.antes013-20261009T192140Z` (600, fora do Git).
+  - Build → `gateway:f5a1c22`; `migrar.py --apply` → aplicada só a 013; recriado só o gateway; postgres/redis/painel com os mesmos IDs.
+  - Produção: schema **13**, padrão da coluna 60; os 4 agentes com `timeout_s` 60 (modos inalterados: só `postman_teste/ag_dba38…` em live/dry); 4 registros `migracao013` na auditoria, visíveis como último evento de cada tenant no `eventos/cursor`. API: efetivo 60; `timeout_s: 601` → 400.
+  - Health interno/público OK; admin/docs/openapi/métricas públicos → 404; interno com `X-Forwarded-For` → 404.
+  - Benchmark bykoji (mock/dry, 4 clientes): **4/4, zero erros, p50 4,344 s, máx. 4,369 s**.
+  - Logs gateway/Postgres/Redis/Caddy: **zero ocorrências** de 10 segredos.
+- Volta: a imagem `gateway:50c22ca` funciona sobre o schema 13 (só mudou o padrão da coluna); voltar o valor dos agentes exigiria PATCH explícito ou restaurar o dump acima.
+- Próximo bloco (aguarda validação do Marco): fila durável e workers da 0.6.

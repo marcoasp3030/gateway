@@ -4,7 +4,7 @@ Banco `gateway`, Postgres próprio do gateway. O backend do painel autentica seu
 
 **Legenda:** ✅ implantado e em produção · ⏳ planejado, **não disponível** (a fase está indicada). Não construir telas sobre rotas ⏳.
 
-**Publicação atual (09/10/2026):** imagem `gateway:50c22ca` (inclui `eventos/cursor`), migrações 001–012, serviço em mock/dry. Tudo marcado ✅ abaixo foi conferido no serviço em produção. Histórico em `PROGRESS.md`.
+**Publicação atual (09/10/2026):** imagem `gateway:f5a1c22`, migrações 001–013, serviço em mock/dry. Tudo marcado ✅ abaixo foi conferido no serviço em produção. Histórico em `PROGRESS.md`.
 
 Rotas relativas a `/admin/v1`, salvo indicação de rota absoluta. Escritas confirmadas gravam auditoria na mesma transação, sem corpos nem segredos. Suspender/pausar usa PATCH.
 
@@ -118,13 +118,13 @@ POST exige `id`, `nome`; aceita `tenant_id` opcional (ausente/nulo = global), `t
   "skyone_auth_tipo": "basic",
   "skyone_auth_usuario": "<usuário gerado pelo Skyone; somente escrita>",
   "skyone_auth": "<senha cadastrada pelo Marco; somente escrita>",
-  "timeout_s": 90,
+  "timeout_s": 60,
   "instrucoes_agente": "Instruções complementares",
   "modo_resposta": "sync"
 }
 ```
 
-`provedor=mock|skyone`; `llm_direto` reservado à Fase 2.5. `timeout_s` 1–600, padrão 90. Só `modo_resposta=sync`; async/callback na 0.6. `skyone_auth_tipo=nenhuma|cabecalho|bearer|basic`; a leitura devolve `skyone_auth_configurado` e `skyone_auth_usuario_configurado`, nunca valores ou ciphertexts. Basic exige usuário e senha; ambos somente escrita, cifrados separadamente (Fernet) e vinculados ao tenant. Omitir um campo preserva o valor; apagar um deles com Basic selecionado → 400, inclusive em tenant de teste. Usuário não aceita `:` nem caracteres de controle. `skyone_token` e `callback_timeout_s` **não são aceitos**. Live sem credencial é recusado fora de tenant de teste (SEG13). O fluxo do Skyone é **criado do zero pelo Marco**, nunca clonado; o gateway não cria fluxos.
+`provedor=mock|skyone`; `llm_direto` reservado à Fase 2.5. `timeout_s` 1–600, **padrão 60** (migração 013). **Atendimento usa 60 s**: o Skyone síncrono foi comprovado até ~66 s e, entre ~66 s e ~127 s, segura a conexão sem responder (teste de 09/10/2026, `docs/SKYONE_RESULTADOS.md`). Valores acima de 60 s só fazem sentido **no modo assíncrono** (callback, Fase 0.6). Só `modo_resposta=sync` por enquanto. `skyone_auth_tipo=nenhuma|cabecalho|bearer|basic`; a leitura devolve `skyone_auth_configurado` e `skyone_auth_usuario_configurado`, nunca valores ou ciphertexts. Basic exige usuário e senha; ambos somente escrita, cifrados separadamente (Fernet) e vinculados ao tenant. Omitir um campo preserva o valor; apagar um deles com Basic selecionado → 400, inclusive em tenant de teste. Usuário não aceita `:` nem caracteres de controle. `skyone_token` e `callback_timeout_s` **não são aceitos**. Live sem credencial é recusado fora de tenant de teste (SEG13). O fluxo do Skyone é **criado do zero pelo Marco**, nunca clonado; o gateway não cria fluxos.
 
 ### Testar
 

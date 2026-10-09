@@ -215,4 +215,21 @@ Executado pelo Marco na VPS com `.local/teste_skyone_carga.py` (biblioteca padr�
 
 **Conclusão:** o Skyone processou as 10 chamadas **em paralelo, sem fila**: o lote levou o mesmo que uma chamada isolada, e nenhuma resposta veio fora do contrato ou com 429/5xx. Para o gateway, a concorrência por agente pode ser dimensionada pela cota (240/min por URL) e pelo `timeout_s`, não por uma fila no provedor. Amostra única de 10, abaixo do limite configurado (300/min); não é ensaio de saturação nem mede o máximo do Skyone.
 
-Pendente antes da 0.6: comportamento com tempo limite/callback.
+Pendente antes da 0.6: comportamento com tempo limite/callback (concluído abaixo para o tempo limite).
+
+## Teste de tempo limite — 09/10/2026
+
+Executado pelo Marco no fluxo **`k3iynwDoOU`** (Basic Auth), com espera artificial no JavaScript “Normalizar Entrada” controlada pelo campo `segundos_teste`, **já removido do fluxo** depois do teste. Resultado `.local/resultado_tempo_20261009_191510.json` (600, fora do Git), conferido nesta entrada.
+
+| Espera pedida | Resultado | Duração |
+|---|---|---|
+| 0 s | HTTP 200, resposta correta | 7,0 s |
+| 30 s | HTTP 200, resposta correta | 36,9 s |
+| 60 s | HTTP 200, resposta correta | 66,2 s |
+| 120 s | **nenhuma resposta e nenhum código HTTP** até o cliente desistir | 210,9 s |
+
+**Conclusão:** modo síncrono comprovado até ~66 s. Existe um teto entre ~66 s e ~127 s em que o Skyone **segura a conexão sem responder** (pode ser limite do módulo JavaScript; ainda não confirmado no Logger). Consequências adotadas:
+
+- `timeout_s` padrão do agente passa a **60 s** (migração 013; agentes no valor antigo de 90 s ajustados para 60 s). O máximo aceito pela API continua 600 s.
+- **Atendimento usa 60 s.** Tarefas que precisem de mais tempo só no **modo assíncrono** (callback, Fase 0.6). Com 60 s, o gateway desiste antes do teto em que o Skyone fica mudo e entrega o fallback.
+- O callback será implementado e testado na 0.6 com o provedor simulado; a validação com um **callback real do Skyone** fica para a Fase 6.5.

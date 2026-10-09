@@ -10,13 +10,14 @@
 |---|---|---|
 | Fase 0 — implantação simulada | ✅ Concluída (commit `aef6f26`) | `PROGRESS.md` |
 | Publicação no domínio | ✅ `https://painel.luxbrain.com.br/gateway/health` via **Caddy** do projeto `painel_koji` (rede `luxbrain_gateway_proxy`, `docker-compose.proxy.yml`) | `PROGRESS.md`, `docs/PUBLICACAO.md`, `docs/Caddyfile.painel.example` |
-| Fase 0.3 — descobertas no Skyone | 🟡 Probe, memória/histórico e comparação de modelos respondidos. **Autenticação Basic validada também pelo `/testar` do gateway: 200, 8.194 ms; limite 300/min no Skyone e 240/min por URL no gateway concluídos.** **10 simultâneas: 10/10 em paralelo, lote em 7,89 s (09/10/2026).** Falta timeout/callback antes da 0.6; comparação direta OpenAI (não executada) para decisão da 2.5 | `docs/SKYONE_RESULTADOS.md`, `PROGRESS.md` |
-| Fase 0.5 | ✅ **Concluída formalmente em 09/10/2026.** Contrato `docs/API_ADMIN.md` revisado e reorganizado por assunto; modelos iniciais `atendente_delivery` e `assistente_generico` confirmados pelo Marco. Em produção: imagem `gateway:50c22ca` (com `eventos/cursor`), migrações 001–012, 97 testes. Painel integrado pela rede interna. Agente live/dry: só `postman_teste/ag_dba38a6fae985abf584d512f`, por escolha do Marco (“[teste] Bench segundo agente” voltou à simulação); nenhum envio live | `docs/API_ADMIN.md`, `docs/MIGRACOES.md`, `PROGRESS.md` |
-| Fases 0.6 em diante | ⏳ Não iniciadas (próxima: 0.6) | — |
+| Fase 0.3 — descobertas no Skyone | 🟡 Probe, memória/histórico e comparação de modelos respondidos. **Autenticação Basic validada também pelo `/testar` do gateway: 200, 8.194 ms; limite 300/min no Skyone e 240/min por URL no gateway concluídos.** **10 simultâneas: 10/10 em paralelo, lote em 7,89 s; tempo limite: síncrono até ~66 s, sem resposta entre ~66 e ~127 s → `timeout_s` padrão 60 s (09/10/2026).** Callback real do Skyone pendente para a 6.5; comparação direta OpenAI (não executada) para decisão da 2.5 | `docs/SKYONE_RESULTADOS.md`, `PROGRESS.md` |
+| Fase 0.5 | ✅ **Concluída formalmente em 09/10/2026.** Contrato `docs/API_ADMIN.md` revisado e reorganizado por assunto; modelos iniciais `atendente_delivery` e `assistente_generico` confirmados pelo Marco. Em produção: imagem `gateway:f5a1c22`, migrações 001–013, 98 testes. Painel integrado pela rede interna. Agente live/dry: só `postman_teste/ag_dba38a6fae985abf584d512f`, por escolha do Marco (“[teste] Bench segundo agente” voltou à simulação); nenhum envio live | `docs/API_ADMIN.md`, `docs/MIGRACOES.md`, `PROGRESS.md` |
+| Fase 0.6 | 🟡 **Iniciada em 09/10/2026.** Bloco 1 concluído: `timeout_s` padrão 60 s (migração 013). Próximos blocos: fila durável, workers, circuito por agente completo, retomada e callback assíncrono com provedor simulado | `PROGRESS.md` |
+| Fases 1 em diante | ⏳ Não iniciadas | — |
 
 **Fechamento da Fase 0.5 (09/10/2026):** últimos ajustes do contrato implantados com um commit por item: erros padronizados (códigos fixos, mensagem em português, `detalhes.campo`, mesmo envelope nos middlewares e no 404), histórico paginado, lista de agentes com `circuito_estado`/`canais`, null em campo obrigatório e integridade com campo, **`/testar` com `{"usar_provedor_real": true}`** (chama o Skyone sem alterar o agente) e `/simular` com IA real quando o envio é dry. Imagem de volta `gateway:39e1a53`; backup `gateway-pre-contrato-20261009T173104Z.dump`. Detalhes em `PROGRESS.md`.
 
-**Fora da 0.5, antes da 0.6:** simultâneas ✅ (10/10 em paralelo); falta timeout/callback com o Marco; comparação OpenAI direta pertence à decisão da 2.5. Nenhuma fase posterior iniciada.
+**Antes da 0.6:** simultâneas ✅ (10/10 em paralelo) e tempo limite ✅ (padrão 60 s). Comparação OpenAI direta (2.5) continua pendente e **não bloqueia a 0.6**. Nenhuma fase posterior iniciada.
 
 **Ambiente real da VPS (prevalece sobre exemplos deste plano):**
 - Proxy público é o **Caddy** do painel (`painel_koji`), não Nginx. `docs/nginx-gateway.conf` fica apenas como referência; a configuração em uso está em `docs/Caddyfile.painel.example` e `docs/PUBLICACAO.md`.
@@ -346,7 +347,7 @@ curl -s "$GW/admin/v1/tenants/$T/metricas?agente=$A" "${AUTH[@]}"
 - [ ] **Adaptador de agente** (`app/agentes/`): interface `enviar(pacote) -> Resposta | Pendente`. Implementações `mock` e `skyone`. O núcleo não importa nada do Skyone diretamente.
 - [ ] **Circuit breaker por agente (INV15):** após N falhas/timeouts em uma janela, o agente entra em "aberto" por alguns minutos: novas mensagens recebem o fallback (ou vão para humano, conforme configuração), sem chamar o Skyone; depois um teste "meio aberto" decide se volta. Estado visível na API administrativa e alertado.
 - [ ] **Retry com backoff** só para falhas transitórias (timeout de conexão, 502/503/504), com limite; nunca reenviar se o Skyone já pode ter respondido ao cliente.
-- [ ] **Modo assíncrono (callback):** para agentes com `modo_resposta=async`, o worker envia o pacote com `callback_url` e `callback_token` de uso único e libera; o Skyone chama `POST /api/v1/agentes/callback/{request_id}` (escopo `callback`) com o mesmo formato do Retorno. Callback repetido é ignorado (idempotência por `request_id`); callback que não chega até `callback_timeout_s` gera fallback/transbordo. Mensagens intermediárias (`"parcial": true`) são permitidas.
+- [ ] **Modo assíncrono (callback):** para agentes com `modo_resposta=async`, o worker envia o pacote com `callback_url` e `callback_token` de uso único e libera; o Skyone chama `POST /api/v1/agentes/callback/{request_id}` (escopo `callback`) com o mesmo formato do Retorno. Callback repetido é ignorado (idempotência por `request_id`); callback que não chega até `callback_timeout_s` gera fallback/transbordo. Mensagens intermediárias (`"parcial": true`) são permitidas. **Implementado e testado nesta fase com o provedor simulado; a validação com um callback real do Skyone fica pendente para a Fase 6.5.** Atendimento síncrono usa `timeout_s` 60 s (teste de 09/10/2026); acima disso, só assíncrono.
 - [ ] **Saúde dos componentes:** `/health` interno mostra fila (tamanho, pendentes, idade do mais antigo), workers vivos e agentes com circuito aberto.
 - [ ] Atualizar a Regra 5 no `PROGRESS.md` como concluída e ajustar `bench.py` para medir com 1 e 3 workers.
 
@@ -354,7 +355,7 @@ curl -s "$GW/admin/v1/tenants/$T/metricas?agente=$A" "${AUTH[@]}"
 - [ ] **INV14:** derrubar o Redis com mensagens enfileiradas e subir de novo → todas respondidas; matar um worker no meio de um lote → outro worker retoma.
 - [ ] **INV15:** agente A com Skyone mockado em timeout; agente B normal → B mantém a latência; A entra em circuito aberto e envia fallback.
 - [ ] **INV07:** 50 conversas no tenant A e 1 no tenant B → B despachada sem esperar A.
-- [ ] Callback: resposta via callback chega ao cliente; callback duplicado ignorado; callback com token errado → 401; sem callback no prazo → fallback.
+- [ ] Callback (provedor simulado): resposta via callback chega ao cliente; callback duplicado ignorado; callback com token errado → 401; sem callback no prazo → fallback.
 - [ ] O webhook de entrada responde em < 200 ms mesmo com o agente mock configurado para 30 s.
 
 ### Pronto quando
@@ -607,6 +608,7 @@ docker compose exec gateway pytest -q
 - [ ] **Escopo aplicado no servidor (INV16):** o escopo do usuário (ex.: `{"filiais": ["Morumbi"], "areas": ["comercial"]}`) entra no pacote ao agente **e** é aplicado pelo gateway em toda rota de ferramenta (`contexto_da_chave` recebe também o usuário da conversa). O agente nunca consegue ampliar o escopo pedindo.
 - [ ] **Módulo `consulta_dados`** (evolução do DQE): consultas analíticas com SQL validado (só leitura, lista de tabelas permitidas, limite de linhas e de tempo), filtradas pelo escopo do usuário. Skills específicas antes do SQL livre (mesma filosofia do DQE).
 - [ ] **Tarefas longas:** agentes internos usam `modo_resposta=async` (Fase 0.6) com aviso imediato ("estou preparando o relatório") e entrega posterior.
+- [ ] **Validar o callback assíncrono com um callback real do Skyone** (na 0.6 só foi testado com o provedor simulado): fluxo chamando `POST /api/v1/agentes/callback/{request_id}` com chave de escopo `callback`, duplicado ignorado, prazo estourado → fallback.
 - [ ] **Arquivos na resposta:** o contrato aceita `arquivos: [{"nome", "url" | "base64", "tipo"}]` (PDF, planilha, gráfico); o adaptador de cada canal envia no formato suportado ou manda link temporário assinado.
 - [ ] **Canal Microsoft Teams:** adaptador via Bot Framework (app Azure já existe para o Skyone; confirmar com o Marco se o mesmo registro será usado ou um novo). Validar o token JWT de entrada do Bot Framework (SEG10).
 - [ ] **Canal chat do Luxbrain:** adaptador para o chat existente (hoje ele chama o webhook do agente de forma síncrona com timeout de 120 s e aceita `file_url`/`file_base64`); passa a chamar o gateway, que repassa ao agente.
