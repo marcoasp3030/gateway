@@ -523,3 +523,28 @@ PY
   - Logs gateway/Postgres/Redis/Caddy: **zero ocorrências** de 10 segredos.
 - Volta: recriar o gateway com `gateway:f5a1c22` sobre o mesmo schema 14 (registrado em `docs/MIGRACOES.md`).
 - Próximo bloco (aguarda validação do Marco): 2 — fila por empresa, workers, agendador com trava de liderança, reconciliação, fallback sem promessa falsa (A), recepção resiliente (B) e capacidade/indicadores/alertas (E1–E3).
+
+
+## Fase 0.6 — Bloco 2: fila durável, workers e agendador (publicados desligados) — 2026-10-09
+
+- Status: concluído e implantado com **`FILA_DURAVEL=off`** (decisão do Marco: ligar só no bloco 5). Nenhum modo de agente alterado.
+- Feito (`a0128b4`):
+  - **Chave e exclusividade:** com `off`, workers e agendador sobem, dão sinal de vida e indicadores, mas não agendam nem consomem; com `on`, o agendador em processo da recepção não processa nada. Teste nas três posições (desligada, ligada, divergente com os dois caminhos rodando juntos): cada lote vira exatamente um turno e uma resposta. **Verificado por mutação:** sem a trava do caminho atual, falha a posição ligada; com a fila nova ignorando a chave, falha a desligada. (A primeira versão do teste passava por tempo de execução, não pela regra; foi refeita.)
+  - **Fila:** Redis Streams por empresa (`gw05:fila:<tenant>`, grupo `workers`) com leitura em rodízio; movimento atômico `due → fila` (Lua); agendador com trava de liderança de 10 s renovada a cada iteração; reconciliação com o Postgres a cada 60 s; retomada de itens de worker morto (`XAUTOCLAIM`, 90 s).
+  - **Processamento por etapas** (caminho novo): turno `processando` antes do agente, `respondido` com a resposta antes do envio, partes `enviando → enviada` sob a trava da conversa; parte presa vira `incerta`, não é reenviada, marca “aguardando atendente” e gera `mensagem.entrega_incerta`. Métricas e consumo passam a contar só turnos concluídos.
+  - **Item A (já ativo no caminho atual):** fallback padrão “Tive uma instabilidade agora. Pode repetir sua mensagem em instantes? 🙏”; migração **015** troca só textos antigos gravados (agentes e config de empresa), auditada — em produção alterou **0** registros (nenhum texto antigo gravado). Erro, tempo esgotado (`TempoEsgotado`, erro `AGENT_TIMEOUT`) ou circuito aberto marcam `aguardando_atendente_desde`/`aguardando_motivo` e geram `conversa.aguardando_atendente`; assumir/devolver/responder limpam. Lista de conversas com os campos e filtro `aguardando`.
+  - **Item B:** `restart: unless-stopped` e healthcheck nos 3 serviços (recepção: `/health`; worker/agendador: arquivo de sinal de vida em `/tmp` renovado a cada 5 s). Plano, Fase 1: confirmar com o uazapi o reenvio do webhook quando a recepção está fora.
+  - **E1–E3:** `WORKERS=2`, `CONCORRENCIA_POR_WORKER=20` no `.env`; limites 192/256/128 MB e 0,5/0,5/0,25 CPU; indicadores em `/admin/v1/fila`, `/admin/v1/tenants/{t}/fila`, métricas e `/health` interno; alertas `fila.atrasada` (> 30 s) e `skyone.cota_alta` (> 80% por 5 min), agrupados. `docs/CAPACIDADE.md` explica como aumentar.
+- Validações (comando → resultado):
+  - `sh scripts/test_suite.sh` → **116 passed** (14 novos em `tests/test_fila.py`, com Redis real e pool real em schema temporário), somente bancos `_test`.
+  - Pré-implantação: `gateway:219d71a` = imagem em uso (volta); zero pendentes, `due` e filas vazios. Backup em `/home/twadmin/backups/gateway/pre-bloco2-20261009T200721Z/` (dump `pg_restore --list` OK, SHA-256 `9e87d89fab2e41507618678b21ba04ea5b49f9d4c3d9b0c7ed4256b03a982b5c`; `.env`; os 3 Composes anteriores; tudo 600).
+  - `.env` recebeu `FILA_DURAVEL=off`, `WORKERS=2`, `CONCORRENCIA_POR_WORKER=20` (600 mantido). Build `gateway:a0128b4`; migração 015 aplicada com a imagem anterior no ar; `up -d --no-deps gateway worker agendador`; postgres/redis/painel com os mesmos IDs. Os 4 containers `healthy`, `unless-stopped`, imagem `a0128b4`.
+  - **Exclusividade em produção:** benchmark bykoji (mock/dry, 4 clientes) **4/4, zero erros, p50 4,409 s, máx. 4,42 s**; os 4 turnos novos vieram **todos do caminho atual** (`mensagem_ids` nulo) e **nenhum da fila nova**; Redis sem filas por empresa, `due` vazio, líder ativo, 2 workers vivos.
+  - Indicadores: `/health` interno com `fila` zerada (`ligada:false`, 2 workers, agendador ativo); público só `{"ok":true}`; `/admin/v1/fila`, `/tenants/bykoji/fila` e `metricas.fila` zerados.
+  - Item A: fallback efetivo do agente que herda = texto novo; `bykoji_atendimento` mantém o fallback personalizado `"/"` (definido pelo Marco no painel às 18:00); lista com os dois campos novos; filtro `aguardando=true` → 0.
+  - Segurança: `/gateway/admin/v1/fila` e demais rotas administrativas públicas → 404; interno com `X-Forwarded-For` → 404; sem chave → 401.
+  - Logs gateway/worker/agendador/Postgres/Redis/Caddy: **zero ocorrências** de 10 segredos.
+  - **Recursos reais, parados** (3 amostras de `docker stats`): recepção 58 MB / ~0,5% CPU; worker 1 50 MB e worker 2 46 MB, 0,02% CPU (pico de 6–8% numa amostra); agendador 47 MB / ~0,3% CPU. Os três novos somam ~142 MB; memória disponível na VPS depois da implantação: 1.052 MB.
+- Pendência pequena: `aguardando` com valor inválido devolve `campo: corpo`; incluir o nome nos campos conhecidos no bloco 3.
+- Volta: `docker compose down` só de `worker` e `agendador` não é necessário com a chave desligada; para voltar o código, restaurar os Composes de `pre-bloco2-20261009T200721Z/` e recriar o gateway com `gateway:219d71a` (schema 15 é compatível: a 015 só altera dados).
+- Próximo bloco (aguarda validação do Marco): 3 — justiça entre empresas com limites compartilhados no Redis (INV07), fechamento manual do circuito e nova tentativa (INV15).

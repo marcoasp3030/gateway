@@ -4,7 +4,7 @@ Banco `gateway`, Postgres próprio do gateway. O backend do painel autentica seu
 
 **Legenda:** ✅ implantado e em produção · ⏳ planejado, **não disponível** (a fase está indicada). Não construir telas sobre rotas ⏳.
 
-**Publicação atual (09/10/2026):** imagem `gateway:219d71a`, migrações 001–014, serviço em mock/dry. Tudo marcado ✅ abaixo foi conferido no serviço em produção. Histórico em `PROGRESS.md`.
+**Publicação atual (09/10/2026):** imagem `gateway:a0128b4`, migrações 001–015, serviço em mock/dry. Processos: recepção (`gateway`), 2 `worker` e 1 `agendador`, com a **fila durável desligada** (`FILA_DURAVEL=off`): quem processa ainda é o agendador da recepção. Tudo marcado ✅ abaixo foi conferido no serviço em produção. Histórico em `PROGRESS.md`.
 
 Rotas relativas a `/admin/v1`, salvo indicação de rota absoluta. Escritas confirmadas gravam auditoria na mesma transação, sem corpos nem segredos. Suspender/pausar usa PATCH.
 
@@ -77,6 +77,8 @@ Os códigos são fixos e são os únicos emitidos; o painel decide pelo código 
 **Criação:** `{ "id":"bykoji", "nome":"By Koji", "plano":"pro", "limite_turnos_mes":20000, "timezone":"America/Sao_Paulo" }`. PATCH também aceita `retencao_dias`, `tenant_teste`, `status`. **`tenant_teste` pertence ao tenant**, não à config. A lista não traz consumo embutido.
 
 **Configuração de comportamento** (`PUT /config` atualiza só os campos enviados): `debounce_s` (1–15), `max_wait_s` (≥ debounce, ≤30), `media_wait_s` (0–60), `history_turns` (0–100), `pause_minutes`, `slow_notice_s`, `aviso_demora`, `fallback`, `alerta_telefone`, `send_mode=dry|live`, `agente_mode=mock|live`, `modo_piloto`, `contatos_permitidos`, `encerrar_vazia_min`, `max_lotes_simultaneos`, `max_concorrencia`, `skyone_dominios_permitidos`. Telefones: 8–16 dígitos. Valores nulos herdam; omitir em PATCH preserva. Cache de 30 s, invalidado por escritas da API.
+
+**Fallback padrão da plataforma** (quem não define o próprio): “Tive uma instabilidade agora. Pode repetir sua mensagem em instantes? 🙏” — sem prometer retorno. A migração 015 trocou para ele só os textos antigos gravados; textos personalizados não mudam.
 
 **Módulos:** `GET /modulos` devolve nome, migrações, rotas e escopos. Registro atual: `catalogo` (busca/contexto) e `pedidos` (interface reservada, sem ferramentas até a Fase 4). PUT do módulo exige `{ "ativo":true, "config":{} }` e altera só o tenant indicado. Módulo desabilitado → 404 nas rotas do módulo.
 
@@ -233,7 +235,9 @@ O pacote ao agente inclui só unidades ativas do tenant, com `id`, `nome`, `aber
 | GET | `/tenants/{tenant}/eventos?desde=` | ✅ Polling |
 | GET | `/tenants/{tenant}/eventos/cursor` | ✅ Último ID de evento confirmado do tenant, sem listar histórico |
 
-**Lista:** filtros opcionais `agente`, `canal`, `status=ativa|pausada`, `busca` (substring literal de nome/telefone), `desde` (ISO com fuso; filtra `atualizado_em`). `limite` 1–100, `cursor=<conversation_id>`, ordem crescente por ID; resposta `itens`/`proximo_cursor`. Agente/canal de outro tenant → 404. `ativa` = bot sem pausa vigente; encerramento/desfecho na Fase 3. Itens trazem agente/canal, nome/telefone, última mensagem/horário e `bot_pausado_ate`.
+**Lista:** filtros opcionais `agente`, `canal`, `status=ativa|pausada`, `busca` (substring literal de nome/telefone), `desde` (ISO com fuso; filtra `atualizado_em`). `limite` 1–100, `cursor=<conversation_id>`, ordem crescente por ID; resposta `itens`/`proximo_cursor`. Agente/canal de outro tenant → 404. `ativa` = bot sem pausa vigente; encerramento/desfecho na Fase 3. Itens trazem agente/canal, nome/telefone, última mensagem/horário, `bot_pausado_ate`, **`aguardando_atendente_desde`** e **`aguardando_motivo`**. Filtro opcional **`aguardando=true|false`** (outro valor → 400 `VALIDATION_ERROR`; hoje com `campo: corpo`, passa a `campo: aguardando` no bloco 3 da Fase 0.6).
+
+**Aguardando atendente ✅:** a conversa que recebe fallback por erro do agente, tempo esgotado ou circuito aberto fica marcada com `aguardando_atendente_desde` (instante da primeira marcação) e `aguardando_motivo` = `erro_agente | tempo_esgotado | circuito_aberto | entrega_incerta`, e gera o evento **`conversa.aguardando_atendente`** no `/eventos` (só na primeira marcação; `alvo` = conversa). A marcação sai quando um atendente **assume, devolve ou responde** a conversa (os dois campos voltam a `null`). `entrega_incerta` só ocorre no caminho da fila durável (parte da resposta presa em envio quando o worker caiu; nunca é reenviada; evento `mensagem.entrega_incerta`).
 
 **Histórico paginado:** `GET .../conversas/{conv}/mensagens?antes=<id>&limite=40` → `{ "itens":[...], "tem_mais":true }`. `antes` é exclusivo (só IDs menores); `limite` 1–100; sem parâmetros, as últimas 100. Itens de cada página em ordem cronológica. Para a página anterior, use o **menor ID** da página atual como `antes`; pare quando `tem_mais=false`. Página vazia → `itens:[]`, `tem_mais:false`. Mensagens novas não deslocam páginas anteriores. Tenant e conversa sempre filtrados. A rota de integração `/api/v1/conversas/{conv}/mensagens` usa a mesma paginação.
 
@@ -283,7 +287,16 @@ POST exige `url`; aceita `eventos` (lista) e `ativo` (padrão false). Devolve `s
 
 **Consumo:** devolve `mes`, `turnos`, `limite`, `agentes` (agente_id/turnos) e `avisos` (percentual/turnos/limite/criado_em). Mês no fuso do tenant; padrão mês atual. Contam todos os turnos registrados, inclusive sistema/erro/ignorados; não equivale a cobrança por tokens. `uso` do provedor é opcional e preservado quando contém contagens inteiras não negativas. Em 80% e 100%, um aviso persistente por tenant/mês/patamar vai para a auditoria e para webhooks ativos inscritos em `consumo.limite`. **Não corta atendimento.** `limite_turnos_mes=null` desativa os avisos; zero aciona ambos no primeiro turno; alterar o limite durante o mês não reenvia patamar já registrado. Postgres é a fonte da verdade; o Redis guarda contador reconstruível.
 
-**Métricas:** `{ "turnos":6, "erros":0, "total_p50_ms":4200, "total_p95_ms":4300 }`; sem turnos, percentis nulos. Único filtro: `agente`. Não enviar filtros de período/canal/unidade.
+**Métricas:** `{ "turnos":6, "erros":0, "total_p50_ms":4200, "total_p95_ms":4300, "fila":{...} }`; sem turnos, percentis nulos. Contam só turnos concluídos. Único filtro: `agente`. Não enviar filtros de período/canal/unidade. `fila` traz os indicadores da empresa (abaixo); se o Redis não responder, `{"ligada":…, "indisponivel":true}` sem derrubar as métricas.
+
+**Fila durável ✅ (indicadores; zerados enquanto `FILA_DURAVEL=off`):**
+
+| Métodos | Rota | Status |
+|---|---|---|
+| GET | `/fila` | ✅ Plataforma: por empresa `aguardando`, `em_processamento`, `mais_antiga_s`; `agentes_em_andamento`; `cota_skyone` por URL (só 12 caracteres do hash, `uso`, `limite`, `percentual`); `workers_vivos`; `agendador_ativo` |
+| GET | `/tenants/{tenant}/fila` | ✅ Só a empresa: `ligada`, `aguardando`, `em_processamento`, `mais_antiga_s`, `agentes_em_andamento`; tenant inexistente → 404 |
+
+`/health` interno (sem cabeçalhos de proxy) devolve também `fila: {ligada, aguardando, mais_antiga_s, workers_vivos, agendador_ativo}`; pelo proxy público continua só `{"ok":true}`. Alertas na auditoria: `fila.atrasada` (empresa; mensagem esperando na fila > 30 s; agrupado a cada 10 min) e `skyone.cota_alta` (plataforma; URL acima de 80% por 5 min; agrupado a cada 30 min). Capacidade: `docs/CAPACIDADE.md`.
 
 ## 15. Benchmark administrativo (operação)
 
