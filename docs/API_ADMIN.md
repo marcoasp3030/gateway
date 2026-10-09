@@ -1,6 +1,6 @@
 # API administrativa — contrato com o painel
 
-Banco: `gateway`, Postgres próprio do gateway. O backend do painel autentica seus usuários e aplica papéis/tenant; a chave de serviço tem acesso administrativo global. O navegador nunca recebe essa chave nem acessa o banco. ✅ indica código implementado; ⏳ indica contrato planejado, **não disponível**. Implementação no checkout pode anteceder a implantação; consulte `PROGRESS.md`.
+Banco: `gateway`, Postgres próprio do gateway. O backend do painel autentica seus usuários e aplica papéis/tenant; a chave de serviço tem acesso administrativo global. O navegador nunca recebe essa chave nem acessa o banco. ✅ indica código implementado; ⏳ indica contrato planejado, **não disponível**. **Publicação atual:** o serviço ainda usa a versão do passo 5 (migrações 001–005). As rotas de módulos, modelos, webhooks de saída, notificar, consumo, unidades e contatos descritas como implementadas abaixo estão testadas no checkout, mas dependem da implantação das migrações 006–011 para uso pelo painel. Consulte `PROGRESS.md`.
 
 ## Acesso interno e autenticação
 

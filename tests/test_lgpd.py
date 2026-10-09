@@ -40,3 +40,9 @@ def test_LGPD03_INV08_exportar_anonimizar_preserva_metricas_e_outro_tenant():
    assert (await h.get(url+'/exportar')).json()['contato']['anonimizado_em']
    assert all(conv not in key for key in fila.due)
  banco(caso)
+
+
+def test_LGPD03_identificador_formatado_sem_juntar_campos_alheios():
+ from admin.contatos import contem
+ assert contem('{"telefone":"+55 (11) 98765-4321"}',['5511987654321'])
+ assert not contem('{"pedido":"5511", "numero":"987654321"}',['5511987654321'])

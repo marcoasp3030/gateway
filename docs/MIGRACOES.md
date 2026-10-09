@@ -128,3 +128,21 @@ COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml sh scripts/test_suite.s
 ```
 
 O wrapper encaminha as integrações para `gateway_migrations_test` com as credenciais de teste existentes; `conftest.py` recusa qualquer URL de banco sem sufixo `_test`. A suíte desta entrega passou antes da troca: **65 testes**. O benchmark pós-troca no banco novo foi uma validação operacional explicitamente autorizada pelo Marco, não a execução da suíte de testes contra produção.
+
+
+## Complementos da 0.5 — preparados em 09/10/2026
+
+Implementados no checkout e testados, **ainda não aplicados no banco do serviço**:
+
+| Migração | Mudança |
+|---|---|
+| 006 | Renomeia `cardapio_itens` para `catalogo_itens`, preservando os dados |
+| 007 | Auditoria de modelos globais permite tenant nulo; negócios continuam com tenant explícito |
+| 008 | Outbox de webhooks assinados, tentativas e índice por tenant |
+| 009 | Eventos de sistema nas mensagens, origem e uso nos turnos |
+| 010 | Avisos mensais persistentes de consumo e índice temporal |
+| 011 | Vínculos de contato/backfill, anonimização e FKs diferíveis somente quando solicitado na transação |
+
+Não reconstruir/recriar o serviço sem aplicar a sequência explicitamente e conferir a versão esperada. A aplicação nova verifica a última versão do diretório de migrações no startup. A imagem anterior do passo 5 exige versão 005: **não basta voltar àquela imagem sobre o schema 011**. Uma implantação deve preservar imagem com tag do commit, backup do banco `gateway` e ambiente, e preparar a volta antes de aplicar as novas migrações. O procedimento antigo de volta à Fase 0 usa `bykoji_test` preservado; não recupera automaticamente conversas criadas em `gateway`.
+
+`tests/smoke_runtime.py` agora cria um schema aleatório dentro de `gateway_migrations_test` e um namespace Redis exclusivo, impedindo que seu agendador consuma lotes do serviço publicado. Usa chaves sintéticas e deve publicar porta só em loopback. Em 09/10/2026 o smoke com servidor/Redis/Postgres reais passou: 6/6 conversas, zero erros, dois tenants/três agentes, exportação e anonimização confirmadas. Container temporário encerrado; schema `smoke_482e3057accb41c3a06b81d11dfd0afe` preservado para inspeção, sem comandos destrutivos.

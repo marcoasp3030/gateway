@@ -1,0 +1,117 @@
+{
+  "health": true,
+  "SEG02": 404,
+  "docs": 404,
+  "bench": {
+    "respondidos": 6,
+    "esperados": 6,
+    "erros": 0,
+    "p50_s": 4.407,
+    "max_s": 4.422,
+    "conversas": [
+      {
+        "tenant": "bykoji",
+        "agente": "bykoji_atendimento",
+        "canal": "can_f5b302fb98f76d3c2f1f958b",
+        "conversation_id": "bykoji:can_f5b302fb98f76d3c2f1f958b:bench-cbfc46e2cb604c7c98199ddb7738e04b",
+        "tempo_s": 4.378
+      },
+      {
+        "tenant": "bykoji",
+        "agente": "bykoji_atendimento",
+        "canal": "can_f5b302fb98f76d3c2f1f958b",
+        "conversation_id": "bykoji:can_f5b302fb98f76d3c2f1f958b:bench-93a7e01a5a57422c9dedebf09f61f6a1",
+        "tempo_s": 4.4
+      },
+      {
+        "tenant": "bykoji",
+        "agente": "ag_26edb65abb7638aa57932d52",
+        "canal": "can_e7b050da72b63f04dc0ac8ca",
+        "conversation_id": "bykoji:can_e7b050da72b63f04dc0ac8ca:bench-3ef4b7726e844de198ed0f77639c901e",
+        "tempo_s": 4.417
+      },
+      {
+        "tenant": "bykoji",
+        "agente": "ag_26edb65abb7638aa57932d52",
+        "canal": "can_e7b050da72b63f04dc0ac8ca",
+        "conversation_id": "bykoji:can_e7b050da72b63f04dc0ac8ca:bench-46ba7ac2d2dc4a2185a01c3ce86371d9",
+        "tempo_s": 4.397
+      },
+      {
+        "tenant": "smoke_teste",
+        "agente": "ag_e6624f6574929003f626ea63",
+        "canal": "can_849290c43d40129286a71dde",
+        "conversation_id": "smoke_teste:can_849290c43d40129286a71dde:bench-6074f22e917442bdadf0a832d85839b9",
+        "tempo_s": 4.422
+      },
+      {
+        "tenant": "smoke_teste",
+        "agente": "ag_e6624f6574929003f626ea63",
+        "canal": "can_849290c43d40129286a71dde",
+        "conversation_id": "smoke_teste:can_849290c43d40129286a71dde:bench-298aee576d5a4a87b4c6cf8786c1c360",
+        "tempo_s": 4.414
+      }
+    ],
+    "metricas": [
+      {
+        "tenant": "bykoji",
+        "agente": "bykoji_atendimento",
+        "delta": {
+          "turnos": 2,
+          "erros": 0
+        },
+        "acumulado": {
+          "turnos": 2,
+          "erros": 0,
+          "total_p50_ms": 4279.0,
+          "total_p95_ms": 4287.1
+        }
+      },
+      {
+        "tenant": "bykoji",
+        "agente": "ag_26edb65abb7638aa57932d52",
+        "delta": {
+          "turnos": 2,
+          "erros": 0
+        },
+        "acumulado": {
+          "turnos": 2,
+          "erros": 0,
+          "total_p50_ms": 4270.0,
+          "total_p95_ms": 4271.8
+        }
+      },
+      {
+        "tenant": "smoke_teste",
+        "agente": "ag_e6624f6574929003f626ea63",
+        "delta": {
+          "turnos": 2,
+          "erros": 0
+        },
+        "acumulado": {
+          "turnos": 2,
+          "erros": 0,
+          "total_p50_ms": 4282.0,
+          "total_p95_ms": 4291.0
+        }
+      }
+    ]
+  },
+  "LGPD03_runtime": "exportação e anonimização confirmadas em transação real",
+  "consumo": {
+    "mes": "2026-10",
+    "turnos": 4,
+    "limite": null,
+    "agentes": [
+      {
+        "agente_id": "ag_26edb65abb7638aa57932d52",
+        "turnos": 2
+      },
+      {
+        "agente_id": "bykoji_atendimento",
+        "turnos": 2
+      }
+    ],
+    "avisos": []
+  }
+}

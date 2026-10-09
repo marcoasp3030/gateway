@@ -19,7 +19,8 @@ async def contato(c,t,cid):
 
 def contem(texto,identificadores):
     # Também cobre telefones formatados em texto de provedores antigos.
-    return any(i in texto or (i.isdigit() and i in re.sub(r'\D','',texto)) for i in identificadores if i)
+    grupos=[re.sub(r'\D','',m.group()) for m in re.finditer(r'\+?\d[\d ()-]{6,}\d',texto)]
+    return any(i in texto or (i.isdigit() and any(i in g for g in grupos)) for i in identificadores if i)
 
 @router.get('/tenants/{tenant_id}/contatos')
 async def lista(request:Request,tenant_id:str,busca:str=Query('',max_length=200)):

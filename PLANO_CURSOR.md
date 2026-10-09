@@ -4,15 +4,24 @@
 
 ---
 
-## 0. Estado atual (atualizado em 08/10/2026)
+## 0. Estado atual (atualizado em 09/10/2026)
 
 | Etapa | Situação | Onde está o registro |
 |---|---|---|
 | Fase 0 — implantação simulada | ✅ Concluída (commit `aef6f26`) | `PROGRESS.md` |
 | Publicação no domínio | ✅ `https://painel.luxbrain.com.br/gateway/health` via **Caddy** do projeto `painel_koji` (rede `luxbrain_gateway_proxy`, `docker-compose.proxy.yml`) | `PROGRESS.md`, `docs/PUBLICACAO.md`, `docs/Caddyfile.painel.example` |
 | Fase 0.3 — descobertas no Skyone | 🟡 Quase concluída: probe no fluxo validado ✅ (commit `bf7651d`, 42 testes), memória ✅ (gateway é dono do histórico), histórico enviado pelo gateway ✅, comparação de modelos ✅. Faltam: **autenticação do Webhook** (bloqueia a *conclusão* da 0.5, não o início), simultâneas e tempo limite/callback (antes da 0.6), chamada direta à OpenAI para medir o custo do Skyone | `docs/SKYONE_RESULTADOS.md`, `docs/SKYONE.md`, `PROGRESS.md` |
-| Fase 0.5 | ▶️ **Em andamento**: blocos 1–4 e troca para banco próprio `gateway` concluídos; benchmark mock/dry com 2 tenants e 3 agentes validado. Autenticação real Skyone e demais funcionalidades da fase ainda pendentes | `docs/MIGRACOES.md`, `PROGRESS.md` |
+| Fase 0.5 | ▶️ **Em andamento**: blocos 1–4 publicados em mock/dry no banco `gateway`; complementos solicitados implementados e testados (módulos, modelos versionados, saídas HMAC, notificar, consumo, unidades, LGPD03 e bench). **Migrações 006–011 e complementos ainda não implantados no serviço**. Fechamento depende de autenticação/limite Skyone, revisão do contrato e pendências abaixo | `docs/MIGRACOES.md`, `PROGRESS.md` |
 | Fases 0.6 em diante | ⏳ Não iniciadas | — |
+
+**Entrega dos complementos (09/10/2026):** cada bloco possui commit e suíte verde. `docs/API_ADMIN.md` é o contrato único, com ✅ implementado no checkout e ⏳ planejado por fase. Teste do backend pela rede Docker: alias `http://luxbrain-gateway:8000/admin/v1`, IP privado aceito com chave e headers de proxy recusados. Conexão do backend do painel a essa rede **não foi alterada**; exige confirmação do Marco.
+
+**Para fechar a 0.5:**
+- Implantar os complementos/migrações 006–011 de modo controlado e repetir validações no serviço (hoje só 001–005 estão aplicadas nele). Testes e servidor temporário usam exclusivamente banco `_test`, schema/fila próprios.
+- Marco confirmar autenticação real Skyone (401/403 sem credencial, 200 com credencial) e limite por minuto, sem presumir formato.
+- Revisar este contrato com o Marco antes das telas e confirmar modelos iniciais; aprovar alteração da rede do backend do painel se essa integração for iniciada.
+- O contrato ainda marca como planejados na 0.5: teste direto do agente (`/testar`), rotação de segredo do canal, lista/filtros de conversas, assumir/devolver/envio humano e polling de eventos. Esses itens estavam fora dos oito complementos solicitados e não foram declarados implementados.
+- Simultâneas, timeout/callback continuam dependências antes da 0.6; provedor direto depende da decisão da 2.5. Nenhuma fase posterior foi iniciada.
 
 **Ambiente real da VPS (prevalece sobre exemplos deste plano):**
 - Proxy público é o **Caddy** do painel (`painel_koji`), não Nginx. `docs/nginx-gateway.conf` fica apenas como referência; a configuração em uso está em `docs/Caddyfile.painel.example` e `docs/PUBLICACAO.md`.
@@ -273,21 +282,21 @@ docker compose logs gateway | grep -c "$UAZAPI_WEBHOOK_SECRET"     # 0 (SEG05)
 
 ### Tarefas — código
 - [ ] Estrutura de pastas: `app/nucleo/` (pipeline, fila, conversas), `app/canais/<tipo>.py` (adaptadores), `app/agentes/` (adaptador de agente; `skyone.py` e `mock.py`), `app/modulos/<nome>/` (rotas, contexto, migrações do módulo), `app/admin/` (API `/admin/v1`).
-- [ ] **Interface de módulo:** cada módulo declara nome, migrações, rotas de ferramentas (`/api/v1/<modulo>/...`), escopos que essas rotas exigem e uma função `contexto(conversa) -> dict` que entra no pacote ao agente. Rotas de módulo não habilitado no tenant → 404.
-- [ ] **Configuração efetiva** = padrão do modelo ← padrão do tenant ← agente (o mais específico vence), com cache em memória (TTL 30 s) e invalidação ao salvar pela API.
+- [x] **Interface de módulo:** cada módulo declara nome, migrações, rotas de ferramentas (`/api/v1/<modulo>/...`), escopos que essas rotas exigem e uma função `contexto(conversa) -> dict` que entra no pacote ao agente. Rotas de módulo não habilitado no tenant → 404.
+- [x] **Configuração efetiva** = padrão do modelo ← padrão do tenant ← agente (o mais específico vence), com cache em memória (TTL 30 s) e invalidação ao salvar pela API.
 - [ ] **Roteamento:** canal → agente. Canal com `triagem` fica previsto no schema; implementação simples por regra (palavra-chave/menu) entra na Fase 6.5.
 - [ ] **Webhooks por canal:** `POST /webhooks/<tipo>/{canal_id}?s=<webhook_secret>`. Canal inativo, agente pausado ou tenant suspenso → 200 sem processar (não forçar reenvio do provedor).
 - [ ] O pipeline lê toda configuração do **agente efetivo**, não do `.env`. O `.env` guarda só infraestrutura e chaves globais.
 - [ ] Payload ao Skyone ganha `tenant_id`, `agente_id`, `modelo_id` e, na estratégia `por_modelo`, `instrucoes_agente` (Apêndice A).
 - [ ] **Chaves de API (SEG04 + SEG11):** só o hash (`sha256(pepper + chave)`, `API_KEY_PEPPER`); valor exibido uma vez; escopos, agente opcional, validade e IPs; `ultimo_uso_em` atualizado. Dependência única `contexto_da_chave(escopo)` usada por **todas** as rotas `/api/*`, que devolve `(tenant_id, agente_id?, conversa?)` (SEG06).
 - [ ] **SEG12:** aceitar `PANEL_SERVICE_KEY` e `PANEL_SERVICE_KEY_NEXT`; registrar no log qual foi usada (sem o valor).
-- [ ] **Teto mensal por tenant (em turnos):** contador mensal no Redis, persistido em `turnos`, com detalhamento por agente. Avisos em 80% e 100%; ao estourar, registrar e alertar, **sem cortar o atendimento** sem decisão do Marco. Gravar `uso` do Skyone se vier no Retorno.
-- [ ] **Horários no pacote:** horários de `tenant_unidades` entram no payload (aberta agora, próxima abertura), no fuso do tenant.
-- [ ] **Notificar pela voz do agente:** `POST /api/v1/conversas/{conv}/notificar` (escopo `notificar`) com `{ "evento": "...", "dados": {...}, "instrucao": "..." }`. Cria turno com origem `sistema`, chama o agente da conversa e envia a resposta. Respeita pausa humana.
-- [ ] **Webhooks de saída assinados:** eventos (`conversa.transferida`, `conversa.encerrada`, eventos de módulos) enviados com `X-Gateway-Timestamp` e `X-Gateway-Signature: sha256=<HMAC(segredo, timestamp + "." + corpo)>`; 3 tentativas com backoff; registro de entrega.
+- [x] **Teto mensal por tenant (em turnos):** contador mensal no Redis, persistido em `turnos`, com detalhamento por agente. Avisos em 80% e 100%; ao estourar, registrar e alertar, **sem cortar o atendimento** sem decisão do Marco. Gravar `uso` do Skyone se vier no Retorno.
+- [x] **Horários no pacote:** horários de `tenant_unidades` entram no payload (aberta agora, próxima abertura), no fuso do tenant.
+- [x] **Notificar pela voz do agente:** `POST /api/v1/conversas/{conv}/notificar` (escopo `notificar`) com `{ "evento": "...", "dados": {...}, "instrucao": "..." }`. Cria turno com origem `sistema`, chama o agente da conversa e envia a resposta. Respeita pausa humana.
+- [x] **Webhooks de saída assinados:** eventos (`conversa.transferida`, `conversa.encerrada`, eventos de módulos) enviados com `X-Gateway-Timestamp` e `X-Gateway-Signature: sha256=<HMAC(segredo, timestamp + "." + corpo)>`; 3 tentativas com backoff; registro de entrega.
 - [ ] **API administrativa** conforme `docs/API_ADMIN.md`: tenants, módulos do tenant, modelos de agente, agentes (incluindo `testar` e `simular` por agente), canais, unidades, chaves com escopo, webhooks de saída, conversas, pausa/retomada, contatos (LGPD), métricas (por tenant e por agente), auditoria.
 - [ ] Remover as rotas antigas `/admin/*`, `/test/*` e `/metricas` globais. Equivalentes: `POST /admin/v1/tenants/{id}/agentes/{agente}/simular` (conversa `<tenant>:test:<usuario>`), `GET /admin/v1/tenants/{id}/conversas/{conv}/mensagens`, `GET /admin/v1/tenants/{id}/metricas?agente=`.
-- [ ] Atualizar `scripts/bench.py`: `--tenant`, `--agente`, `--panel-key` no lugar de `--admin-key`; opção de rodar vários tenants/agentes ao mesmo tempo.
+- [x] Atualizar `scripts/bench.py`: `--tenant`, `--agente`, `--panel-key` no lugar de `--admin-key`; opção de rodar vários tenants/agentes ao mesmo tempo.
 - [ ] Variáveis de validação a partir desta fase: `AUTH=(-H "Authorization: Bearer $PANEL_SERVICE_KEY" -H "X-Actor: cursor")`, `T=bykoji`, `A=<id do agente>`.
 - [ ] **SEG03 (SSRF):** `validar_formato_url` ao salvar URLs (Skyone, webhooks de saída, `base_url` de canal); `validar_url_saida` **chamada pelos adaptadores Skyone e uazapi antes de cada requisição** (hoje existe mas não é usada — pendência registrada no `PROGRESS.md`).
 - [ ] **SEG13 (genérico, para não esperar o teste do Marco):** o adaptador Skyone envia a credencial conforme `skyone_auth_tipo`: `cabecalho` → `<skyone_auth_cabecalho>: <valor>`; `bearer` → `Authorization: Bearer <valor>`; `nenhuma` → só aceito com `agente_mode=mock` ou tenant marcado como teste (agente `live` sem credencial → 400). Valor criptografado (Fernet), nunca devolvido pela API, nunca em log. Quando o Marco informar o formato real do Skyone, só ajustar o padrão e o teste — sem mudar o schema. 🛑 A Fase 0.5 **só fecha** depois desse teste real (401/403 sem credencial, 200 com credencial).
@@ -296,7 +305,7 @@ docker compose logs gateway | grep -c "$UAZAPI_WEBHOOK_SECRET"     # 0 (SEG05)
 - [ ] **Estratégia de sessão (decidida em 08/10/2026):** o Skyone **não** manteve memória pela `session_id` no teste. **O gateway é o dono do histórico**: envia `historico` (últimos `history_turns` turnos com `enviada_em`, e depois o resumo da Fase 5.5) e `session_id = request_id` (sessão nova por turno, para não duplicar contexto caso o Skyone passe a guardar memória). Documentar em `docs/SKYONE.md` junto com o JavaScript do fluxo-modelo que monta o prompt com o histórico (código atual em `docs/SKYONE_RESULTADOS.md`).
 - [ ] **Teste de contrato com o histórico real:** o pacote montado pelo pipeline para uma conversa com 3 turnos anteriores tem `historico` com 3 itens em ordem cronológica, `role` `user|assistant`, `enviada_em` no fuso do tenant, e nunca inclui mensagens de outra conversa (INV17).
 - [ ] **SEG02:** toda rota nova de gestão sob `/admin`.
-- [ ] **LGPD03:** exportar e apagar/anonimizar contato, com `audit_log`.
+- [x] **LGPD03:** exportar e apagar/anonimizar contato, com `audit_log`.
 
 ### Testes obrigatórios
 - [ ] **INV08/INV17 — isolamento:** tenant A não lê nem altera nada do tenant B por nenhuma rota; mensagem de canal do tenant A nunca chega a agente do tenant B; dois agentes do mesmo tenant com canais diferentes recebem só as suas conversas.

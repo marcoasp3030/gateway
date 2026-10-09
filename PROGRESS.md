@@ -362,3 +362,19 @@ PY
 - `scripts/bench.py` usa `/admin/v1`, `--tenant`, `--agente`, `--panel-key` ou variável de ambiente; repetição de alvos para múltiplos tenants/agentes, canal explícito ou descoberta inequívoca, verificação mock/dry/piloto antes de escrever.
 - Duas entradas por conversa, conferência do histórico, timeout e exit de falha, métricas/deltas separados e latências. Nenhuma criação/ativação automática de entidades, nenhuma chave em relatório/erro.
 - Suíte isolada: **74 passed**, incluindo benchmark com dois tenants em transporte simulado e HTTP recusado contabilizado como erro. Serviço ainda não recriado.
+
+## Fase 0.5 — Validação integrada dos complementos e parada — 2026-10-09
+
+- Status: **oito blocos solicitados implementados**, cada um com commit/testes verdes; Fase 0.5 integral ainda não concluída.
+- Suíte final: **75 passed em 19,33 s**, banco `_test`. Acrescentada regressão LGPD para telefone formatado sem concatenar números de campos alheios; ajuste evita anonimizar um bruto sem relação com o contato.
+- `tests/smoke_runtime.py` agora cria schema Postgres e namespace Redis exclusivos, com chaves sintéticas. Nenhum agendador temporário consome a fila do serviço.
+- Servidor temporário em `127.0.0.1:18100`, migrations 001–011, schema `smoke_482e3057accb41c3a06b81d11dfd0afe` em `gateway_migrations_test`: startup/health OK, SEG02 → 404 com proxy forjado, docs → 404, novas rotas de módulos/modelos/unidades/consumo/contatos/saídas respondem no ambiente isolado.
+- Novo `scripts/bench.py` executado contra esse servidor com **2 tenants, 3 agentes, 3 canais, 6 conversas e 12 entradas**: **6/6 respondidas, 0 erros, p50 observado 4,407 s, máximo 4,422 s**. Mock/dry com debounce 4 s. Exportação/anonimização LGPD validadas também com transação real, depois do benchmark; consumo de By Koji continuou em 4 turnos.
+- Container temporário encerrado; schema de diagnóstico preservado no banco de testes. Relatório sanitizado em `docs/VALIDACAO_COMPLEMENTOS05.json`.
+- Serviço publicado preservado: health interno/público `{"ok":true}`, schema **005**, **zero agentes em live**. Complementos/migrações 006–011 ainda não implantados no serviço; contrato identifica essa diferença explicitamente. Nenhum Compose do painel alterado, nenhum envio externo ou prune.
+- Seção 0 do plano e procedimento de migrações atualizados. A imagem do passo 5 exige schema 005 e não pode simplesmente ser recolocada sobre 011; implantação futura deve preparar backup/volta compatível antes de migrar.
+- Para fechar a fase:
+  - Implantação controlada dos complementos e revalidação no serviço.
+  - Marco: autenticação real Skyone (401/403 sem credencial, 200 com credencial), limite/minuto, revisão do contrato/modelos iniciais; confirmação para conectar backend do painel à rede interna, se for iniciar a integração.
+  - Gestão ainda planejada no contrato da 0.5, fora dos oito blocos solicitados: `/agentes/{id}/testar`, rotação do segredo de canal, lista/filtros de conversas, assumir/devolver/envio humano e polling de eventos. Não foram implementados por inferência nem declarados concluídos.
+  - Simultâneas e timeout/callback antes da 0.6 continuam com o Marco. Nenhuma fase posterior iniciada.
