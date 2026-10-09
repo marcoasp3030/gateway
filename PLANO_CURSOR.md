@@ -11,20 +11,12 @@
 | Fase 0 — implantação simulada | ✅ Concluída (commit `aef6f26`) | `PROGRESS.md` |
 | Publicação no domínio | ✅ `https://painel.luxbrain.com.br/gateway/health` via **Caddy** do projeto `painel_koji` (rede `luxbrain_gateway_proxy`, `docker-compose.proxy.yml`) | `PROGRESS.md`, `docs/PUBLICACAO.md`, `docs/Caddyfile.painel.example` |
 | Fase 0.3 — descobertas no Skyone | 🟡 Probe, memória/histórico e comparação de modelos respondidos. **Autenticação Basic validada também pelo `/testar` do gateway: 200, 8.194 ms; limite 300/min no Skyone e 240/min por URL no gateway concluídos.** Faltam simultâneas e timeout/callback antes da 0.6; comparação direta OpenAI para decisão da 2.5 | `docs/SKYONE_RESULTADOS.md`, `PROGRESS.md` |
-| Fase 0.5 | ✅ **Implementação e validações concluídas; fechamento formal aguarda somente revisão do contrato e confirmação dos modelos iniciais pelo Marco.** Banco `gateway`, migrações 001–012; 87 testes aprovados na entrega, benchmark 2 tenants/3 agentes 6/6 sem erros. Agente `postman_teste/ag_dba38a6fae985abf584d512f` validado e preservado em **Skyone live/dry**; demais agentes sem live e nenhum envio live. Autenticação/limite concluídos, logs conferidos sem credenciais | `docs/API_ADMIN.md`, `docs/MIGRACOES.md`, `PROGRESS.md` |
-| Fases 0.6 em diante | ⏳ Não iniciadas | — |
+| Fase 0.5 | ✅ **Concluída formalmente em 09/10/2026.** Contrato `docs/API_ADMIN.md` revisado e reorganizado por assunto; modelos iniciais `atendente_delivery` e `assistente_generico` confirmados pelo Marco. Em produção: imagem `gateway:8f387be`, migrações 001–012, 96 testes. Painel integrado pela rede interna. Agentes live/dry: `postman_teste/ag_dba38a6fae985abf584d512f` e `bykoji/ag_7e8683a49b68e615aa4e2101` (“[teste] Bench segundo agente”), por escolha do Marco; nenhum envio live | `docs/API_ADMIN.md`, `docs/MIGRACOES.md`, `PROGRESS.md` |
+| Fases 0.6 em diante | ⏳ Não iniciadas (próxima: 0.6) | — |
 
-**Entrega dos complementos (09/10/2026):** cada bloco possui commit e suíte verde. `docs/API_ADMIN.md` é o contrato único, com ✅ implementado e publicado no serviço e ⏳ planejado por fase. Teste do backend pela rede Docker: alias `http://luxbrain-gateway:8000/admin/v1`, IP privado aceito com chave e headers de proxy recusados. Conexão do backend do painel a essa rede **não foi alterada**; exige confirmação do Marco.
+**Fechamento da Fase 0.5 (09/10/2026):** últimos ajustes do contrato implantados com um commit por item: erros padronizados (códigos fixos, mensagem em português, `detalhes.campo`, mesmo envelope nos middlewares e no 404), histórico paginado, lista de agentes com `circuito_estado`/`canais`, null em campo obrigatório e integridade com campo, **`/testar` com `{"usar_provedor_real": true}`** (chama o Skyone sem alterar o agente) e `/simular` com IA real quando o envio é dry. Imagem de volta `gateway:39e1a53`; backup `gateway-pre-contrato-20261009T173104Z.dump`. Detalhes em `PROGRESS.md`.
 
-**Para fechar formalmente a 0.5 — somente duas confirmações do Marco:**
-1. Revisar e aprovar `docs/API_ADMIN.md` antes de iniciar as telas do painel.
-2. Confirmar os modelos iniciais `atendente_delivery` e `assistente_generico`.
-
-**Autenticação e limite: concluídos.** Marco cadastrou Basic Auth pelo túnel e executou `/testar`: HTTP 200, `ok: true`, 8.194 ms, resposta em português. Sem credencial/senha errada no Skyone → 401; correta → 200. Configuração adotada: 300/min no Webhook, 240/min compartilhados por URL no gateway. Logs disponíveis do container atual: zero ocorrências de senha/Basic/Authorization; auditoria do teste confirmada. Nenhuma nova chamada real foi feita pelo Codex nessa conferência.
-
-**Estado preservado:** somente o agente `ag_dba38a6fae985abf584d512f` do tenant `postman_teste` está em `agente_mode=live`, `provedor=skyone`, `send_mode=dry`; nenhum outro agente live e nenhum envio live. Nenhuma configuração alterada na conferência.
-
-**Fora do fechamento da 0.5:** conectar o backend do painel à rede interna exige confirmação separada se essa integração for iniciada. Simultâneas e timeout/callback continuam antes da 0.6; comparação OpenAI direta pertence à decisão da 2.5. Nenhuma fase posterior iniciada.
+**Fora da 0.5, antes da 0.6:** simultâneas e timeout/callback com o Marco; comparação OpenAI direta pertence à decisão da 2.5. Nenhuma fase posterior iniciada.
 
 **Ambiente real da VPS (prevalece sobre exemplos deste plano):**
 - Proxy público é o **Caddy** do painel (`painel_koji`), não Nginx. `docs/nginx-gateway.conf` fica apenas como referência; a configuração em uso está em `docs/Caddyfile.painel.example` e `docs/PUBLICACAO.md`.
@@ -334,7 +326,7 @@ curl -s "$GW/admin/v1/tenants/$T/metricas?agente=$A" "${AUTH[@]}"
 ### Pronto quando
 - Dois tenants e três agentes rodando ao mesmo tempo, com configuração, canais, chaves, métricas e dados isolados.
 - Criar um agente novo a partir de um modelo é só configuração (nenhuma linha de código).
-- 🛑 **PARE:** revisar com o Marco a `docs/API_ADMIN.md` antes de ele começar as telas do painel.
+- 🛑 **PARE:** revisar com o Marco a `docs/API_ADMIN.md` antes de ele começar as telas do painel. ✅ Revisado e aprovado em 09/10/2026; fase fechada.
 
 ---
 

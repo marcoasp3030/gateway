@@ -434,3 +434,28 @@ PY
 - Configuração efetiva conferida: agente informado preservado em **provedor skyone / agente_mode live / send_mode dry**, **zero outros agentes live**, **zero agentes com envio live**. Nenhum PATCH, alteração de banco/configuração, rotação, build, restart ou envio nesta tarefa.
 - Atualizados `docs/SKYONE_RESULTADOS.md` e seção 0 do plano. Alterações somente documentais; `git diff --check` aprovado, sem necessidade de repetir a suíte de código (última entrega: 87 testes verdes).
 - Pendências formais exatas: **(1)** Marco revisar/aprovar `docs/API_ADMIN.md`; **(2)** confirmar `atendente_delivery` e `assistente_generico`. Integração do painel depende de confirmação separada se iniciada; simultâneas/timeout/callback são anteriores à 0.6, não bloqueios adicionais da 0.5.
+
+
+## Fase 0.5 — Ajustes finais do contrato e fechamento formal — 2026-10-09
+
+- Status: **concluída formalmente.** Marco aprovou o contrato e confirmou os modelos iniciais `atendente_delivery` e `assistente_generico` (ambos globais, presentes em produção).
+- Feito (um commit por item, todos com testes):
+  - Edições pendentes da sessão anterior revisadas e separadas: `88eaccf` erros padronizados (códigos fixos, mensagem em português, `detalhes.campo`, envelope nos middlewares/404, `TENANT_NOT_FOUND` → `NOT_FOUND`); `fa468ad` histórico paginado (`antes`, `limite` 1–100, `tem_mais`); `03297a6` lista de agentes com `circuito_estado` e `canais` (consulta única por página). Cada commit verificado isoladamente em worktree: 88 → 89 → 90 testes.
+  - `9d631ee` null em campo obrigatório → 400 `VALIDATION_ERROR` com `detalhes.campo`, recusado antes de qualquer UPDATE (teste com mutação comprova); integridade NOT NULL/CHECK/FK → 400 com campo, UNIQUE → 409 com campo, só nomes conhecidos.
+  - `2aedcc9` `/testar` com **`{"usar_provedor_real": true}`**: chama o Skyone só nessa requisição, mesmo com o agente em mock, pela cota por URL e pelo circuito; agente não muda; falta de provedor/URL/credencial → 400 com campo; sucesso/falha auditados (`agente.testado_provedor_real` / `agente.teste_provedor_real_falhou`).
+  - `8f387be` `/simular` aceita IA real quando `send_mode=dry`; envio real → 400 `detalhes.campo=send_mode`, sem gravar entrada.
+  - `82f8e2e` `docs/API_ADMIN.md` reorganizado por assunto; ✅ só para o conferido em produção.
+  - `429dff4` `scripts/test_suite.sh` fixado no compose base (`bykoji_test`): o `COMPOSE_FILE` do `.env` aponta o gateway para o banco de produção.
+- Validações (comando → resultado):
+  - Suíte `scripts/test_suite.sh` → **96 passed**, somente `bykoji_test`.
+  - Pré-implantação: `gateway:39e1a53` = imagem em uso (volta); schema 012, nenhuma migração alterada; zero entradas pendentes, `gw05:due` vazio, sem buffers/travas.
+  - Backup `/home/twadmin/backups/gateway/gateway-pre-contrato-20261009T173104Z.dump` (600, `pg_restore --list` OK), SHA-256 `ac83c3bdff517f3c4c5b932fe3c1c2a33b3356aec194876c7240242840ff71d6`; ambiente em `.env.antes-contrato-20261009T173104Z` (600, fora do Git).
+  - Build → nova imagem `sha256:978a03be…` marcada `gateway:8f387be`; recriado só o gateway; postgres/redis/painel com os mesmos IDs.
+  - Health interno/público `{"ok":true}`; público `/gateway/admin/v1/tenants`, `/docs`, `/openapi.json`, `/metricas` → 404; interno com `X-Forwarded-For` → 404 no envelope; sem chave → 401 no envelope.
+  - Contrato em produção: rota e tenant inexistentes → `NOT_FOUND` "Recurso não encontrado."; lista com `circuito_estado`/`canais`; histórico `limite=1` → `tem_mais:true`; PATCH `timeout_s:null` → 400 campo `timeout_s`; `/testar` com `usar_provedor_real` em agente mock → 400 campo `provedor` (sem chamada externa); `/testar` comum → mock. 21 rotas GET ✅ do contrato → 200; ⏳ `circuito/fechar` e `/metricas/plataforma` → 404.
+  - Benchmark `bykoji/bykoji_atendimento` (mock/dry), 4 clientes: **4/4, zero erros, p50 4,323 s, máximo 4,336 s**; delta 4 turnos, 0 erros. O par `bench_passo5` ficou de fora: o Marco desativou e rotacionou o canal API pelo painel às 17:23–17:24 UTC; não foi reativado.
+  - SQL pós-implantação: schema 12, zero pendentes, zero envio live.
+  - Logs gateway/Postgres/Redis/Caddy: **zero ocorrências** de 10 segredos pesquisados (inclui a senha do `GATEWAY_DATABASE_URL`).
+- Estado preservado: agentes live/dry `postman_teste/ag_dba38a6fae985abf584d512f` e `bykoji/ag_7e8683a49b68e615aa4e2101` (“[teste] Bench segundo agente”), por escolha do Marco; nenhum agente com envio live. Nenhum Compose do painel alterado, nenhuma chamada real ao Skyone, nenhum prune.
+- Nome publicado do parâmetro do `/testar`: **`usar_provedor_real`**.
+- Pendências / decisões para o Marco: simultâneas e timeout/callback antes da 0.6; comparação OpenAI direta (2.5). Próxima fase: 0.6.
