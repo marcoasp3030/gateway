@@ -1,6 +1,6 @@
 # API administrativa — contrato com o painel
 
-Banco: `gateway`, Postgres próprio do gateway. O backend do painel autentica seus usuários e aplica papéis/tenant; a chave de serviço tem acesso administrativo global. O navegador nunca recebe essa chave nem acessa o banco. ✅ indica código implementado; ⏳ indica contrato planejado, **não disponível**. **Publicação atual:** complementos e migrações 001–011 implantados em 09/10/2026, mantendo mock/dry. Consulte `PROGRESS.md`.
+Banco: `gateway`, Postgres próprio do gateway. O backend do painel autentica seus usuários e aplica papéis/tenant; a chave de serviço tem acesso administrativo global. O navegador nunca recebe essa chave nem acessa o banco. ✅ indica código implementado; ⏳ indica contrato planejado, **não disponível**. **Publicação atual:** complementos, rotas de gestão e migrações 001–011 implantados em 09/10/2026, mantendo mock/dry. Consulte `PROGRESS.md`.
 
 ## Acesso interno e autenticação
 
@@ -40,7 +40,7 @@ Erro: `{ "erro": { "codigo": "NOT_FOUND", "mensagem": "NOT_FOUND", "detalhes": {
 | 401 | Credencial ausente, inválida, vencida ou revogada |
 | 403 | Escopo ou origem IP não permitido |
 | 404 | Recurso indisponível nesse tenant/agente, rota ausente ou proteção SEG02 |
-| 409 | Conflito de integridade |
+| 409 | Conflito de integridade, contato ocupado ou canal indisponível para envio humano |
 | 422 | Regra de negócio (planejada nas operações que a exigirem) |
 | 429 | Limite de requisições; observar `Retry-After` |
 | 501 | Tipo de canal/triagem ainda não implementado |
@@ -59,18 +59,17 @@ Todas as rotas desta seção são relativas a `/admin/v1`. Escritas confirmadas 
 | GET, POST | `/tenants/{tenant}/agentes` | ✅ Lista/cria a partir de modelo habilitado |
 | GET, PATCH | `/tenants/{tenant}/agentes/{agente}` | ✅ Detalhe/config efetiva; `status=rascunho|ativo|pausado` |
 | POST | `/tenants/{tenant}/agentes/{agente}/simular` | ✅ Pipeline mock/dry; corpo abaixo |
-| POST | `/tenants/{tenant}/agentes/{agente}/testar` | ⏳ Fase 0.5; ainda não implementada, sem corpo real aceito |
+| POST | `/tenants/{tenant}/agentes/{agente}/testar` | ✅ Pacote sintético; resposta ou erro 502 sanitizado |
 | POST | `/tenants/{tenant}/agentes/{agente}/circuito/fechar` | ⏳ Fase 0.6 |
 | GET, POST | `/tenants/{tenant}/canais` | ✅ Lista/cria; segredo mostrado uma vez |
 | GET, PATCH | `/tenants/{tenant}/canais/{canal}` | ✅ Detalhe/edição |
-| POST | `/tenants/{tenant}/canais/{canal}/rotacionar-segredo` | ⏳ Fase 0.5 |
+| POST | `/tenants/{tenant}/canais/{canal}/rotacionar-segredo` | ✅ Nova URL uma vez; segredo anterior invalidado |
 | POST | `/tenants/{tenant}/canais/{canal}/testar-envio` | ⏳ Fase 1; contrato depende do provedor |
 | GET | `/tenants/{tenant}/canais/{canal}/status` | ⏳ Fase 1; depende do provedor |
 | GET | `/tenants/{tenant}/canais/{canal}/qrcode` | ⏳ Fase 1; depende do provedor |
 | GET, POST | `/tenants/{tenant}/api-keys` | ✅ Lista/cria |
 | GET, PATCH, DELETE | `/tenants/{tenant}/api-keys/{chave}` | ✅ Detalhe/edição/revogação |
 | GET | `/tenants/{tenant}/auditoria` | ✅ Actor, ação, alvo, horário |
-| GET | `/tenants/{tenant}/conversas/{conv}/mensagens` | ✅ Últimas 100 mensagens |
 | GET | `/tenants/{tenant}/metricas?agente=` | ✅ Contagem/erros/p50/p95, acumulados |
 | GET | `/modulos` | ✅ Registro/configuração de módulos |
 | GET | `/tenants/{tenant}/modulos` | ✅ Registro/configuração de módulos |
@@ -124,7 +123,7 @@ Simulação real:
 { "canal_id":"can_...", "identificador":"marco", "texto":"Olá", "message_id":"opcional-id-unico", "enviada_em":"2026-10-08T15:00:00-03:00" }
 ```
 
-Canal API ativo ligado ao agente, mock/dry. Retorno `{ "ok":true, "duplicada":false, "conversation_id":"tenant:can_...:marco", "mensagem_id":123 }`; resposta consultada no histórico. Piloto e status são respeitados. `/testar` ainda não existe: o painel não deve enviar o antigo exemplo `{mensagem:...}` esperando resposta.
+Canal API ativo ligado ao agente, mock/dry. Retorno `{ "ok":true, "duplicada":false, "conversation_id":"tenant:can_...:marco", "mensagem_id":123 }`; resposta consultada no histórico. Piloto e status são respeitados.
 
 ### Canais e chaves
 
@@ -156,17 +155,37 @@ Rotas absolutas; API usa `X-API-Key`, nunca chave do painel. Webhooks usam segre
 
 Canal inativo, agente pausado/rascunho ou tenant suspenso: recepção retorna 200 ignorado após autenticação. Mensagens de clientes são gravadas antes de agendar. Histórico e dados são filtrados por tenant e restrição de agente da chave; acesso cruzado → 404. `/notificar`: `{ "evento":"pedido_saiu", "dados":{"pedido":"K-1042"}, "instrucao":"Avise o cliente" }`, respeitando pausa humana.
 
+
+## Atendimento e diagnósticos implementados
+
+| Métodos | Rota | Status |
+|---|---|---|
+| GET | `/tenants/{tenant}/conversas/{conv}/mensagens` | ✅ Últimas 100 mensagens |
+| GET | `/tenants/{tenant}/conversas` | ✅; lista/filtros |
+| POST | `/tenants/{tenant}/conversas/{conv}/assumir` | ✅; `{minutos:60}` |
+| POST | `/tenants/{tenant}/conversas/{conv}/devolver` | ✅ |
+| POST | `/tenants/{tenant}/conversas/{conv}/mensagens` | ✅; mensagem humana |
+| GET | `/tenants/{tenant}/eventos?desde=` | ✅; polling |
+
+`POST /tenants/{tenant}/agentes/{agente}/testar` aceita corpo ausente, `{}` ou `{"message":"teste do painel"}`. Gera UUID novo, `session_id=request_id`, conversa sintética, `historico:[]`, `instrucoes_agente` e IDs do agente/tenant/modelo. Não cria conversa nem envia mensagem ao canal. Usa provedor, credencial e timeout do agente; mock retorna o mock. Resposta `{ "ok":true,"latencia_ms":12,"resposta":["Resposta simulada."] }`; falhas retornam 502 com motivo fixo sanitizado, sem URL/corpo/credencial externa. Sucesso e falha são auditados. O campo antigo `mensagem` não é aceito.
+
+`rotacionar-segredo` não exige corpo. Retorna `{ "id":"can_...","webhook_url":"https://painel.luxbrain.com.br/gateway/webhooks/api/can_...?s=<novo>" }` somente nessa resposta; leituras posteriores não mostram o segredo. O provedor precisa ser atualizado pelo operador: após o commit da rotação, chamadas com o segredo anterior recebem 401. Requisições autenticadas antes da rotação podem já estar em processamento.
+
+Lista de conversas: filtros opcionais `agente`, `canal`, `status=ativa|pausada`, `busca` (substring literal de nome/telefone), `desde` (ISO com fuso; filtra `atualizado_em`). Paginação `limite=1..100`, `cursor=<conversation_id>`, ordenação crescente por ID; resposta `itens`/`proximo_cursor`. IDs de agente/canal de outro tenant retornam 404. `ativa` significa bot sem pausa vigente; encerramento/desfecho continuam na Fase 3. Itens incluem agente/canal, nome/telefone, última mensagem/horário e `bot_pausado_ate`.
+
+`assumir`: corpo opcional `{ "minutos":60 }`, inteiro 1–10080; pausa imediatamente ao confirmar a transação. `devolver`: sem corpo, remove pausa e reagenda somente entradas ainda pendentes, sem repetir turnos já ignorados. Retornam `{ "ok":true,"bot_pausado_ate":"... ou null" }`. Pausa e envio final do bot usam a mesma trava por conversa; uma resposta ainda em geração é descartada se a pausa confirmar antes de seu envio.
+
+Envio humano: `{ "texto":"Olá, sou o atendente" }` (1–20000 caracteres não vazios). Pausa pelo `pause_minutes` efetivo e grava saída com `origem=humano`; em dry registra a simulação sem chamar provedor. Retorna 201 `{ "ok":true,"mensagem_id":123,"origem":"humano","send_mode":"dry" }`. Erro do provedor retorna 502 sanitizado, mantém pausa e não registra entrega bem-sucedida. Canal inativo/tenant suspenso retorna 409; envio live de canal não implementado retorna 501. Não há retry automático do envio humano.
+
+Polling: `GET /tenants/{tenant}/eventos?desde=0&limite=50` retorna `{ "itens":[{"id":123,"tipo":"mensagem.recebida","alvo":"tenant:canal:contato","criado_em":"..."}],"proximo_cursor":123,"tem_mais":false }`. Reutilizar `proximo_cursor` como `desde`; consumir páginas enquanto `tem_mais=true`, depois consultar a cada 2–3 s. IDs vêm da auditoria persistente, com alocação serializada por tenant até o commit. Inclui mudanças administrativas, mensagens recebidas/enviadas/humanas, resultado de turnos e consumo; não inclui conteúdo nem credenciais. Use `alvo` para atualizar a conversa/lista correspondente, e refaça a leitura inicial ao conectar. Eventos antigos de mensagens anteriores a esta implementação não são reconstruídos; mudanças posteriores e auditoria existente ficam disponíveis. Todas essas operações exigem chave do painel e toda escrita exige `X-Actor`.
+
+
 ## Rotas planejadas para o painel
 
 Base `/admin/v1`. Não implementar telas dependentes destas rotas como se já estivessem disponíveis.
 
 | Métodos | Rota | Status |
 |---|---|---|
-| GET | `/tenants/{tenant}/conversas` | ⏳ Fase 0.5; lista/filtros |
-| POST | `/tenants/{tenant}/conversas/{conv}/assumir` | ⏳ Fase 0.5; `{minutos:60}` |
-| POST | `/tenants/{tenant}/conversas/{conv}/devolver` | ⏳ Fase 0.5 |
-| POST | `/tenants/{tenant}/conversas/{conv}/mensagens` | ⏳ Fase 0.5; mensagem humana |
-| GET | `/tenants/{tenant}/eventos?desde=` | ⏳ Fase 0.5; polling |
 | GET | `/tenants/{tenant}/metricas/conversas` | ⏳ Fase 9 |
 | GET | `/tenants/{tenant}/metricas/export.csv` | ⏳ Fase 9 |
 | GET | `/metricas/plataforma` | ⏳ Fase 9 |

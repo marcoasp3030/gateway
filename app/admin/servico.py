@@ -35,6 +35,10 @@ def validar(modelo, dados):
 
 
 async def auditar(conn, tenant, actor, acao, alvo):
+    # Serializa a alocação de IDs por tenant até o commit: polling não pula
+    # um evento de transação concorrente que confirmar depois. Chamador usa transação.
+    if not conn.is_in_transaction(): raise RuntimeError("Auditoria exige transação")
+    await conn.execute('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', 'auditoria:'+(tenant or 'plataforma'))
     # Auditoria só com identificadores/ação; nunca corpo ou segredos.
     await conn.execute('INSERT INTO audit_log(tenant_id,actor,acao,alvo,dados) VALUES ($1,$2,$3,$4,$5::jsonb)',
         tenant,actor,acao,alvo,'{}')

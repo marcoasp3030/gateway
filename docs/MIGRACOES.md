@@ -1,6 +1,6 @@
 # Migrações do gateway
 
-**Estado atual — 08/10/2026:** passo 5 concluído. O serviço usa banco e usuário `gateway`, migrações 001–005, agentes mock/dry. `bykoji_test` está preservado. A imagem de volta `gateway:fase0` foi validada pelo Compose. Os registros de impedimentos abaixo são históricos; consulte a seção final para operação e rollback.
+**Estado atual — 09/10/2026:** complementos e rotas de gestão implantados no banco/usuário `gateway`, migrações 001–011, agentes mock/dry. `bykoji_test` preservado. Volta dos complementos usa `gateway:ccb261b` com dump restaurado numa base nova de schema 005; volta apenas das rotas de gestão usa `gateway:9bcc828` no schema 011 atual. Os registros anteriores são históricos; procedimentos atuais ao final.
 
 O executor `app/migrar.py` aplica `app/migrations/NNN_*.sql` em ordem, com uma transação por arquivo e registro em `schema_migrations` (versão, nome, SHA-256, data). Uma trava consultiva do Postgres serializa executores concorrentes. Arquivo já aplicado não pode ser alterado; adicione uma versão nova. Lacunas, versões desconhecidas e checksums diferentes interrompem a execução.
 
@@ -32,7 +32,7 @@ Cada cenário usa um schema aleatório em uma transação externa que é reverti
 
 As FKs e os filtros da API mínima/pipeline foram testados com dois tenants. Criptografia e autenticação genérica estão implementadas; a autenticação real Skyone ainda depende do teste externo do Marco para concluir a fase.
 
-`cardapio_itens` recebeu `tenant_id`; sua extração física para as migrações do módulo `catalogo` segue pendente. O framework de módulos e a gestão administrativa completa continuam pendentes. API mínima e pipeline multiempresa estão ativos; dados antigos não serão convertidos, conforme decisão do Marco. A Fase 0.5 integral não foi declarada concluída.
+A migração 006 renomeou `cardapio_itens` para `catalogo_itens`. Framework de módulos, complementos e gestão solicitada estão implantados. Dados antigos não serão convertidos, conforme decisão do Marco. A Fase 0.5 integral aguarda validações externas e revisão do contrato.
 
 ## Histórico: blocos 1–4 implementados — antes da troca de banco
 
@@ -130,9 +130,9 @@ COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml sh scripts/test_suite.s
 O wrapper encaminha as integrações para `gateway_migrations_test` com as credenciais de teste existentes; `conftest.py` recusa qualquer URL de banco sem sufixo `_test`. A suíte desta entrega passou antes da troca: **65 testes**. O benchmark pós-troca no banco novo foi uma validação operacional explicitamente autorizada pelo Marco, não a execução da suíte de testes contra produção.
 
 
-## Complementos da 0.5 — preparados em 09/10/2026
+## Histórico da preparação dos complementos — 09/10/2026
 
-Implementados no checkout e testados, **ainda não aplicados no banco do serviço**:
+Na preparação, estavam implementados e testados; a implantação posterior está registrada abaixo:
 
 | Migração | Mudança |
 |---|---|
@@ -172,3 +172,12 @@ curl --fail --silent https://painel.luxbrain.com.br/gateway/health
 ```
 
 Se for necessário restaurar novamente, criar **outro banco vazio**, com dono gateway, e usar `pg_restore --exit-on-error --no-owner --role=gateway` com esse dump; conferir versões 001–005 antes de apontar a imagem antiga. Nunca executar downgrade, `--clean`, restauração sobre `gateway`/`bykoji_test`, remoção de volumes ou limpeza do Redis. Conferir filas antes de uma volta posterior; preservar mensagens novas para reconciliação. Esta implantação não precisou de rollback.
+
+
+## Rotas de gestão sobre schema 011 — 09/10/2026
+
+Implantadas sem migração adicional. Antes do build foi conferida a tag de volta `gateway:9bcc828` da imagem em uso; antes da recriação, filas e entradas pendentes vazias. Dump adicional `/home/twadmin/backups/gateway/gateway-pre-gestao-20261009T125335Z.dump`, modo 600, validado com `pg_restore --list`; SHA-256 `818d5a9d1f593544b809c3e4d0db88b849113ef0ba37c7145d8c874b2f54b454`. Somente gateway foi recriado; banco, Redis e painel preservados.
+
+Para voltar **somente o código deste bloco**, a imagem `gateway:9bcc828` aceita o mesmo banco 011: `.local/rollback-gestao.py` acrescenta ao `COMPOSE_FILE` o override `.local/compose.volta-gestao.yml` com essa imagem e `pull_policy: never`, recria apenas gateway sem build e confirma health. Não restaura banco nem altera mensagens/dados. O roteiro anterior `.local/rollback011.py` é exclusivo da volta ao schema 005 numa base restaurada, não da volta deste bloco. Nenhum rollback foi necessário.
+
+Suíte 82 testes; validação operacional em `VALIDACAO_GESTAO05.json`. Imagem desta entrega: `sha256:8365cc6253988d6a8ac9ef1225b5ec65b402d15602a170ea504399e41cdd46e4`; marcada com a tag do commit ao registrar o bloco.

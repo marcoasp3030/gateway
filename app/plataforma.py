@@ -136,6 +136,8 @@ def criar_app(infra,db=None,redis=None):
     from admin.notificacoes import router as notificacoes
     from admin.unidades import router as unidades
     from admin.contatos import router as contatos
+    from admin.gestao import router as gestao
+    app.include_router(gestao)
     app.include_router(contatos)
     app.include_router(unidades)
     app.include_router(notificacoes)

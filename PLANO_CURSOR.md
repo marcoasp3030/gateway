@@ -11,16 +11,17 @@
 | Fase 0 — implantação simulada | ✅ Concluída (commit `aef6f26`) | `PROGRESS.md` |
 | Publicação no domínio | ✅ `https://painel.luxbrain.com.br/gateway/health` via **Caddy** do projeto `painel_koji` (rede `luxbrain_gateway_proxy`, `docker-compose.proxy.yml`) | `PROGRESS.md`, `docs/PUBLICACAO.md`, `docs/Caddyfile.painel.example` |
 | Fase 0.3 — descobertas no Skyone | 🟡 Quase concluída: probe no fluxo validado ✅ (commit `bf7651d`, 42 testes), memória ✅ (gateway é dono do histórico), histórico enviado pelo gateway ✅, comparação de modelos ✅. Faltam: **autenticação do Webhook** (bloqueia a *conclusão* da 0.5, não o início), simultâneas e tempo limite/callback (antes da 0.6), chamada direta à OpenAI para medir o custo do Skyone | `docs/SKYONE_RESULTADOS.md`, `docs/SKYONE.md`, `PROGRESS.md` |
-| Fase 0.5 | ▶️ **Em andamento**: blocos 1–4 publicados em mock/dry no banco `gateway`; complementos solicitados implementados e testados (módulos, modelos versionados, saídas HMAC, notificar, consumo, unidades, LGPD03 e bench). **Migrações 006–011 e complementos implantados e validados no serviço em mock/dry**. Fechamento depende de autenticação/limite Skyone, revisão do contrato e pendências abaixo | `docs/MIGRACOES.md`, `PROGRESS.md` |
+| Fase 0.5 | ▶️ **Implementação solicitada implantada em mock/dry**, banco `gateway` com migrações 001–011; módulos, modelos, HMAC, notificar, consumo, unidades, LGPD03, benchmark e rotas de gestão (testar, rotação, atendimento humano, filtros e polling). **82 testes aprovados**, benchmark 2 tenants/3 agentes 6/6, zero erros. Fechamento formal aguarda validações e revisão do Marco abaixo | `docs/API_ADMIN.md`, `docs/MIGRACOES.md`, `PROGRESS.md` |
 | Fases 0.6 em diante | ⏳ Não iniciadas | — |
 
-**Entrega dos complementos (09/10/2026):** cada bloco possui commit e suíte verde. `docs/API_ADMIN.md` é o contrato único, com ✅ implementado no checkout e ⏳ planejado por fase. Teste do backend pela rede Docker: alias `http://luxbrain-gateway:8000/admin/v1`, IP privado aceito com chave e headers de proxy recusados. Conexão do backend do painel a essa rede **não foi alterada**; exige confirmação do Marco.
+**Entrega dos complementos (09/10/2026):** cada bloco possui commit e suíte verde. `docs/API_ADMIN.md` é o contrato único, com ✅ implementado e publicado no serviço e ⏳ planejado por fase. Teste do backend pela rede Docker: alias `http://luxbrain-gateway:8000/admin/v1`, IP privado aceito com chave e headers de proxy recusados. Conexão do backend do painel a essa rede **não foi alterada**; exige confirmação do Marco.
 
 **Para fechar a 0.5:**
 - Implantação 006–011 concluída: benchmark 6/6, zero erros; testes automatizados continuam exclusivamente em banco `_test`.
 - Marco confirmar autenticação real Skyone (401/403 sem credencial, 200 com credencial) e limite por minuto, sem presumir formato.
-- Revisar este contrato com o Marco antes das telas e confirmar modelos iniciais; aprovar alteração da rede do backend do painel se essa integração for iniciada.
-- O contrato ainda marca como planejados na 0.5: teste direto do agente (`/testar`), rotação de segredo do canal, lista/filtros de conversas, assumir/devolver/envio humano e polling de eventos. Esses itens estavam fora dos oito complementos solicitados e não foram declarados implementados.
+- Marco revisar `docs/API_ADMIN.md` antes das telas e confirmar modelos iniciais (`atendente_delivery`, `assistente_generico`).
+- Integração do painel, se iniciada: confirmar separadamente a conexão de seu backend à rede interna. Isso não impede a validação do gateway isolado; o Compose do painel permanece intacto.
+- Rotas de gestão solicitadas concluídas e publicadas no mesmo schema 011: `/testar`, rotação de segredo, lista/filtros de conversas, assumir/devolver/envio humano e polling de eventos. Nenhuma nova migração necessária neste bloco.
 - Simultâneas, timeout/callback continuam dependências antes da 0.6; provedor direto depende da decisão da 2.5. Nenhuma fase posterior foi iniciada.
 
 **Ambiente real da VPS (prevalece sobre exemplos deste plano):**

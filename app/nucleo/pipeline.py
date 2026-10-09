@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from agentes import skyone
 from canais import uazapi
 from nucleo.banco import Repositorio
+from nucleo.configuracao import Configuracoes
 from admin.servico import auditar
 
 log=logging.getLogger('gateway.pipeline')
@@ -46,12 +47,13 @@ redis.call('ZADD',KEYS[2],math.min(agora+tonumber(ARGV[2]),primeira+tonumber(ARG
 return 1
 ''',2,self.prefixo+':first:'+chave,self.prefixo+':due',chave,cfg['debounce_s'],cfg['max_wait_s'])
 
-    async def contexto(self,tenant,canal_id):
-        canal=await self.repo.obter(tenant,'tenant_canais',canal_id)
-        empresa=await self.repo.tenant(tenant)
+    async def contexto(self,tenant,canal_id,repo=None,configuracoes=None):
+        repo=repo or self.repo
+        canal=await repo.obter(tenant,'tenant_canais',canal_id)
+        empresa=await repo.tenant(tenant)
         if not canal or not empresa: raise HTTPException(404,'NOT_FOUND')
         if canal['triagem'] is not None: raise HTTPException(501,'Triagem disponível na Fase 6.5')
-        cfg=await self.cfg.efetiva(tenant,canal['agente_id'])
+        cfg=await (configuracoes or self.cfg).efetiva(tenant,canal['agente_id'])
         return canal,empresa,cfg
 
     async def receber(self,tenant,canal_id,m):
@@ -78,6 +80,8 @@ return 1
                 VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(tenant_id,message_id) DO NOTHING RETURNING id''',
                 tenant,conversa,'saida' if humano else 'entrada','humano' if humano else 'cliente',m['texto'],
                 mensagem_id,m.get('enviada_em') or datetime.now(timezone.utc))
+            if msgid:
+                await auditar(conn,tenant,'sistema','mensagem.humana' if humano else 'mensagem.recebida',conversa)
             if humano and msgid:
                 await conn.execute('UPDATE conversas SET bot_pausado_ate=now()+make_interval(mins=>$3) '
                     'WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa,cfg['pause_minutes'])
@@ -89,23 +93,29 @@ return 1
         await self.enfileirar(tenant,conversa,cfg)
         return {'ok':True,'duplicada':msgid is None,'conversation_id':conversa,'mensagem_id':msgid}
 
-    async def permitido(self,tenant,conversa,agente_id):
-        conv=await self.repo.obter(tenant,'conversas',conversa)
+    async def permitido(self,tenant,conversa,agente_id,repo=None,configuracoes=None):
+        repo=repo or self.repo
+        conv=await repo.obter(tenant,'conversas',conversa)
         if not conv or conv['agente_id']!=agente_id: return False
-        canal,empresa,cfg=await self.contexto(tenant,conv['canal_id'])
+        canal,empresa,cfg=await self.contexto(tenant,conv['canal_id'],repo,configuracoes)
         return (canal['ativo'] and canal['agente_id']==agente_id and empresa['status']=='ativo' and cfg['status']=='ativo'
             and not (conv['bot_pausado_ate'] and conv['bot_pausado_ate']>datetime.now(timezone.utc))
             and (not cfg['modo_piloto'] or conv['telefone'] in cfg['contatos_permitidos']))
 
     async def enviar(self,tenant,conversa,agente_id,texto):
-        # Reconsulta imediatamente antes de enviar; pausa/roteamento podem mudar durante a chamada ao agente.
-        if not await self.permitido(tenant,conversa,agente_id): return False
-        conv=await self.repo.obter(tenant,'conversas',conversa)
-        canal,empresa,cfg=await self.contexto(tenant,conv['canal_id'])
-        if cfg['send_mode']=='live':
-            if canal['tipo']!='uazapi': raise ValueError('Envio live deste canal ainda não implementado')
-            await uazapi.enviar(self.http,self.cofre,tenant,canal,conv['telefone'],texto)
-        await self.db.execute("INSERT INTO mensagens(tenant_id,conversation_id,direcao,origem,conteudo,processada_em) VALUES ($1,$2,'saida','bot',$3,now())",tenant,conversa,texto)
+        # A mesma trava de assumir/devolver serializa a pausa e o envio final.
+        async with self.db.acquire() as conn,conn.transaction():
+            await conn.execute('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',conversa)
+            repo=Repositorio(conn);configuracoes=Configuracoes(repo)
+            if not await self.permitido(tenant,conversa,agente_id,repo,configuracoes): return False
+            conv=await repo.obter(tenant,'conversas',conversa)
+            canal,empresa,cfg=await self.contexto(tenant,conv['canal_id'],repo,configuracoes)
+            if cfg['send_mode']=='live':
+                if canal['tipo']!='uazapi': raise ValueError('Envio live deste canal ainda não implementado')
+                await uazapi.enviar(self.http,self.cofre,tenant,canal,conv['telefone'],texto)
+            await conn.execute("INSERT INTO mensagens(tenant_id,conversation_id,direcao,origem,conteudo,processada_em) VALUES ($1,$2,'saida','bot',$3,now())",tenant,conversa,texto)
+            await conn.execute('UPDATE conversas SET atualizado_em=now() WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa)
+            await auditar(conn,tenant,'sistema','mensagem.enviada',conversa)
         return True
 
     async def processar(self,tenant,conversa):
@@ -171,14 +181,16 @@ return 1
                     int((inicio-itens[-1]['criado_em']).total_seconds()*1000),int((fim_agente-inicio).total_seconds()*1000),
                     int((fim-itens[-1]['criado_em']).total_seconds()*1000),cfg['agente_mode'],status,erro,json.dumps(resultado) if resultado else None,fim if entregue else None,aviso)
                 await conn.execute('UPDATE turnos SET origem=$3,uso=$4::jsonb WHERE tenant_id=$1 AND request_id=$2',tenant,uuid.UUID(rid),origem,json.dumps(resultado.get('uso')) if resultado and resultado.get('uso') else None)
+                # Ordem de travas: consumo antes de auditoria em todos os turnos.
+                from nucleo.consumo import registrar,atualizar_cache
+                mes,total=await registrar(conn,tenant)
                 if origem=='sistema' and status=='ignorado':
                     await auditar(conn,tenant,'sistema','notificacao.nao_enviada',conversa)
                 if status=='ok' and resultado and resultado.get('acao') in ('transferir_humano','encerrar'):
                     from nucleo.webhooks import emitir
                     await emitir(conn,tenant,'conversa.transferida' if resultado['acao']=='transferir_humano' else 'conversa.encerrada',{'conversation_id':conversa,'agente_id':cfg['id']})
                 await conn.execute('UPDATE mensagens SET processada_em=now() WHERE tenant_id=$1 AND conversation_id=$2 AND id=ANY($3::bigint[])',tenant,conversa,ids)
-                from nucleo.consumo import registrar,atualizar_cache
-                mes,total=await registrar(conn,tenant)
+                await auditar(conn,tenant,'sistema','turno.'+status,conversa)
             await atualizar_cache(self.redis,self.prefixo,tenant,mes,total)
         finally:
             await self.redis.eval("if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end",1,lock,token)
