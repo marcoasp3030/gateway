@@ -10,19 +10,21 @@
 |---|---|---|
 | Fase 0 — implantação simulada | ✅ Concluída (commit `aef6f26`) | `PROGRESS.md` |
 | Publicação no domínio | ✅ `https://painel.luxbrain.com.br/gateway/health` via **Caddy** do projeto `painel_koji` (rede `luxbrain_gateway_proxy`, `docker-compose.proxy.yml`) | `PROGRESS.md`, `docs/PUBLICACAO.md`, `docs/Caddyfile.painel.example` |
-| Fase 0.3 — descobertas no Skyone | 🟡 Quase concluída: probe no fluxo validado ✅ (commit `bf7651d`, 42 testes), memória ✅ (gateway é dono do histórico), histórico enviado pelo gateway ✅, comparação de modelos ✅. Faltam: autenticação Basic e limite 300/min respondidos pelo Marco; falta validação do adaptador com o PATCH e `/testar` feitos por ele; simultâneas e tempo limite/callback (antes da 0.6), chamada direta à OpenAI para medir o custo do Skyone | `docs/SKYONE_RESULTADOS.md`, `docs/SKYONE.md`, `PROGRESS.md` |
-| Fase 0.5 | ▶️ **Implementação solicitada implantada em mock/dry**, banco `gateway` com migrações 001–012; módulos, modelos, HMAC, notificar, consumo, unidades, LGPD03, benchmark e rotas de gestão (testar, rotação, atendimento humano, filtros e polling). **87 testes aprovados**, benchmark 2 tenants/3 agentes 6/6, zero erros. Fechamento formal aguarda validações e revisão do Marco abaixo | `docs/API_ADMIN.md`, `docs/MIGRACOES.md`, `PROGRESS.md` |
+| Fase 0.3 — descobertas no Skyone | 🟡 Probe, memória/histórico e comparação de modelos respondidos. **Autenticação Basic validada também pelo `/testar` do gateway: 200, 8.194 ms; limite 300/min no Skyone e 240/min por URL no gateway concluídos.** Faltam simultâneas e timeout/callback antes da 0.6; comparação direta OpenAI para decisão da 2.5 | `docs/SKYONE_RESULTADOS.md`, `PROGRESS.md` |
+| Fase 0.5 | ✅ **Implementação e validações concluídas; fechamento formal aguarda somente revisão do contrato e confirmação dos modelos iniciais pelo Marco.** Banco `gateway`, migrações 001–012; 87 testes aprovados na entrega, benchmark 2 tenants/3 agentes 6/6 sem erros. Agente `postman_teste/ag_dba38a6fae985abf584d512f` validado e preservado em **Skyone live/dry**; demais agentes sem live e nenhum envio live. Autenticação/limite concluídos, logs conferidos sem credenciais | `docs/API_ADMIN.md`, `docs/MIGRACOES.md`, `PROGRESS.md` |
 | Fases 0.6 em diante | ⏳ Não iniciadas | — |
 
 **Entrega dos complementos (09/10/2026):** cada bloco possui commit e suíte verde. `docs/API_ADMIN.md` é o contrato único, com ✅ implementado e publicado no serviço e ⏳ planejado por fase. Teste do backend pela rede Docker: alias `http://luxbrain-gateway:8000/admin/v1`, IP privado aceito com chave e headers de proxy recusados. Conexão do backend do painel a essa rede **não foi alterada**; exige confirmação do Marco.
 
-**Para fechar a 0.5:**
-- Implantação 006–011 concluída: benchmark 6/6, zero erros; testes automatizados continuam exclusivamente em banco `_test`.
-- Marco informou Basic Auth validado (401 sem credencial/senha errada, 200 com credencial correta) e 300/min configurados. Adaptador Basic, teto compartilhado 240/min por URL, alerta e circuito antecipado implementados; falta Marco cadastrar a credencial pelo túnel e executar `/testar` no gateway, sem compartilhar a senha.
-- Marco revisar `docs/API_ADMIN.md` antes das telas e confirmar modelos iniciais (`atendente_delivery`, `assistente_generico`).
-- Integração do painel, se iniciada: confirmar separadamente a conexão de seu backend à rede interna. Isso não impede a validação do gateway isolado; o Compose do painel permanece intacto.
-- Rotas de gestão solicitadas concluídas e publicadas no mesmo schema 011: `/testar`, rotação de segredo, lista/filtros de conversas, assumir/devolver/envio humano e polling de eventos. Nenhuma nova migração necessária neste bloco.
-- Simultâneas, timeout/callback continuam dependências antes da 0.6; provedor direto depende da decisão da 2.5. Nenhuma fase posterior foi iniciada.
+**Para fechar formalmente a 0.5 — somente duas confirmações do Marco:**
+1. Revisar e aprovar `docs/API_ADMIN.md` antes de iniciar as telas do painel.
+2. Confirmar os modelos iniciais `atendente_delivery` e `assistente_generico`.
+
+**Autenticação e limite: concluídos.** Marco cadastrou Basic Auth pelo túnel e executou `/testar`: HTTP 200, `ok: true`, 8.194 ms, resposta em português. Sem credencial/senha errada no Skyone → 401; correta → 200. Configuração adotada: 300/min no Webhook, 240/min compartilhados por URL no gateway. Logs disponíveis do container atual: zero ocorrências de senha/Basic/Authorization; auditoria do teste confirmada. Nenhuma nova chamada real foi feita pelo Codex nessa conferência.
+
+**Estado preservado:** somente o agente `ag_dba38a6fae985abf584d512f` do tenant `postman_teste` está em `agente_mode=live`, `provedor=skyone`, `send_mode=dry`; nenhum outro agente live e nenhum envio live. Nenhuma configuração alterada na conferência.
+
+**Fora do fechamento da 0.5:** conectar o backend do painel à rede interna exige confirmação separada se essa integração for iniciada. Simultâneas e timeout/callback continuam antes da 0.6; comparação OpenAI direta pertence à decisão da 2.5. Nenhuma fase posterior iniciada.
 
 **Ambiente real da VPS (prevalece sobre exemplos deste plano):**
 - Proxy público é o **Caddy** do painel (`painel_koji`), não Nginx. `docs/nginx-gateway.conf` fica apenas como referência; a configuração em uso está em `docs/Caddyfile.painel.example` e `docs/PUBLICACAO.md`.

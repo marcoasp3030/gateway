@@ -181,4 +181,23 @@ Fluxo “gateway”: `https://luxtia.api.integrasky.cloud/k3iynwDoOU`.
 
 Gateway: tipo `basic`, usuário/senha cifrados separadamente com Fernet; cabeçalho Basic montado somente no envio. Tipos Bearer e cabeçalho customizado preservados. Limite local padrão **240/minuto por URL**, compartilhado entre agentes/tenants, com espera incluída em `timeout_s`. HTTP 401/403 gera “credencial do Skyone recusada”, alerta persistente e contagem do circuito, sem retry. Detalhes operacionais e PATCH em `API_ADMIN.md`.
 
-Próxima validação real: Marco cadastra as credenciais pelo túnel com `PATCH` e executa `/testar`. Para chamar o Skyone nesse teste, configurar `provedor=skyone`, `agente_mode=live`, mantendo `send_mode=dry`. A implantação pelo Codex mantém todos os agentes mock/dry; nenhuma senha real é cadastrada ou lida. O probe antigo não foi convertido para Basic nesta tarefa; usar `/testar` para essa validação.
+Próxima validação real prevista naquele registro (concluída abaixo): Marco cadastra as credenciais pelo túnel com `PATCH` e executa `/testar`. Para chamar o Skyone nesse teste, configurar `provedor=skyone`, `agente_mode=live`, mantendo `send_mode=dry`. A implantação pelo Codex mantém todos os agentes mock/dry; nenhuma senha real é cadastrada ou lida. O probe antigo não foi convertido para Basic nesta tarefa; usar `/testar` para essa validação.
+
+
+## Validação real pelo gateway concluída — 09/10/2026
+
+**Autenticação e limite concluídos para a Fase 0.5.** Teste executado e resultado informado pelo Marco, usando `POST /admin/v1/tenants/postman_teste/agentes/ag_dba38a6fae985abf584d512f/testar`:
+
+- Agente com `provedor=skyone`, `agente_mode=live`, `send_mode=dry`; Basic Auth cadastrado pelo próprio Marco via túnel.
+- **HTTP 200**, `ok: true`, **8.194 ms (8,194 s)**, resposta em português do fluxo `k3iynwDoOU`. É uma amostra individual, não p50/p95.
+- Marco confirmou que a senha não apareceu na resposta do PATCH.
+- Testes diretos no Skyone: sem credencial → 401; senha errada → 401; credencial correta → 200.
+- Limites adotados: **300/min no Webhook**, **240/min por URL compartilhada no gateway**, este último também conferido no ambiente em execução. Isso confirma a configuração, não um ensaio de saturação ou o máximo comercial do Skyone.
+
+Verificação independente na VPS: auditoria registra um `agente.testado` para esse tenant/agente, em **2026-10-09T13:48:08.992228+00:00**. A latência e a resposta acima são as fornecidas pelo Marco; nenhuma chamada real foi repetida nesta conferência.
+
+Verificação de logs: examinados stdout/stderr disponíveis do container atual, iniciado em **2026-10-09T13:32:46.777594627Z**. Usuário e senha foram decifrados somente em memória dentro de um processo de verificação, que montou o valor Basic para comparação sem exibir nem gravar credenciais ou logs brutos. **Zero ocorrências** da senha literal, representações JSON/URL, token Base64, valor completo Basic e nome `Authorization`. O resultado cobre os logs disponíveis desse container, não arquivos históricos já removidos. Relatório local sanitizado: `.local/verificacao-auth-real.json`.
+
+Agente mantido intacto em **live/dry** para os próximos testes. Consulta da configuração efetiva confirmou **zero outros agentes live** e **zero agentes com envio live**. Não houve PATCH, alteração de credencial/configuração, reinício ou envio ao WhatsApp nesta verificação.
+
+Para fechar formalmente a 0.5 faltam somente a revisão de `docs/API_ADMIN.md` pelo Marco e a confirmação dos modelos iniciais `atendente_delivery` e `assistente_generico`. Simultâneas e timeout/callback continuam antes da 0.6; não são pendências de autenticação da 0.5.
