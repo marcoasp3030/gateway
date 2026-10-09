@@ -356,3 +356,9 @@ PY
 - Anonimização transacional de contato, conversa/ID pessoal, mensagens, respostas dos turnos, brutos, entregas pendentes e identificadores da auditoria. Métricas preservadas; outro tenant preservado. Agendamentos antigos retirados após confirmação da transação; conversa em processamento retorna 409 sem alteração parcial.
 - Suíte isolada: **73 passed**. LGPD03 verifica ausência do telefone em todas as tabelas afetadas do tenant, inclusive IDs e brutos, manutenção das métricas e do mesmo telefone em outro tenant. Corrigida a primeira versão da migração para manter FKs imediatas no uso normal e adiar somente na transação LGPD.
 - Exportação inclui brutos/entregas/auditoria associados e campos JSON estruturados. Backups/dados já enviados a terceiros e formatos reais ainda não capturados continuam com as limitações documentadas. Nenhum dado do banco de serviço foi anonimizado.
+
+## Fase 0.5 — Benchmark atualizado — 2026-10-09
+
+- `scripts/bench.py` usa `/admin/v1`, `--tenant`, `--agente`, `--panel-key` ou variável de ambiente; repetição de alvos para múltiplos tenants/agentes, canal explícito ou descoberta inequívoca, verificação mock/dry/piloto antes de escrever.
+- Duas entradas por conversa, conferência do histórico, timeout e exit de falha, métricas/deltas separados e latências. Nenhuma criação/ativação automática de entidades, nenhuma chave em relatório/erro.
+- Suíte isolada: **74 passed**, incluindo benchmark com dois tenants em transporte simulado e HTTP recusado contabilizado como erro. Serviço ainda não recriado.

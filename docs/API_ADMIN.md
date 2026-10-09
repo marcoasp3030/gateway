@@ -236,3 +236,14 @@ Contatos são vinculados às conversas na recepção; migração 011 vincula con
 DELETE exige corpo `{ "confirmacao":"<telefone ou e-mail atual>" }`. Faz **anonimização**, não remoção de métricas: apaga telefone/e-mail/nome/perfil/resumo, substitui conteúdo das mensagens, retira resposta/erro dos turnos, troca IDs de conversa que continham identificadores pessoais por IDs aleatórios, limpa payloads brutos associados e entregas que carregam esses identificadores, cancela entregas pendentes e retira agendamentos Redis antigos. Auditoria mantém ação/horário, com identificadores pessoais substituídos. Retorno `{ "ok":true, "anonimizado":true }`. Repetição em contato já anonimizado → 409.
 
 Conversa em processamento → 409, sem alterações parciais; repetir após terminar. Verificações de referências entre tenants continuam imediatas normalmente; só a transação de anonimização as adia e verifica antes de concluir. Outro tenant permanece intacto, mesmo contendo o mesmo telefone. Mensagens futuras constituem novo contato/atendimento, não recuperam histórico apagado. Payloads antigos sem vínculo são localizados pelos identificadores conhecidos, inclusive telefone formatado; fixtures reais dos provedores ainda são necessárias na Fase 1 para validar formatos novos. Backups e dados já entregues a terceiros não são alterados por esta API; retenção/restauração é tratada na Fase 9.
+
+## Benchmark administrativo
+
+`scripts/bench.py` usa `--tenant`, `--agente`, `--panel-key` (ou variável `PANEL_SERVICE_KEY`), `--clientes`, `--timeout` e `--canal` opcional. Repita pares tenant/agente para execução simultânea; se houver mais de um canal API ativo para o agente, informe canal para todos os pares. Exemplo sem chave em argumentos:
+
+```bash
+python scripts/bench.py --tenant bykoji --agente bykoji_atendimento \
+  --tenant bench_passo5 --agente ag_DO_TENANT_TESTE --clientes 2
+```
+
+Exige agentes ativos mock/dry, piloto desligado e canais API existentes. Não cria nem ativa tenants/agentes. Envia duas mensagens por conversa e consulta o histórico; relatório traz latências observadas, erros e métricas acumuladas/delta de cada agente. Exit diferente de zero em falha/timeout/erro de turno. Não usa mais `/test/*`, `/metricas` global ou `--admin-key`. Configure URL interna; a chave nunca deve chegar ao navegador.
