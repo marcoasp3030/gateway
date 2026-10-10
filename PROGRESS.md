@@ -649,3 +649,13 @@ PY
 - `scripts/canal_credencial.py` (novo): pede endereço base e token com `getpass`, valida o endereço com as regras de SSRF (https, 443, sem usuário/senha, DNS só para IP público) e grava cifrado pelo `PATCH` do canal. Recusa terminal não interativo; erros não repetem os valores. Testes: `tests/test_canal_credencial.py` (3). Suíte: **133 passed**, só bancos `_test`.
 - Limpeza do `postman_teste`: **não executada**; backup `/home/twadmin/backups/gateway/pre-limpeza-postman-20261010T013732Z/gateway.dump` (21 tabelas) e contagem entregue ao Marco. Achado: `conversas.agente_id` e `conversas.canal_id` são obrigatórios e têm chave estrangeira, então não dá para apagar o agente e o canal do caso “aguardando” mantendo a conversa como registro. Aguardando decisão.
 - uazapi (documentação oficial, `POST /webhook`): campos `url`, `events`, `excludeMessages`, `enabled`; a documentação não descreve reenvio de webhook quando o destino falha (há `/webhook/errors` para diagnóstico). Pendência da Fase 1 mantida.
+
+## Limpeza do postman_teste e piloto do By Koji — 2026-10-10
+
+- Limpeza (opção 1, autorizada pelo Marco; backup `pre-limpeza-postman-20261010T013732Z`), numa transação que só confirmava com as contagens combinadas:
+  - Removido do teste INV14: 620 conversas, 1.240 mensagens, 620 turnos, 620 contatos, o canal `can_0c276f791ffdd5b141eeaaf5` e o agente `ag_002430f4999ada600015605f`.
+  - Caso “aguardando”: canal `can_33e464559d7d941f750258ee` desativado e agente `ag_393bad0c761589e969d99555` pausado; a conversa `postman_teste:can_33e464559d7d941f750258ee:cliente-teste-aguardando` fica como registro.
+  - Auditoria intacta (2.944 linhas antes e depois). Marcadores no Redis expiram sozinhos. Agente Postman e bykoji não tocados.
+- Fase 1 (preparação): `bykoji/bykoji_atendimento` com `modo_piloto: true` e `contatos_permitidos` com o celular de teste informado pelo Marco; continua em simulação com envio de teste. Canal uazapi `can_49fce1f15a43f87f22739d60` **ativado** (canal novo nasce inativo e, inativo, o webhook é ignorado sem gravar o payload). Número da instância uazapi de teste informado pelo Marco: 5511957769899 (o mesmo número informado como celular de teste — a confirmar).
+- Efeitos do piloto ligado: o `scripts/bench.py` recusa o agente (exige piloto desligado) e conversas simuladas com identificador fora da lista são gravadas e ignoradas.
+- Achado: `tenant_canais.ultimo_evento_em` e `status_conexao` não são atualizados por nenhum código; ficam nulos mesmo com eventos chegando. A chegada se confere por `webhook_raw`. Corrigir junto com os ajustes da Fase 1.
