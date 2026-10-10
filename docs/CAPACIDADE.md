@@ -27,7 +27,7 @@ Exemplo (By Koji): 240 chamadas/min × (8 s ÷ 60) ≈ 32 → `max_lotes_simulta
 - `max_lotes_simultaneos` (por empresa, padrão 5): conversas em andamento somando todos os agentes da empresa. Ajuste: `PUT /admin/v1/tenants/{t}/config` com `{"max_lotes_simultaneos": N}` (1–100; nulo volta ao padrão).
 - `max_concorrencia` (por agente, padrão 5): conversas em andamento de um agente. Ajuste: `PATCH /admin/v1/tenants/{t}/agentes/{a}` com `{"max_concorrencia": N}`, ou no `/config` da empresa para valer como padrão dos agentes dela.
 - Os dois valem ao mesmo tempo. Como a cota do Skyone é por URL (por fluxo, isto é, por agente), o agente só chega perto do teto da empresa se o `max_concorrencia` dele também subir.
-- Em 10/10/2026: bykoji com `max_lotes_simultaneos = 30`; demais empresas no padrão 5. `max_concorrencia` continua 5 em todos os agentes.
+- Em 10/10/2026: bykoji com `max_lotes_simultaneos = 30` e o agente “Atendimento By Koji” (`bykoji_atendimento`, um agente e um fluxo Skyone próprio) com `max_concorrencia = 30`. Demais empresas e agentes no padrão 5 e 5 (inclusive o agente `[teste]` de bench do bykoji).
 - A capacidade dos workers (`WORKERS × CONCORRENCIA_POR_WORKER`, hoje 40) é o teto de tudo somado.
 
 ## Alertas

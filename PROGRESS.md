@@ -639,3 +639,13 @@ PY
 - Limpeza: removida só a imagem `gateway-carga:latest` (sem prune). Mantidos: agente e canal do caso “aguardando” (até o Marco validar o painel), agente/canal/conversas do teste INV14, `.local/teste_skyone_tempo.py`. Nenhuma alteração no Skyone.
 - Observação: a conversa do caso “aguardando” foi assumida pelo Marco no painel às 01:15 UTC (auditoria `conversa.assumida`); por isso saiu do filtro `aguardando=true`.
 - Pendências: decidir `max_concorrencia` do bykoji; limpeza dos dois agentes `[teste]` do `postman_teste` quando o Marco pedir; fallback `"/"` do `bykoji/bykoji_atendimento`; ~3 min do worker morto à força. Próxima: Fase 1 (uazapi real).
+
+## Limite do By Koji e preparação da Fase 1 — 2026-10-10
+
+- Status: preparação feita; **Fase 1 ainda não iniciada** (aguarda o Marco configurar a instância uazapi de teste). Sem build, sem migração; imagem `gateway:7423fac`, `FILA_DURAVEL=on`.
+- `max_concorrencia = 30` no agente `bykoji/bykoji_atendimento` (`PATCH /admin/v1/tenants/bykoji/agentes/bykoji_atendimento`); efetivo: 30 por empresa e 30 no agente. Registrado em `docs/CAPACIDADE.md`.
+- Canal uazapi de teste criado no bykoji: `can_49fce1f15a43f87f22739d60` (“[teste] WhatsApp uazapi (Fase 1)”), ligado ao “Atendimento By Koji”, que continua em simulação com envio de teste (mock/dry). Sem credenciais ainda. A URL do webhook (contém segredo) foi gravada só em `.local/fase1_webhook_uazapi.txt` (600, fora do git) e não foi exibida.
+  - Conferido por fora: `POST` na rota do canal com segredo errado → 401; `/gateway/health` → `{"ok":true}`.
+- `scripts/canal_credencial.py` (novo): pede endereço base e token com `getpass`, valida o endereço com as regras de SSRF (https, 443, sem usuário/senha, DNS só para IP público) e grava cifrado pelo `PATCH` do canal. Recusa terminal não interativo; erros não repetem os valores. Testes: `tests/test_canal_credencial.py` (3). Suíte: **133 passed**, só bancos `_test`.
+- Limpeza do `postman_teste`: **não executada**; backup `/home/twadmin/backups/gateway/pre-limpeza-postman-20261010T013732Z/gateway.dump` (21 tabelas) e contagem entregue ao Marco. Achado: `conversas.agente_id` e `conversas.canal_id` são obrigatórios e têm chave estrangeira, então não dá para apagar o agente e o canal do caso “aguardando” mantendo a conversa como registro. Aguardando decisão.
+- uazapi (documentação oficial, `POST /webhook`): campos `url`, `events`, `excludeMessages`, `enabled`; a documentação não descreve reenvio de webhook quando o destino falha (há `/webhook/errors` para diagnóstico). Pendência da Fase 1 mantida.
