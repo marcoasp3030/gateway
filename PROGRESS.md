@@ -763,3 +763,10 @@ PY
   - **Defeito do gateway corrigido (`ccf5113`):** com a fila durável ligada, a marca da primeira mensagem do lote não era apagada (só o caminho antigo apagava) e ficava 24 h no Redis; a partir da segunda mensagem da conversa o debounce não valia (no teste, espera de 138 ms no “obrigado”). Mensagens picadas depois da primeira resposta virariam turnos separados. Corrigido e conferido em produção com o agente simulado: três turnos seguidos na mesma conversa com espera de 4,2 · 4,4 · 4,2 s (debounce 4 s). Existia desde que a fila foi ligada (10/10, ~01:19 UTC).
 - `docs/SKYONE.md` **não atualizado:** o arquivo `docs/fase2_skyone_atendente_delivery.md` não existe no repositório nem em `/home/twadmin` (busca por nome).
 - Validações: `sh scripts/test_suite.sh` → **151 passed**, só bancos `_test`. Produção: 4 containers `healthy`, fila zerada, `/health` público `{"ok":true}`, modos inalterados.
+
+## Fase 2 — transferência conferida com o fluxo ajustado — 2026-10-10
+
+- O Marco trocou o “Interpretar Resposta” no Skyone (normaliza `acao` e converte `nenhuma` + motivo `pediu_humano | pedido_para_confirmar | catering | reclamacao` em `transferir_humano`).
+- Reteste no Simular (conversa nova, IA real, envio de teste; número fictício em `contatos_permitidos` só durante o teste, lista de volta a `["5511942717046"]`, conferido): “quero falar com uma pessoa” → enviado “Só um instante, estou verificando.” (aviso de demora) e “Boa noite! A equipe vai continuar o atendimento em instantes.”; turno com `acao=transferir_humano`, sem `motivo_silencio` nem `desfecho`; conversa **pausada** e **aguardando atendente** com motivo `transferido_pelo_agente`. Tempos: agente 20,4 s, total 24,8 s.
+- Anotado para depois do teste A/B de latência (sem mudar agora): rever o aviso de demora (`slow_notice_s` = 15 s), que hoje sai antes de respostas de 15–29 s e antes de silêncio.
+- `docs/SKYONE.md` continua pendente: `docs/fase2_skyone_atendente_delivery.md` não está no servidor (busca em todo o disco por nome e por arquivos `.md` recentes).
