@@ -173,6 +173,7 @@ class FilaDuravel:
         proxima_limpeza = 0
         proxima_varredura = 0
         proximas_vazias = 0
+        proximos_avisos = 0
         while not (parar and parar.is_set()):
             try:
                 if await self.manter_lideranca():
@@ -184,6 +185,11 @@ class FilaDuravel:
                             self.varredura_task is None or self.varredura_task.done()):
                         # Em tarefa própria: chamada lenta ao provedor não atrasa o agendamento.
                         self.varredura_task = asyncio.create_task(self.varrer()); proxima_varredura = agora + self.varredura_s
+                    if agora >= proximos_avisos:
+                        # Avisos internos (pedido para a unidade, transbordo, aviso de pedido ao cliente).
+                        proximos_avisos = agora + 2
+                        from modulos.pedidos.avisos import despachar as despachar_avisos
+                        await despachar_avisos(self.p)
                     if self.ligada:
                         await self.mover_vencidos()
                         if agora >= proxima_reconciliacao:

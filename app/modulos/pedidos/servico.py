@@ -262,6 +262,52 @@ async def cancelar(conn,tenant,conversa,numero,motivo):
         WHERE tenant_id=$1 AND id=$2 RETURNING *""",tenant,p['id'],(motivo or '').strip()[:300] or None)
 
 
+class JaDecidido(Exception):
+    """A unidade (ou o cliente) já decidiu este pedido: quem chega depois não muda nada."""
+    def __init__(self,pedido): self.pedido=pedido
+
+
+async def decidir(conn,tenant,numero,novo,motivo,por):
+    """Confirmação ou recusa pela unidade (painel ou WhatsApp). O primeiro que decide vale.
+    Devolve o pedido atualizado; JaDecidido se não estava mais aguardando; None se não existe."""
+    assert novo in ('confirmado','recusado')
+    p=await conn.fetchrow('SELECT * FROM pedidos WHERE tenant_id=$1 AND numero=$2 FOR UPDATE',tenant,numero)
+    if not p: return None
+    if p['status']!='aguardando_loja': raise JaDecidido(p)
+    p=await conn.fetchrow("""UPDATE pedidos SET status=$3,motivo=$4,decidido_em=now(),decidido_por=$5,atualizado_em=now()
+        WHERE tenant_id=$1 AND id=$2 RETURNING *""",tenant,p['id'],novo,(motivo or '').strip()[:300] or None,por[:100])
+    if novo=='recusado' and p['carrinho_id']:
+        # Recusado: os itens voltam para o carrinho do cliente, se ele ainda não abriu outro.
+        if not await aberto(conn,tenant,p['conversation_id']):
+            await conn.execute("UPDATE carrinhos SET status='aberto',atualizado_em=now() WHERE tenant_id=$1 AND id=$2 AND status='fechado'",tenant,p['carrinho_id'])
+    return p
+
+
+# "OK 48213" confirma; "NÃO 48213 motivo" recusa. Só vale vindo do WhatsApp de pedidos da unidade do pedido.
+import re as _re
+_OK=_re.compile(r'^\s*(?:ok|okay|sim|confirm[ao](?:do)?)\s*[#nº°]*\s*(\d{4,12})\s*[.!]*\s*$',_re.I)
+_NAO=_re.compile(r'^\s*(?:n[aã]o|nao|recus[ao](?:do)?)\s*[#nº°]*\s*(\d{4,12})\b[\s:,.\-–—]*(.*)$',_re.I|_re.S)
+
+
+def comando_da_unidade(texto):
+    """('confirmado'|'recusado', numero, motivo) ou None se o texto não é um comando."""
+    t=str(texto or '')
+    m=_OK.match(t)
+    if m: return 'confirmado',m.group(1),None
+    m=_NAO.match(t)
+    if m: return 'recusado',m.group(1),' '.join(m.group(2).split())[:300] or None
+    return None
+
+
+async def numero_interno(conn,tenant,telefone):
+    """O telefone é WhatsApp de pedidos de alguma unidade ou o número de alerta da empresa?
+    Esses números nunca são tratados como cliente. Devolve os códigos das unidades (lista vazia = só alerta) ou None."""
+    if not telefone or not str(telefone).isdigit(): return None
+    unidades=[r[0] for r in await conn.fetch('SELECT codigo FROM tenant_unidades WHERE tenant_id=$1 AND ativo AND whatsapp_pedidos=$2',tenant,telefone)]
+    if unidades: return unidades
+    return [] if await conn.fetchval('SELECT whatsapp_alerta_transbordo=$2 FROM tenants WHERE id=$1',tenant,telefone) else None
+
+
 async def contexto(repo,tenant,conversa):
     """Bloco contexto_modulos.pedidos do pacote ao agente: carrinho aberto e o último pedido da conversa."""
     conn=repo.db   # só leituras: serve conexão ou pool

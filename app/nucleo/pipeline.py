@@ -46,6 +46,8 @@ async def encerrar_conversa(conn,tenant,conversa,desfecho):
         WHERE tenant_id=$1 AND conversation_id=$2 AND encerrada_em IS NULL RETURNING true""",tenant,conversa,desfecho))
 
 
+# Endereço do painel citado no alerta de transbordo (vazio = não cita).
+PAINEL_URL=os.getenv('PAINEL_URL','https://painel.luxbrain.com.br').strip() or None
 FIM_DE_FRASE=('?','.','!','…')
 # Segundos de "digitando" pedidos ao canal por vez; o canal cancela sozinho ao enviar.
 DIGITANDO_S=25
@@ -89,12 +91,16 @@ def debounce_da_mensagem(cfg,m):
     return min(normal,cfg['debounce_curto_s']) if completa else normal
 
 
-async def marcar_aguardando(conn,tenant,conversa,motivo):
-    """Marca a conversa como aguardando atendente; evento só na primeira marcação."""
+async def marcar_aguardando(conn,tenant,conversa,motivo,detalhe=None):
+    """Marca a conversa como aguardando atendente; evento e alerta de transbordo só na primeira marcação."""
     novo=await conn.fetchval("""UPDATE conversas SET aguardando_atendente_desde=now(),aguardando_motivo=$3
         WHERE tenant_id=$1 AND conversation_id=$2 AND aguardando_atendente_desde IS NULL RETURNING true""",
         tenant,conversa,motivo)
-    if novo: await auditar(conn,tenant,'sistema','conversa.aguardando_atendente',conversa)
+    if novo:
+        await auditar(conn,tenant,'sistema','conversa.aguardando_atendente',conversa)
+        # Alerta de transbordo (Fase 4): aviso curto ao número da empresa, se houver um cadastrado.
+        from modulos.pedidos.avisos import avisar_transbordo
+        await avisar_transbordo(conn,tenant,conversa,motivo,detalhe,PAINEL_URL)
     return bool(novo)
 
 
@@ -160,6 +166,15 @@ return 1
             return {'ok':True,'ignorado':True}
         if m.get('via_api'): return {'ok':True,'ignorado':True}
         identificador=m['identificador']
+        # WhatsApp de pedidos de uma unidade e número de alerta nunca são clientes (Fase 4): a mensagem
+        # não vira conversa nem turno; se for "OK <numero>" / "NÃO <numero> motivo", decide o pedido.
+        from modulos.pedidos import servico as pedidos_servico
+        unidades=await pedidos_servico.numero_interno(self.db,tenant,identificador)
+        if unidades is not None:
+            if m.get('tipo') not in (None,'texto'): return {'ok':True,'ignorado':True,'interno':True}
+            from modulos.pedidos.rotas import mensagem_de_numero_interno
+            async with self.db.acquire() as conn,conn.transaction():
+                return await mensagem_de_numero_interno(conn,tenant,identificador,unidades,m['texto'],m.get('message_id'))
         conversa=f'{tenant}:{canal_id}:{identificador}'
         humano=m.get('humano',False)
         mensagem_id=f'{canal_id}:{m["message_id"]}' if m.get('message_id') else None
@@ -450,7 +465,8 @@ return 1
                 erro='AGENT_TIMEOUT' if isinstance(falha,TempoEsgotado) else 'AGENT_ERROR'
                 status='erro';resultado={'resposta':[cfg['fallback']],'acao':'nenhuma'}
             finally:
-                if presenca and not presenca.done(): presenca.cancel()
+                # Espera o pedido de "digitando" terminar (é curto e tem limite próprio) em vez de cortá-lo no meio.
+                if presenca: await asyncio.gather(presenca,return_exceptions=True)
         # A resposta fica gravada antes de qualquer envio: se o worker cair, só falta enviar.
         if resultado and resultado.get('silencio_sem_motivo'): status='erro';erro='SILENCE_WITHOUT_REASON'
         return await self.db.fetchrow('''UPDATE turnos SET etapa='respondido',status=$3,erro=$4,resposta=$5::jsonb,
@@ -531,7 +547,7 @@ return 1
             # Ordem de travas: consumo antes de auditoria em todos os turnos.
             from nucleo.consumo import registrar,atualizar_cache
             mes,total=await registrar(conn,tenant)
-            if motivo: await marcar_aguardando(conn,tenant,conversa,motivo)
+            if motivo: await marcar_aguardando(conn,tenant,conversa,motivo,resultado.get('motivo') if resultado and motivo=='transferido_pelo_agente' else None)
             if turno['origem']=='sistema' and status=='ignorado':
                 await auditar(conn,tenant,'sistema','notificacao.nao_enviada',conversa)
             # INV03 antes do envio: o agente respondeu, mas a conversa foi pausada (ou saiu do piloto)

@@ -190,13 +190,13 @@ def test_configuracao_por_unidade_e_pacote_ao_agente():
             assert (u['codigo'],u['telefone'],u['whatsapp_pedidos'],u['taxa_entrega'],u['pedido_minimo'],u['aceita_retirada'],u['formas_pagamento'])==('patio_guedala',None,None,None,None,None,None)
             r=await client.patch(f'/admin/v1/tenants/alpha/unidades/{uid}',json={'whatsapp_pedidos':'5511900000010','taxa_entrega':12.5,'aceita_retirada':True,'formas_pagamento':'  '})
             u=r.json();assert (u['whatsapp_pedidos'],u['taxa_entrega'],u['aceita_retirada'],u['formas_pagamento'],u['endereco'])==('5511900000010',12.5,True,None,'Av. Comendador Adibo Ares, 9')
-            # codigo e WhatsApp de pedidos são únicos na empresa.
+            # codigo é único na empresa; o mesmo WhatsApp de pedidos pode atender mais de uma unidade.
             assert (await client.post('/admin/v1/tenants/alpha/unidades',json={'nome':'Outra','codigo':'patio_guedala'})).status_code==409
-            assert (await client.post('/admin/v1/tenants/alpha/unidades',json={'nome':'Outra','codigo':'outra','whatsapp_pedidos':'5511900000010'})).status_code==409
+            assert (await client.post('/admin/v1/tenants/alpha/unidades',json={'nome':'Outra','codigo':'outra','whatsapp_pedidos':'5511900000010'})).status_code==201
             for ruim in ({'codigo':'Pátio'},{'whatsapp_pedidos':'11-9999'},{'taxa_entrega':-1}):
                 assert (await client.patch(f'/admin/v1/tenants/alpha/unidades/{uid}',json=ruim)).status_code in (400,422),ruim
             # Pacote ao agente: dados da unidade, nulo para o que não foi informado; o WhatsApp de pedidos não vai.
-            p=(await pacote(conn,'alpha','America/Sao_Paulo'))[0]
+            p=[u for u in await pacote(conn,'alpha','America/Sao_Paulo') if u['codigo']=='patio_guedala'][0]
             assert (p['codigo'],p['endereco'],p['telefone'],p['taxa_entrega'],p['pedido_minimo'],p['aceita_retirada'],p['regras'])==('patio_guedala','Av. Comendador Adibo Ares, 9',None,12.5,None,True,'Horários do salão.')
             assert 'whatsapp_pedidos' not in p and 'telefone_whatsapp' not in p and p['horarios']=={'seg':[['12:00','15:00'],['19:00','22:00']]} and 'aberta_agora' in p
             json.dumps(p)   # serializável (sem Decimal)

@@ -59,9 +59,6 @@ async def salvar(request,t,dados,actor,uid=None):
             if isinstance(final[k],str) and not final[k].strip(): final[k]=None
         if final['codigo'] and await c.fetchval('SELECT EXISTS(SELECT 1 FROM tenant_unidades WHERE tenant_id=$1 AND codigo=$2 AND id<>$3)',t,final['codigo'],uid):
             raise HTTPException(409,{'campo':'codigo'})
-        # O WhatsApp de pedidos de uma unidade nunca é de outra (as respostas "OK <numero>" são atribuídas por ele).
-        if final['whatsapp_pedidos'] and await c.fetchval('SELECT EXISTS(SELECT 1 FROM tenant_unidades WHERE tenant_id=$1 AND whatsapp_pedidos=$2 AND id<>$3)',t,final['whatsapp_pedidos'],uid):
-            raise HTTPException(409,{'campo':'whatsapp_pedidos'})
         if novo:
             await c.execute('INSERT INTO tenant_unidades(id,tenant_id,nome,telefone_whatsapp,horarios,ativo) VALUES ($1,$2,$3,$4,$5::jsonb,$6)',uid,t,final['nome'],final['telefone_whatsapp'],json.dumps(final['horarios']),final['ativo'])
         else:

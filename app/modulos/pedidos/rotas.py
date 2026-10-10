@@ -9,7 +9,7 @@ from nucleo.banco import Repositorio
 from nucleo.webhooks import emitir
 from admin.servico import auditar
 from modulos import habilitado
-from . import servico
+from . import servico,avisos
 
 router=APIRouter()
 chave=contexto_da_chave('ferramentas:pedidos')
@@ -134,6 +134,8 @@ async def fechar(request:Request,dados:Fechar,ctx=Depends(chave)):
                 if p is not None:
                     await auditar(conn,t,'agente','pedido.criado',p['numero'])
                     await emitir(conn,t,'pedido.criado',resumo_evento(p))
+                    # Unidade com WhatsApp de pedidos recebe o resumo; sem número, o pedido fica só no painel.
+                    await avisos.avisar_unidade_do_pedido(conn,t,p,servico.retrato_pedido(p)['itens'])
         except servico.Recusa as r:
             return recusa(r,await servico.retrato(conn,t,conversa))
         if p is None:
@@ -165,6 +167,21 @@ async def cancelar(request:Request,numero:str,dados:Cancelar,ctx=Depends(chave))
     return {'ok':True,'pedido':servico.retrato_pedido(p)}
 
 
+async def decidir_pedido(conn,tenant,numero,novo,motivo,por):
+    """Decisão da unidade, igual para painel e WhatsApp: grava, audita, dispara webhook e avisa o cliente.
+    Chamar dentro de transação. Devolve o pedido, None (não existe) ou levanta servico.JaDecidido."""
+    p=await servico.decidir(conn,tenant,numero,novo,motivo,por)
+    if p is None: return None
+    await auditar(conn,tenant,por,'pedido.'+novo,p['numero'])
+    await emitir(conn,tenant,'pedido.'+novo,{**resumo_evento(p),'motivo':p['motivo']})
+    await avisos.avisar_cliente_do_pedido(conn,tenant,p)
+    return p
+
+
+class Decisao(Estrito):
+    motivo:str|None=Field(None,max_length=300)
+
+
 admin=APIRouter(prefix='/admin/v1',dependencies=[Depends(painel)])
 
 
@@ -184,3 +201,57 @@ async def detalhe(request:Request,tenant_id:str,numero:str):
     r=await request.app.state.db.fetchrow('SELECT * FROM pedidos WHERE tenant_id=$1 AND numero=$2',tenant_id,numero)
     if not r: raise HTTPException(404,'NOT_FOUND')
     return {**servico.retrato_pedido(r),'id':r['id'],'cliente_telefone':r['cliente_telefone'],'decidido_por':r['decidido_por']}
+
+
+async def _decidir_pelo_painel(request,tenant_id,numero,novo,motivo,actor):
+    async with request.app.state.db.acquire() as conn:
+        try:
+            async with conn.transaction():
+                p=await decidir_pedido(conn,tenant_id,numero,novo,motivo,actor)
+        except servico.JaDecidido as ja:
+            # Quem decidiu primeiro vale (painel ou WhatsApp da unidade).
+            return JSONResponse({'erro':{'codigo':'CONFLICT','mensagem':'O pedido já foi decidido.','detalhes':{'campo':'status','status':ja.pedido['status']}}},
+                                status_code=409,headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
+    if p is None: raise HTTPException(404,'NOT_FOUND')
+    return {**servico.retrato_pedido(p),'id':p['id'],'cliente_telefone':p['cliente_telefone'],'decidido_por':p['decidido_por']}
+
+
+@admin.post('/tenants/{tenant_id}/pedidos/{numero}/confirmar')
+async def confirmar(request:Request,tenant_id:str,numero:str,actor=Depends(painel)):
+    return await _decidir_pelo_painel(request,tenant_id,numero,'confirmado',None,actor)
+
+
+@admin.post('/tenants/{tenant_id}/pedidos/{numero}/recusar')
+async def recusar(request:Request,tenant_id:str,numero:str,dados:Decisao|None=None,actor=Depends(painel)):
+    return await _decidir_pelo_painel(request,tenant_id,numero,'recusado',dados.motivo if dados else None,actor)
+
+
+@admin.get('/tenants/{tenant_id}/avisos')
+async def lista_avisos(request:Request,tenant_id:str,limite:int=50):
+    """Avisos internos (para a unidade, alerta de transbordo e avisos de pedido ao cliente) e o que aconteceu com cada um."""
+    if not await Repositorio(request.app.state.db).tenant(tenant_id): raise HTTPException(404,'NOT_FOUND')
+    if not 1<=limite<=200: raise HTTPException(400,'VALIDATION_ERROR')
+    rows=await request.app.state.db.fetch('SELECT id,tipo,destino,conversation_id,referencia,status,tentativas,erro,criado_em,enviado_em FROM avisos_internos WHERE tenant_id=$1 ORDER BY id DESC LIMIT $2',tenant_id,limite)
+    return {'itens':[dict(r) for r in rows]}
+
+
+async def mensagem_de_numero_interno(conn,tenant,telefone,unidades,texto,message_id):
+    """Mensagem vinda de um WhatsApp de unidade ou do número de alerta: nunca vira conversa de cliente.
+    Se for "OK <numero>" / "NÃO <numero> motivo" de uma unidade dona do pedido, decide o pedido e responde."""
+    comando=servico.comando_da_unidade(texto)
+    if not comando or not unidades: return {'ok':True,'ignorado':True,'interno':True}
+    novo,numero,motivo=comando;por='unidade:whatsapp'
+    ref=str(message_id or f'{numero}:{novo}')
+    p=await conn.fetchrow('SELECT * FROM pedidos WHERE tenant_id=$1 AND numero=$2',tenant,numero)
+    if not p or p['unidade'] not in unidades:
+        # Número inexistente ou de outra unidade: não revela nada além de "não encontrado".
+        await avisos.enfileirar(conn,tenant,'resposta_unidade',ref,f'Pedido {numero} não encontrado para esta unidade.',telefone)
+        return {'ok':True,'interno':True,'comando':novo,'resultado':'nao_encontrado'}
+    try:
+        async with conn.transaction():
+            p=await decidir_pedido(conn,tenant,numero,novo,motivo,por)
+        resposta=f'Pedido {numero} {"confirmado ✅" if novo=="confirmado" else "recusado ❌"}. O cliente foi avisado.';resultado=novo
+    except servico.JaDecidido as ja:
+        resposta=f'Pedido {numero} já estava {ja.pedido["status"].replace("_"," ")}; nada foi alterado.';resultado='ja_decidido'
+    await avisos.enfileirar(conn,tenant,'resposta_unidade',ref,resposta,telefone)
+    return {'ok':True,'interno':True,'comando':novo,'resultado':resultado}

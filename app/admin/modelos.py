@@ -16,6 +16,8 @@ class Tenant(Estrito):
     retencao_dias: int | None = Field(None,gt=0)
     tenant_teste: bool | None = None
     status: Literal['ativo','suspenso'] | None = None
+    # Fase 4: número que recebe o alerta quando uma conversa fica aguardando atendente (nulo = desligado).
+    whatsapp_alerta_transbordo: str | None = Field(None,pattern=r'^\d{8,16}$')
 
 
 class Comportamento(Estrito):
