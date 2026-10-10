@@ -121,6 +121,7 @@ async def conversas(request: Request, tenant: str, agente: str | None = None, ca
         raise HTTPException(400, 'VALIDATION_ERROR')
     rows = await request.app.state.db.fetch('''SELECT c.conversation_id,c.agente_id,c.canal_id,c.canal,c.nome,
         c.telefone,c.bot_pausado_ate,c.atualizado_em,c.aguardando_atendente_desde,c.aguardando_motivo,
+        c.encerrada_em,c.desfecho,c.limitado_ate,
         CASE WHEN c.bot_pausado_ate>now() THEN 'pausada' ELSE 'ativa' END AS status,
         m.conteudo AS ultima_mensagem,m.enviada_em AS ultima_em
         FROM conversas c LEFT JOIN LATERAL (

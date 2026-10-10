@@ -34,6 +34,18 @@ def campos_do_retorno(resultado):
     return acao,(resultado.get('motivo') if acao=='silencio' else None),resultado.get('desfecho')
 
 
+# Mensagem do atendente pelo celular que devolve a conversa ao bot na hora (não vai para o agente).
+COMANDO_BOT='#bot'
+# SEG07 por contato: tempo sem chamar o agente depois de estourar o limite por minuto.
+BLOQUEIO_CONTATO_MIN=5
+
+
+async def encerrar_conversa(conn,tenant,conversa,desfecho):
+    """Marca a conversa como encerrada (primeira marcação vale). Mensagem nova do cliente reabre."""
+    return bool(await conn.fetchval("""UPDATE conversas SET encerrada_em=now(),desfecho=$3,atualizado_em=now()
+        WHERE tenant_id=$1 AND conversation_id=$2 AND encerrada_em IS NULL RETURNING true""",tenant,conversa,desfecho))
+
+
 FIM_DE_FRASE=('?','.','!','…')
 # Segundos de "digitando" pedidos ao canal por vez; o canal cancela sozinho ao enviar.
 DIGITANDO_S=25
@@ -163,6 +175,8 @@ return 1
                 WHERE conversas.tenant_id=EXCLUDED.tenant_id''',tenant,conversa,canal['tipo'],canal_id,cfg['id'],identificador,m.get('nome'))
             await conn.execute('UPDATE conversas SET contato_id=$3 WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa,contato)
             reacao=m.get('tipo')=='reacao'
+            comando_bot=humano and not reacao and m['texto'].strip().lower()==COMANDO_BOT
+            if comando_bot: m={**m,'tipo':'comando'}
             msgid=await conn.fetchval('''INSERT INTO mensagens(tenant_id,conversation_id,direcao,origem,conteudo,message_id,enviada_em,tipo,meta,processada_em,origem_recebimento)
                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,CASE WHEN $10 THEN now() END,$11) ON CONFLICT(tenant_id,message_id) DO NOTHING RETURNING id''',
                 tenant,conversa,'saida' if humano else 'entrada','humano' if humano else 'cliente',m['texto'],
@@ -172,14 +186,42 @@ return 1
                 await auditar(conn,tenant,'sistema','mensagem.humana' if humano else 'mensagem.recebida',conversa)
             # Reação fica no histórico, mas não abre turno nem pausa o bot (um 👍 do atendente não é assumir a conversa).
             if reacao: return {'ok':True,'reacao':True,'duplicada':msgid is None,'conversation_id':conversa,'mensagem_id':msgid}
-            if humano and msgid:
+            if comando_bot:
+                # Atendente devolveu a conversa ao bot pelo celular: retoma na hora e não vai para o agente.
+                if msgid:
+                    await conn.execute('''UPDATE conversas SET bot_pausado_ate=NULL,aguardando_atendente_desde=NULL,aguardando_motivo=NULL,
+                        atualizado_em=now() WHERE tenant_id=$1 AND conversation_id=$2''',tenant,conversa)
+                    await conn.execute('UPDATE mensagens SET processada_em=now() WHERE tenant_id=$1 AND id=$2',tenant,msgid)
+                    await auditar(conn,tenant,'atendente','conversa.devolvida',conversa)
+                retomar=bool(msgid) and await conn.fetchval("SELECT EXISTS(SELECT 1 FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND direcao='entrada' AND processada_em IS NULL AND origem IN ('cliente','sistema'))",tenant,conversa)
+            elif humano and msgid:
                 await conn.execute('UPDATE conversas SET bot_pausado_ate=now()+make_interval(mins=>$3) '
                     'WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa,cfg['pause_minutes'])
-            if humano: return {'ok':True,'from_me':True}
+            if humano and not comando_bot: return {'ok':True,'from_me':True}
+            if msgid and not humano:
+                # Cliente voltou a falar: conversa encerrada reabre.
+                if await conn.fetchval('''UPDATE conversas SET encerrada_em=NULL,desfecho=NULL WHERE tenant_id=$1 AND conversation_id=$2
+                        AND encerrada_em IS NOT NULL RETURNING true''',tenant,conversa):
+                    await auditar(conn,tenant,'sistema','conversa.reaberta',conversa)
+                # SEG07 por contato: mensagens demais em um minuto → registra, alerta e para de chamar o agente por um tempo.
+                limitado=await conn.fetchval('SELECT limitado_ate>now() FROM conversas WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa)
+                if not limitado and await conn.fetchval('''SELECT count(*) FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2
+                        AND direcao='entrada' AND origem='cliente' AND criado_em>now()-make_interval(secs=>60)''',tenant,conversa)>cfg['max_msgs_por_minuto_contato']:
+                    await conn.execute('UPDATE conversas SET limitado_ate=now()+make_interval(mins=>$3) WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa,BLOQUEIO_CONTATO_MIN)
+                    await auditar(conn,tenant,'sistema','contato.limite_excedido',conversa)
+                    log.warning('Contato acima do limite de mensagens por minuto; agente suspenso por %s min',BLOQUEIO_CONTATO_MIN)
+                    limitado=True
+                if limitado:
+                    await conn.execute('UPDATE mensagens SET processada_em=now() WHERE tenant_id=$1 AND id=$2',tenant,msgid)
+                    return {'ok':True,'ignorado':True,'limitado':True,'conversation_id':conversa,'mensagem_id':msgid}
             if msgid and cfg['modo_piloto'] and identificador not in cfg['contatos_permitidos']:
                 await conn.execute('UPDATE mensagens SET processada_em=now() WHERE tenant_id=$1 AND id=$2',tenant,msgid)
                 return {'ok':True,'ignorado':True,'conversation_id':conversa,'mensagem_id':msgid}
         # Em retry de webhook duplicado, o agendamento é reparado se a primeira chamada falhou no Redis.
+        if humano:
+            # Só chega aqui o #bot: se havia mensagem do cliente esperando, o bot responde agora.
+            if retomar: await self.enfileirar(tenant,conversa,cfg)
+            return {'ok':True,'from_me':True,'comando':'bot','duplicada':msgid is None}
         # A última mensagem decide a espera: a que parece completa encurta, a picada mantém.
         await self.enfileirar(tenant,conversa,cfg,debounce_da_mensagem(cfg,m) if msgid else None)
         return {'ok':True,'duplicada':msgid is None,'conversation_id':conversa,'mensagem_id':msgid}
@@ -288,6 +330,8 @@ return 1
                 if motivo: await marcar_aguardando(conn,tenant,conversa,motivo)
                 if origem=='sistema' and status=='ignorado':
                     await auditar(conn,tenant,'sistema','notificacao.nao_enviada',conversa)
+                if status=='ok' and resultado and resultado.get('acao')=='encerrar':
+                    await encerrar_conversa(conn,tenant,conversa,resultado.get('desfecho'))
                 if status=='ok' and resultado and resultado.get('acao') in ('transferir_humano','encerrar'):
                     from nucleo.webhooks import emitir
                     await emitir(conn,tenant,'conversa.transferida' if resultado['acao']=='transferir_humano' else 'conversa.encerrada',{'conversation_id':conversa,'agente_id':cfg['id']})
@@ -490,6 +534,12 @@ return 1
             if motivo: await marcar_aguardando(conn,tenant,conversa,motivo)
             if turno['origem']=='sistema' and status=='ignorado':
                 await auditar(conn,tenant,'sistema','notificacao.nao_enviada',conversa)
+            # INV03 antes do envio: o agente respondeu, mas a conversa foi pausada (ou saiu do piloto)
+            # antes de a resposta sair. A resposta é descartada e fica registrado.
+            if status=='ignorado' and turno['status']!='ignorado' and resultado and resultado.get('resposta'):
+                await auditar(conn,tenant,'sistema','resposta.descartada',conversa)
+            if status=='ok' and resultado and resultado.get('acao')=='encerrar':
+                await encerrar_conversa(conn,tenant,conversa,resultado.get('desfecho'))
             if status=='ok' and resultado and resultado.get('acao') in ('transferir_humano','encerrar'):
                 from nucleo.webhooks import emitir
                 await emitir(conn,tenant,'conversa.transferida' if resultado['acao']=='transferir_humano' else 'conversa.encerrada',{'conversation_id':conversa,'agente_id':cfg['id']})
@@ -504,6 +554,31 @@ return 1
             conv=await self.repo.obter(row['tenant_id'],'conversas',row['conversation_id'])
             cfg=await self.cfg.efetiva(row['tenant_id'],conv['agente_id'])
             await self.enfileirar(row['tenant_id'],row['conversation_id'],cfg)
+
+    async def encerrar_vazias(self,limite=200):
+        """Encerra com desfecho "vazia" a conversa em que o cliente só mandou o que o gateway não lê
+        (anexo, figurinha, reação) e ninguém mais falou depois de encerrar_vazia_min."""
+        candidatas=await self.db.fetch("""SELECT c.tenant_id,c.conversation_id,c.agente_id,
+              (SELECT max(criado_em) FROM mensagens m WHERE m.tenant_id=c.tenant_id AND m.conversation_id=c.conversation_id) AS ultima
+            FROM conversas c WHERE c.encerrada_em IS NULL AND c.aguardando_atendente_desde IS NULL
+              AND (c.bot_pausado_ate IS NULL OR c.bot_pausado_ate<now())
+              AND EXISTS(SELECT 1 FROM mensagens m WHERE m.tenant_id=c.tenant_id AND m.conversation_id=c.conversation_id AND m.origem='cliente')
+              AND NOT EXISTS(SELECT 1 FROM mensagens m WHERE m.tenant_id=c.tenant_id AND m.conversation_id=c.conversation_id
+                    AND (m.origem='humano' OR (m.origem='cliente' AND m.tipo IN ('texto','localizacao'))
+                         OR (m.direcao='entrada' AND m.processada_em IS NULL)))
+            ORDER BY c.atualizado_em LIMIT $1""",limite)
+        encerradas=0;agora=datetime.now(timezone.utc)
+        for c in candidatas:
+            try: cfg=await self.cfg.efetiva(c['tenant_id'],c['agente_id'])
+            except LookupError: continue
+            if not c['ultima'] or agora-c['ultima']<timedelta(minutes=cfg['encerrar_vazia_min']): continue
+            async with self.db.acquire() as conn,conn.transaction():
+                await conn.execute('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',c['conversation_id'])
+                # Confere de novo sob a trava: o cliente pode ter escrito neste instante.
+                if await conn.fetchval("""SELECT max(criado_em) FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2""",c['tenant_id'],c['conversation_id'])!=c['ultima']: continue
+                if await encerrar_conversa(conn,c['tenant_id'],c['conversation_id'],'vazia'):
+                    await auditar(conn,c['tenant_id'],'sistema','conversa.encerrada',c['conversation_id']);encerradas+=1
+        return encerradas
 
     async def limpeza(self):
         # Retenção de webhook por tenant; sem logs de conteúdo ou telefones.

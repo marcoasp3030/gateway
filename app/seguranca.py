@@ -133,8 +133,17 @@ async def validar_url_saida(url: str, dominios_permitidos: list[str] | None = No
 _PARAMS_SENSIVEIS = re.compile(r"([?&](?:s|token|key|secret|api_key)=)[^&\s\"]+", re.I)
 
 
+# LGPD04: telefone em log aparece como 5511****7777 (10 a 15 dígitos seguidos; ex.: o
+# identificador da conversa na URL das rotas administrativas).
+_TELEFONE = re.compile(r"(?<![0-9])([0-9]{4})[0-9]{2,7}([0-9]{4})(?![0-9])")
+
+
+def mascarar_telefones(texto: str) -> str:
+    return _TELEFONE.sub(r"\1****\2", texto)
+
+
 def mascarar(texto: str) -> str:
-    return _PARAMS_SENSIVEIS.sub(r"\1***", texto)
+    return mascarar_telefones(_PARAMS_SENSIVEIS.sub(r"\1***", texto))
 
 
 class FiltroSegredos(logging.Filter):

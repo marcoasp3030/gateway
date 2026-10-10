@@ -160,6 +160,14 @@ Estado persistente por agente: três falhas consecutivas em cinco minutos abrem 
 
 **Aviso de demora e “digitando” (Fase 3):** o padrão de `slow_notice_s` passou de 15 para 20 s. Com envio real em canal uazapi, o gateway pede “digitando” ao canal enquanto o agente processa (25 s por pedido; o envio da resposta encerra; em silêncio é retirado). Em envio de teste nada é chamado.
 
+**Conversa: encerramento, `#bot`, limite por contato (Fase 3):**
+- `GET .../conversas` devolve também `encerrada_em`, `desfecho` e `limitado_ate`. Quando o agente responde `encerrar`, a conversa fica com `encerrada_em` e `desfecho` (`pedido_feito`, `duvida_resolvida`, `reclamacao`, `sem_interesse`...); a próxima mensagem do cliente reabre (os dois voltam a nulo; auditoria `conversa.reaberta`). O `status` (`ativa | pausada`) não muda de significado.
+- **Conversa vazia:** a cada 5 min o agendador encerra com `desfecho = "vazia"` a conversa em que o cliente só mandou o que o gateway não lê (anexo, figurinha) e ninguém falou por `encerrar_vazia_min` (padrão 30). Não vale para conversa com atendente, pausada, aguardando atendente ou com mensagem pendente.
+- **`#bot`:** mensagem do atendente pelo celular da instância com exatamente `#bot` devolve a conversa ao bot na hora (tira pausa e “aguardando atendente”), não vai para o agente e fica gravada com `tipo = "comando"`; auditoria `conversa.devolvida` com ator `atendente`.
+- **Limite por contato (SEG07):** `max_msgs_por_minuto_contato` (1–600, padrão 20; por empresa ou agente). Acima disso em 60 s, o contato fica 5 min sem chamar o agente (`limitado_ate`); as mensagens continuam gravadas; auditoria `contato.limite_excedido` e aviso no log.
+- **Resposta descartada (INV03):** se a conversa é pausada depois de o agente responder e antes do envio, a resposta não sai; turno `ignorado` e auditoria `resposta.descartada`.
+- **Logs (LGPD04):** telefones aparecem como `5511****7777` em qualquer linha de log (inclusive URLs das rotas); nenhum log traz conteúdo de mensagem.
+
 **Limites compartilhados (fila durável, ativos quando `FILA_DURAVEL=on`):** `max_lotes_simultaneos` por empresa e `max_concorrencia` por agente valem somados entre todos os workers (vagas no Redis). Padrão 5 e 5; os dois valem ao mesmo tempo (uma conversa precisa de vaga na empresa **e** no agente). Por empresa: `PUT /admin/v1/tenants/{t}/config`; por agente: `PATCH /admin/v1/tenants/{t}/agentes/{a}` (1–100; nulo herda). Como dimensionar: `docs/CAPACIDADE.md`. Empresa no limite não atrasa as outras (INV07).
 
 ## 7. Skyone: autenticação Basic, limite por URL e credencial recusada ✅

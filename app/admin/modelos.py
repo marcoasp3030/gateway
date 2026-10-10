@@ -37,6 +37,7 @@ class Comportamento(Estrito):
     encerrar_vazia_min: int | None = Field(None,gt=0)
     max_lotes_simultaneos: int | None = Field(None,gt=0,le=100)
     max_concorrencia: int | None = Field(None,gt=0,le=100)
+    max_msgs_por_minuto_contato: int | None = Field(None,ge=1,le=600)
     skyone_dominios_permitidos: list[str] | None = None
 
 

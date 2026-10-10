@@ -172,6 +172,7 @@ class FilaDuravel:
         proximos_indicadores = 0
         proxima_limpeza = 0
         proxima_varredura = 0
+        proximas_vazias = 0
         while not (parar and parar.is_set()):
             try:
                 if await self.manter_lideranca():
@@ -189,6 +190,9 @@ class FilaDuravel:
                             await self.reconciliar(); proxima_reconciliacao = agora + 60
                         if agora >= proxima_limpeza:
                             await self.p.limpeza(); proxima_limpeza = agora + 21600
+                        if agora >= proximas_vazias:
+                            # Conversa vazia (Fase 3): a cada 5 min.
+                            proximas_vazias = agora + 300; await self.p.encerrar_vazias()
                         await self.despachar_saidas()
                 self.tocar_arquivo()
             except Exception:
