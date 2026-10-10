@@ -25,7 +25,17 @@ def estado(horarios,fuso,agora=None):
     futuras=[a for a,b in intervalos if a>agora]
     return {'aberta_agora':aberta,'proxima_abertura':min(futuras).isoformat() if futuras and not aberta else None}
 
+# Dados da unidade que vão ao agente. Nulo = não informado: o agente não afirma nada sobre o campo
+# e diz que a unidade confirma no retorno do pré-pedido. whatsapp_pedidos é interno e não vai.
+PARA_O_AGENTE=('codigo','endereco','telefone','formas_pagamento','taxa_entrega','pedido_minimo','area_entrega','aceita_retirada','regras')
+
+
 async def pacote(db,tenant,fuso,agora=None):
-    rows=await db.fetch('SELECT id,nome,horarios FROM tenant_unidades WHERE tenant_id=$1 AND ativo ORDER BY id',tenant)
+    rows=await db.fetch('SELECT * FROM tenant_unidades WHERE tenant_id=$1 AND ativo ORDER BY id',tenant)
     import json
-    return [{'id':r['id'],'nome':r['nome'],**estado(json.loads(r['horarios']) if isinstance(r['horarios'],str) else r['horarios'],fuso,agora)} for r in rows]
+    saida=[]
+    for r in rows:
+        horarios=json.loads(r['horarios']) if isinstance(r['horarios'],str) else r['horarios']
+        dados={k:(float(r[k]) if k in ('taxa_entrega','pedido_minimo') and r[k] is not None else r[k]) for k in PARA_O_AGENTE}
+        saida.append({'id':r['id'],'nome':r['nome'],**estado(horarios,fuso,agora),**dados,'horarios':horarios})
+    return saida

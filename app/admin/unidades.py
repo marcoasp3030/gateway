@@ -12,9 +12,26 @@ class Unidade(Estrito):
     telefone_whatsapp:str|None=Field(None,pattern=r'^\d{8,16}$')
     horarios:dict|None=None
     ativo:bool|None=None
+    # Fase 4. codigo liga a unidade aos itens do catálogo. Os demais: vazio (nulo) = o agente não
+    # afirma nada e diz que a unidade confirma no retorno do pré-pedido.
+    codigo:str|None=Field(None,pattern=r'^[a-z0-9][a-z0-9_]{0,39}$')
+    endereco:str|None=Field(None,max_length=500)
+    telefone:str|None=Field(None,max_length=40)
+    whatsapp_pedidos:str|None=Field(None,pattern=r'^\d{8,16}$')
+    formas_pagamento:str|None=Field(None,max_length=500)
+    taxa_entrega:float|None=Field(None,ge=0,le=99999)
+    pedido_minimo:float|None=Field(None,ge=0,le=99999)
+    area_entrega:str|None=Field(None,max_length=1000)
+    aceita_retirada:bool|None=None
+    regras:str|None=Field(None,max_length=2000)
+
+EXTRAS=('codigo','endereco','telefone','whatsapp_pedidos','formas_pagamento','taxa_entrega','pedido_minimo','area_entrega','aceita_retirada','regras')
 
 def formato(row):
-    d=dict(row);d['horarios']=json.loads(d['horarios']) if isinstance(d['horarios'],str) else d['horarios'];return d
+    d=dict(row);d['horarios']=json.loads(d['horarios']) if isinstance(d['horarios'],str) else d['horarios']
+    for campo in ('taxa_entrega','pedido_minimo'):
+        if d.get(campo) is not None: d[campo]=float(d[campo])
+    return d
 
 async def obter(c,t,uid):
     row=await c.fetchrow('SELECT * FROM tenant_unidades WHERE tenant_id=$1 AND id=$2',t,uid)
@@ -33,14 +50,24 @@ async def salvar(request,t,dados,actor,uid=None):
     d=validar(Unidade,dados);novo=uid is None;uid=uid or 'uni_'+secrets.token_hex(12)
     async with request.app.state.db.acquire() as c,c.transaction():
         await empresa(c,t)
-        old={'nome':None,'telefone_whatsapp':None,'horarios':{},'ativo':True} if novo else await obter(c,t,uid)
+        old={'nome':None,'telefone_whatsapp':None,'horarios':{},'ativo':True,**{k:None for k in EXTRAS}} if novo else await obter(c,t,uid)
         final={**old,**d}
         if not final['nome'] or not isinstance(final['ativo'],bool): raise HTTPException(400,'VALIDATION_ERROR')
         validar_horarios(final['horarios'])
+        # Texto só com espaços vale como vazio.
+        for k in EXTRAS:
+            if isinstance(final[k],str) and not final[k].strip(): final[k]=None
+        if final['codigo'] and await c.fetchval('SELECT EXISTS(SELECT 1 FROM tenant_unidades WHERE tenant_id=$1 AND codigo=$2 AND id<>$3)',t,final['codigo'],uid):
+            raise HTTPException(409,{'campo':'codigo'})
+        # O WhatsApp de pedidos de uma unidade nunca é de outra (as respostas "OK <numero>" são atribuídas por ele).
+        if final['whatsapp_pedidos'] and await c.fetchval('SELECT EXISTS(SELECT 1 FROM tenant_unidades WHERE tenant_id=$1 AND whatsapp_pedidos=$2 AND id<>$3)',t,final['whatsapp_pedidos'],uid):
+            raise HTTPException(409,{'campo':'whatsapp_pedidos'})
         if novo:
             await c.execute('INSERT INTO tenant_unidades(id,tenant_id,nome,telefone_whatsapp,horarios,ativo) VALUES ($1,$2,$3,$4,$5::jsonb,$6)',uid,t,final['nome'],final['telefone_whatsapp'],json.dumps(final['horarios']),final['ativo'])
         else:
             await c.execute('UPDATE tenant_unidades SET nome=$3,telefone_whatsapp=$4,horarios=$5::jsonb,ativo=$6 WHERE tenant_id=$1 AND id=$2',t,uid,final['nome'],final['telefone_whatsapp'],json.dumps(final['horarios']),final['ativo'])
+        await c.execute('''UPDATE tenant_unidades SET codigo=$3,endereco=$4,telefone=$5,whatsapp_pedidos=$6,formas_pagamento=$7,
+            taxa_entrega=$8,pedido_minimo=$9,area_entrega=$10,aceita_retirada=$11,regras=$12 WHERE tenant_id=$1 AND id=$2''',t,uid,*(final[k] for k in EXTRAS))
         await auditar(c,t,actor,'unidade.salva',uid)
         return await obter(c,t,uid)
 

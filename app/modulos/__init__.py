@@ -21,8 +21,8 @@ async def catalogo_contexto(repo, tenant, conversa):
     return {'itens_ativos':n}
 
 REGISTRO={
- 'catalogo':Modulo('catalogo',('006_catalogo.sql',),('/api/v1/catalogo/busca',),('ferramentas:catalogo',),catalogo_contexto),
- 'pedidos':Modulo('pedidos',(),(),('ferramentas:pedidos',),vazio),
+ 'catalogo':Modulo('catalogo',('006_catalogo.sql','021_catalogo_pedidos.sql'),('/api/v1/catalogo/busca',),('ferramentas:catalogo',),catalogo_contexto),
+ 'pedidos':Modulo('pedidos',('021_catalogo_pedidos.sql',),(),('ferramentas:pedidos',),vazio),
 }
 
 async def habilitado(repo, tenant, nome):

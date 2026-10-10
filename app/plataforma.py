@@ -155,7 +155,7 @@ def criar_app(infra,db=None,redis=None):
         return {'ok':True,'fila':fila}
 
     from admin.capacidades import router as capacidades
-    from modulos.catalogo.rotas import router as catalogo
+    from modulos.catalogo.rotas import router as catalogo,admin as catalogo_admin
     from admin.saidas import router as saidas
     from admin.notificacoes import router as notificacoes
     from admin.unidades import router as unidades
@@ -170,6 +170,6 @@ def criar_app(infra,db=None,redis=None):
     app.include_router(unidades)
     app.include_router(notificacoes)
     app.include_router(saidas)
-    app.include_router(capacidades);app.include_router(catalogo)
+    app.include_router(capacidades);app.include_router(catalogo);app.include_router(catalogo_admin)
     app.include_router(canais_router);app.include_router(router);app.include_router(api)
     return app
