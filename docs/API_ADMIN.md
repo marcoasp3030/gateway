@@ -76,7 +76,7 @@ Os códigos são fixos e são os únicos emitidos; o painel decide pelo código 
 
 **Criação:** `{ "id":"bykoji", "nome":"By Koji", "plano":"pro", "limite_turnos_mes":20000, "timezone":"America/Sao_Paulo" }`. PATCH também aceita `retencao_dias`, `tenant_teste`, `status`. **`tenant_teste` pertence ao tenant**, não à config. A lista não traz consumo embutido.
 
-**Configuração de comportamento** (`PUT /config` atualiza só os campos enviados): `debounce_s` (1–15), `debounce_curto_s` (0,5–15; padrão 1,5) e `debounce_palavras` (1–50; padrão 6) — **debounce adaptativo**: texto que termina com `?`, `.`, `!` ou `…`, ou com mais de `debounce_palavras` palavras, espera `debounce_curto_s` (nunca mais que `debounce_s`); mensagem curta, mídia e localização esperam `debounce_s`; o teto `max_wait_s` continua valendo —, `max_wait_s` (≥ debounce, ≤30), `media_wait_s` (0–60), `history_turns` (0–100), `pause_minutes`, `slow_notice_s`, `aviso_demora`, `fallback`, `alerta_telefone`, `send_mode=dry|live`, `agente_mode=mock|live`, `modo_piloto`, `contatos_permitidos`, `encerrar_vazia_min`, `max_lotes_simultaneos`, `max_concorrencia`, `skyone_dominios_permitidos`. Telefones: 8–16 dígitos. Valores nulos herdam; omitir em PATCH preserva. Cache de 30 s, invalidado por escritas da API.
+**Configuração de comportamento** (`PUT /config` atualiza só os campos enviados): `debounce_s` (1–15), `debounce_curto_s` (0,5–15; padrão 1,5) e `debounce_palavras` (1–50; padrão 6) — **debounce adaptativo**: texto que termina com `?`, `.`, `!` ou `…`, ou com mais de `debounce_palavras` palavras, espera `debounce_curto_s` (nunca mais que `debounce_s`); mensagem curta, mídia e localização esperam `debounce_s`; o teto `max_wait_s` continua valendo —, `max_wait_s` (≥ debounce, ≤30), `media_wait_s` (0–60), `history_turns` (0–100), `pause_minutes`, `slow_notice_s`, `aviso_demora`, `fallback`, `alerta_telefone`, `send_mode=dry|live`, `agente_mode=mock|live`, `modo_piloto`, `contatos_permitidos`, `encerrar_vazia_min`, `max_lotes_simultaneos`, `max_concorrencia`, `skyone_dominios_permitidos`, `botoes_interativos=on|off` (padrão `off`: as opções que o agente devolve em `botoes` saem numeradas em texto; `on` envia botões de resposta no WhatsApp/uazapi — ver `docs/ESPEC_BOTOES.md`). Telefones: 8–16 dígitos. Valores nulos herdam; omitir em PATCH preserva. Cache de 30 s, invalidado por escritas da API.
 
 **Fallback padrão da plataforma** (quem não define o próprio): “Tive uma instabilidade agora. Pode repetir sua mensagem em instantes? 🙏” — sem prometer retorno. A migração 015 trocou para ele só os textos antigos gravados; textos personalizados não mudam.
 
@@ -365,7 +365,7 @@ POST exige `url`; aceita `eventos` (lista) e `ativo` (padrão false). Devolve `s
 | Métodos | Rota | Status |
 |---|---|---|
 | GET | `/tenants/{tenant}/consumo?mes=AAAA-MM` | ✅ Contagem e avisos mensais |
-| GET | `/tenants/{tenant}/metricas?agente=` | ✅ Contagem/erros/p50/p95 acumulados |
+| GET | `/tenants/{tenant}/metricas?agente=` | ✅ Contagem/erros/p50/p95 acumulados; bloco `botoes`: `{"enviados": {"botao", "lista"}, "em_texto": {"total", "por_motivo": {...}}, "clicados": {"atual", "antigo"}}` |
 | GET | `/tenants/{tenant}/auditoria` | ✅ Actor, ação, alvo, horário |
 | GET | `/auditoria/plataforma` | ✅ Últimas 100 operações globais |
 

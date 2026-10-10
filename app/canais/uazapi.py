@@ -161,6 +161,10 @@ def _credencial(cofre,tenant_id,canal):
     return cred['base_url'].rstrip('/'),cred['token']
 
 
+class MenuRecusado(ValueError):
+    """O provedor recusou o menu com certeza (4xx): nada foi enviado, dá para mandar em texto."""
+
+
 async def _chamar(client,cofre,tenant_id,canal,metodo,caminho,corpo=None,timeout=15):
     """Uma chamada à instância: URL conferida (SSRF), sem redirecionamento, erro sem detalhes."""
     base,token=_credencial(cofre,tenant_id,canal)
@@ -192,6 +196,20 @@ async def enviar(client,cofre,tenant_id,canal,telefone,texto):
     try: response=await _chamar(client,cofre,tenant_id,canal,'POST','/send/text',{'number':telefone,'text':texto})
     except ValueError as erro:
         raise ValueError('Envio recusado' if 'HTTP' in str(erro) else str(erro)) from None
+    try: return id_do_envio(response.json())
+    except ValueError: return None
+
+
+async def enviar_menu(client,cofre,tenant_id,canal,telefone,texto,opcoes):
+    """POST /send/menu, type "button", só com botões de resposta ("título|id").
+    Recusa certa do provedor (4xx, menos 408) → MenuRecusado: nada saiu, quem chama envia em texto.
+    Qualquer outra falha sobe como entrega incerta (não reenviar). Devolve o messageid do provedor."""
+    corpo={'number':telefone,'type':'button','text':texto,'choices':[f'{o["titulo"]}|{o["id"]}' for o in opcoes]}
+    try: response=await _chamar(client,cofre,tenant_id,canal,'POST','/send/menu',corpo)
+    except ValueError as erro:
+        achado=re.search(r'HTTP (\d{3})',str(erro))
+        if achado and 400<=int(achado.group(1))<500 and achado.group(1)!='408': raise MenuRecusado('Menu recusado') from None
+        raise ValueError('Envio recusado' if achado else str(erro)) from None
     try: return id_do_envio(response.json())
     except ValueError: return None
 

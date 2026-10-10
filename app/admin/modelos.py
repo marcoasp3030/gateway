@@ -40,6 +40,7 @@ class Comportamento(Estrito):
     max_lotes_simultaneos: int | None = Field(None,gt=0,le=100)
     max_concorrencia: int | None = Field(None,gt=0,le=100)
     max_msgs_por_minuto_contato: int | None = Field(None,ge=1,le=600)
+    botoes_interativos: Literal['on','off'] | None = None
     skyone_dominios_permitidos: list[str] | None = None
 
 

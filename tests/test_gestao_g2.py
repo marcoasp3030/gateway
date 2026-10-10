@@ -188,7 +188,7 @@ def test_migracao_025_nao_altera_dado_fora_da_regra_falha_e_nada_muda(tmp_path):
         assert await conn.fetchval("SELECT whatsapp_pedidos FROM tenant_unidades WHERE id='uni_1'")=='12345678'
         # Corrigido por quem decide (aqui, o teste), a migração passa.
         await conn.execute("UPDATE tenant_unidades SET whatsapp_pedidos='5511900000010' WHERE id='uni_1'")
-        assert await migrar.aplicar(conn)==['025_telefone_e164.sql']
+        assert (await migrar.aplicar(conn))[0]=='025_telefone_e164.sql'
     banco(cenario)
 
 

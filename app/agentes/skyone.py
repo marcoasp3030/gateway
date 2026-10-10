@@ -197,6 +197,9 @@ async def _chamar(client,repo,cofre,tenant_id,cfg,payload):
         if motivo: result['motivo']=motivo
         desfecho=corpo.get('desfecho')
         if isinstance(desfecho,str) and re.fullmatch(r'[a-z0-9_]{1,40}',desfecho.strip()): result['desfecho']=desfecho.strip()
+        from nucleo import botoes as mod_botoes
+        escolhas=mod_botoes.do_retorno(corpo.get('botoes'),acao,textos)
+        if escolhas: result['botoes']=escolhas
         uso=corpo.get('uso')
         if isinstance(uso,dict) and all(isinstance(k,str) and type(v) is int and v>=0 for k,v in uso.items()): result['uso']=uso
         # Não permitir eco da credencial mesmo dentro de campos do contrato.

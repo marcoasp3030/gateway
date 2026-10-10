@@ -155,6 +155,7 @@ A credencial vai no cabeçalho `Authorization` (SEG13), nunca no corpo.
 
 - **`desfecho`:** `pedido_feito`, `duvida_resolvida`, `reclamacao`, `sem_interesse` ou nulo (aceita qualquer identificador curto em minúsculas com `_`; fora disso é descartado).
 - **Silêncio sem motivo é falha (INV04):** `acao: "silencio"` sem `motivo`, ou `resposta` vazia com `acao: "nenhuma"`. O gateway consulta o agente **mais uma vez** com o mesmo pacote; se persistir, não envia nada ao cliente, pausa o bot e marca a conversa como aguardando atendente (`silencio_sem_motivo`).
+- **`botoes`** (opcional): `{"opcoes": [{"id": "confirmar_pedido", "titulo": "Confirmar pedido"}, {"id": "alterar", "titulo": "Alterar"}]}`. Valem para o **último balão** e só com `acao` `nenhuma` ou `pedido_fechado`. Ausente ou `null` = sem botões. Até 3 opções, `titulo` até 20 caracteres, `id` em `[a-z0-9_]` até 40, sem repetidos. Fora disso (ou com o recurso desligado no agente, ou em canal sem botão) as mesmas opções saem numeradas em texto; nunca vira erro. O agente só cria botões de **resposta**; nunca link, telefone ou payload de canal. Ver `docs/ESPEC_BOTOES.md`.
 - `uso` (`{"tokens_entrada", "tokens_saida"}`) é opcional. Qualquer outro campo é descartado.
 
 ## Passo a passo para criar um agente novo

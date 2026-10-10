@@ -108,4 +108,22 @@ async def metricas(request:Request,tenant_id:str,agente:str|None=None):
     try: fila=await fila_da_empresa(request,tenant_id)
     except HTTPException: raise
     except Exception: fila={'ligada':request.app.state.infra.fila_duravel,'indisponivel':True}
-    return {**dict(linha),'fila':fila}
+    # Botões (docs/ESPEC_BOTOES.md, seção 6): tudo sai de mensagens.meta.
+    bot=await request.app.state.db.fetch("""SELECT m.meta->'botoes'->>'forma' AS forma, m.meta->'botoes'->>'motivo' AS motivo, count(*) AS n
+        FROM mensagens m JOIN conversas c ON c.tenant_id=m.tenant_id AND c.conversation_id=m.conversation_id
+        WHERE m.tenant_id=$1 AND m.direcao='saida' AND m.meta ? 'botoes' AND ($2::text IS NULL OR c.agente_id=$2) GROUP BY 1,2""",tenant_id,agente)
+    cliques=await request.app.state.db.fetchrow("""SELECT count(*) AS total,
+        count(*) FILTER (WHERE o.id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM mensagens d WHERE d.tenant_id=m.tenant_id
+            AND d.conversation_id=m.conversation_id AND d.direcao='saida' AND d.id>o.id AND d.id<m.id)) AS atuais
+        FROM mensagens m JOIN conversas c ON c.tenant_id=m.tenant_id AND c.conversation_id=m.conversation_id
+        LEFT JOIN mensagens o ON o.tenant_id=m.tenant_id AND o.conversation_id=m.conversation_id AND o.direcao='saida' AND o.origem='bot'
+            AND o.message_id=c.canal_id||':'||(m.meta->'interacao'->>'mensagem')
+        WHERE m.tenant_id=$1 AND m.direcao='entrada' AND m.meta->'interacao'->>'tipo'='botao' AND ($2::text IS NULL OR c.agente_id=$2)""",tenant_id,agente)
+    # Com motivo = não saiu como botão (plano B em texto, ou entrega incerta).
+    texto={}
+    for r in bot:
+        if r['motivo']: texto[r['motivo']]=texto.get(r['motivo'],0)+r['n']
+    botoes={'enviados':{f:sum(r['n'] for r in bot if r['forma']==f and not r['motivo']) for f in ('botao','lista')},
+            'em_texto':{'total':sum(texto.values()),'por_motivo':texto},
+            'clicados':{'atual':cliques['atuais'],'antigo':cliques['total']-cliques['atuais']}}
+    return {**dict(linha),'fila':fila,'botoes':botoes}

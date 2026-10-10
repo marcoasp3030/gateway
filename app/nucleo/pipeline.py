@@ -13,6 +13,7 @@ from datetime import datetime,timezone,timedelta
 from fastapi import HTTPException
 from agentes import skyone
 from canais import uazapi
+from nucleo import botoes
 from nucleo.banco import Repositorio
 from nucleo.configuracao import Configuracoes
 from admin.servico import auditar
@@ -89,6 +90,13 @@ def debounce_da_mensagem(cfg,m):
     sem_enfeite=texto.rstrip(' \t\n)"\'*_~'+''.join(c for c in texto[-6:] if ord(c)>0x2000 and c not in FIM_DE_FRASE))
     completa=sem_enfeite.endswith(FIM_DE_FRASE) or len(texto.split())>cfg['debounce_palavras']
     return min(normal,cfg['debounce_curto_s']) if completa else normal
+
+
+def _meta(marca_meta,plano):
+    """meta da mensagem enviada: marca do envio (ex.: sem id do provedor) + registro dos botões."""
+    meta=json.loads(marca_meta) if marca_meta else {}
+    if plano: meta['botoes']=botoes.registro(*plano)
+    return json.dumps(meta,ensure_ascii=False) if meta else None
 
 
 async def marcar_aguardando(conn,tenant,conversa,motivo,detalhe=None):
@@ -250,7 +258,7 @@ return 1
             and not (conv['bot_pausado_ate'] and conv['bot_pausado_ate']>datetime.now(timezone.utc))
             and (not cfg['modo_piloto'] or conv['telefone'] in cfg['contatos_permitidos']))
 
-    async def enviar(self,tenant,conversa,agente_id,texto):
+    async def enviar(self,tenant,conversa,agente_id,texto,escolhas=None):
         # A mesma trava de assumir/devolver serializa a pausa e o envio final.
         async with self.db.acquire() as conn,conn.transaction():
             await conn.execute('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',conversa)
@@ -258,12 +266,12 @@ return 1
             if not await self.permitido(tenant,conversa,agente_id,repo,configuracoes): return False
             conv=await repo.obter(tenant,'conversas',conversa)
             canal,empresa,cfg=await self.contexto(tenant,conv['canal_id'],repo,configuracoes)
-            marca=(None,None)
-            if cfg['send_mode']=='live':
-                if canal['tipo']!='uazapi': raise ValueError('Envio live deste canal ainda não implementado')
-                marca=uazapi.marca_do_envio(canal['id'],await uazapi.enviar(self.http,self.cofre,tenant,canal,conv['telefone'],texto))
+            plano=botoes.planejar(escolhas,canal['tipo'],cfg['botoes_interativos']=='on')
+            marca,plano=await self._despachar(conn,tenant,conversa,canal,cfg,conv['telefone'],texto,plano)
             await conn.execute("""INSERT INTO mensagens(tenant_id,conversation_id,direcao,origem,conteudo,processada_em,message_id,meta)
-                VALUES ($1,$2,'saida','bot',$3,now(),$4,$5::jsonb) ON CONFLICT(tenant_id,message_id) DO NOTHING""",tenant,conversa,texto,*marca)
+                VALUES ($1,$2,'saida','bot',$3,now(),$4,$5::jsonb) ON CONFLICT(tenant_id,message_id) DO NOTHING""",tenant,conversa,
+                botoes.numerado(texto,plano[2]),marca[0],_meta(marca[1],plano if escolhas else None))
+            if escolhas: await self._plano_b(conn,tenant,conversa,plano[1])
             await conn.execute('UPDATE conversas SET atualizado_em=now() WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa)
             await auditar(conn,tenant,'sistema','mensagem.enviada',conversa)
         return True
@@ -321,8 +329,8 @@ return 1
                 if resultado and resultado.get('silencio_sem_motivo'): status='erro';erro='SILENCE_WITHOUT_REASON'
                 fim_agente=datetime.now(timezone.utc)
                 try:
-                    for texto in resultado['resposta']:
-                        if not await self.enviar(tenant,conversa,cfg['id'],texto): status='ignorado';break
+                    for n,texto in enumerate(resultado['resposta'],start=1):
+                        if not await self.enviar(tenant,conversa,cfg['id'],texto,resultado.get('botoes') if n==len(resultado['resposta']) else None): status='ignorado';break
                         entregue=True
                     if resultado.get('acao')=='transferir_humano':
                         await self.db.execute('UPDATE conversas SET bot_pausado_ate=now()+make_interval(mins=>$3) WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa,cfg['pause_minutes'])
@@ -488,7 +496,26 @@ return 1
             tenant,turno['id'],status,erro,json.dumps(resultado) if resultado else None,aviso,
             json.dumps(resultado.get('uso')) if resultado and resultado.get('uso') else None,*campos_do_retorno(resultado))
 
-    async def _enviar_parte(self,tenant,conversa,cfg,rid,parte,texto):
+    async def _despachar(self,conn,tenant,conversa,canal,efetiva,telefone,texto,plano):
+        """Envia um balão pelo canal (se o envio for real) na forma planejada. Devolve (marca, plano final).
+        Menu recusado pelo provedor → o mesmo balão em texto numerado, com aviso. A conversa não falha por botão."""
+        forma,motivo,opcoes=plano;marca=(None,None)
+        if efetiva['send_mode']=='live':
+            if canal['tipo']!='uazapi': raise ValueError('Envio live deste canal ainda não implementado')
+            if forma=='botao':
+                try: return uazapi.marca_do_envio(canal['id'],await uazapi.enviar_menu(self.http,self.cofre,tenant,canal,telefone,texto,opcoes)),plano
+                except uazapi.MenuRecusado:
+                    forma,motivo='texto','provedor_recusou'
+            marca=uazapi.marca_do_envio(canal['id'],await uazapi.enviar(self.http,self.cofre,tenant,canal,telefone,botoes.numerado(texto,opcoes)))
+        return marca,(forma,motivo,opcoes)
+
+    async def _plano_b(self,conn,tenant,conversa,motivo):
+        """Opções que saíram (ou sairiam) em texto no lugar de botão: aviso sem telefone e sem texto do cliente."""
+        if not motivo: return
+        log.warning('Botões enviados como texto numerado: %s',motivo)
+        await auditar(conn,tenant,'sistema','botoes.fallback',conversa)
+
+    async def _enviar_parte(self,tenant,conversa,cfg,rid,parte,texto,escolhas=None):
         """Grava 'enviando' antes do canal e 'enviada' depois. Parte já presa em 'enviando'
         (worker caiu no meio) vira 'incerta' e nunca é reenviada."""
         async with self.db.acquire() as conn:
@@ -503,18 +530,23 @@ return 1
                 if not await self.permitido(tenant,conversa,cfg['id'],repo,configuracoes): return 'ignorada'
                 conv=await repo.obter(tenant,'conversas',conversa)
                 canal,empresa,efetiva=await self.contexto(tenant,conv['canal_id'],repo,configuracoes)
-                await conn.execute('''INSERT INTO mensagens(tenant_id,conversation_id,direcao,origem,conteudo,processada_em,turno_request_id,parte,entrega)
-                    VALUES ($1,$2,'saida','bot',$3,now(),$4,$5,'enviando')''',tenant,conversa,texto,rid,parte)
-                marca=(None,None)
+                plano=botoes.planejar(escolhas,canal['tipo'],efetiva['botoes_interativos']=='on')
+                # No histórico o balão fica sempre com as opções numeradas, saiam elas como botão ou como texto.
+                await conn.execute('''INSERT INTO mensagens(tenant_id,conversation_id,direcao,origem,conteudo,processada_em,turno_request_id,parte,entrega,meta)
+                    VALUES ($1,$2,'saida','bot',$3,now(),$4,$5,'enviando',$6::jsonb)''',tenant,conversa,botoes.numerado(texto,plano[2]),rid,parte,
+                    _meta(None,plano if escolhas else None))
                 try:
-                    if efetiva['send_mode']=='live':
-                        if canal['tipo']!='uazapi': raise ValueError('Envio live deste canal ainda não implementado')
-                        marca=uazapi.marca_do_envio(canal['id'],await uazapi.enviar(self.http,self.cofre,tenant,canal,conv['telefone'],texto))
+                    marca,plano=await self._despachar(conn,tenant,conversa,canal,efetiva,conv['telefone'],texto,plano)
                 except Exception:
                     # Não se sabe se o canal entregou: não reenviar, revisão humana.
+                    if escolhas:
+                        await conn.execute("UPDATE mensagens SET meta=$4::jsonb WHERE tenant_id=$1 AND turno_request_id=$2 AND parte=$3",tenant,rid,parte,
+                                           _meta(None,(plano[0],'provedor_incerto',plano[2])))
                     await self._incerta(conn,tenant,conversa,rid,parte);raise
                 async with conn.transaction():
-                    await conn.execute("UPDATE mensagens SET entrega='enviada',enviada_em=now(),message_id=$4,meta=$5::jsonb WHERE tenant_id=$1 AND turno_request_id=$2 AND parte=$3",tenant,rid,parte,*marca)
+                    await conn.execute("UPDATE mensagens SET entrega='enviada',enviada_em=now(),message_id=$4,meta=$5::jsonb WHERE tenant_id=$1 AND turno_request_id=$2 AND parte=$3",tenant,rid,parte,
+                                       marca[0],_meta(marca[1],plano if escolhas else None))
+                    if escolhas: await self._plano_b(conn,tenant,conversa,plano[1])
                     await conn.execute('UPDATE conversas SET atualizado_em=now() WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa)
                     await auditar(conn,tenant,'sistema','mensagem.enviada',conversa)
                 return 'enviada'
@@ -534,8 +566,10 @@ return 1
         resultado=json.loads(turno['resposta']) if isinstance(turno['resposta'],str) else turno['resposta']
         if status=='ignorado' or not resultado: return status,entregue
         try:
+            ultima=len(resultado['resposta'])
             for i,texto in enumerate(resultado['resposta'],start=1):
-                r=await self._enviar_parte(tenant,conversa,cfg,turno['request_id'],i,texto)
+                # Os botões pertencem ao último balão.
+                r=await self._enviar_parte(tenant,conversa,cfg,turno['request_id'],i,texto,resultado.get('botoes') if i==ultima else None)
                 if r=='ignorada': status='ignorado';break
                 if r=='enviada': entregue=True
             if resultado.get('acao')=='transferir_humano':

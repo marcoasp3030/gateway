@@ -279,7 +279,8 @@ Ordem sugerida: B1 → B2 → B4 → B3 → B5. O B1 vem primeiro porque sem ler
 | Bloco | Situação |
 |---|---|
 | B1 — Ler o clique | Implementado em 10/10/2026: `uazapi.normalizar()` reconhece `TemplateButtonReplyMessage`; `mensagens.meta.interacao`; `ultima_interacao` no pacote (`skyone.interacao()`); testes em `tests/test_botoes.py` |
-| B2, B4 | Aguardam liberação |
+| B2 — Botões de resposta do agente | Implementado em 10/10/2026: `nucleo/botoes.py` (leitura do Retorno e tabela 3.1), `uazapi.enviar_menu()`, plano B em texto, `meta.botoes`, configuração `botoes_interativos` (migração 026, padrão `off`), bloco `botoes` em `GET /metricas`; testes em `tests/test_botoes_b2.py`. **Desligado em todos os agentes** até o Marco pedir |
+| B4 | Aguarda liberação |
 | B3, B5 | Junto do G3 |
 
 Detalhes do B1 que a implementação fixou:
@@ -287,3 +288,12 @@ Detalhes do B1 que a implementação fixou:
 - Mensagem "de origem" válida = enviada **pelo bot** (não pelo atendente), **nesta conversa**, com o id do provedor gravado. Fora disso, o clique vai como texto puro.
 - `atual` = nenhuma mensagem saiu (do bot ou do atendente) depois da mensagem dos botões.
 - Clique sem título nenhum (não observado) continua como tipo não suportado, e o agente pede texto.
+
+Detalhes do B2 que a implementação fixou:
+- **Erro incerto (5xx, 408, tempo esgotado):** segue a regra que já vale para qualquer envio — a parte fica `incerta`, **não é reenviada** (nem em texto) e a conversa vai para revisão humana (`entrega_incerta`). Não há nova tentativa automática em texto, ao contrário do que a tabela 3.1 sugeria; é o comportamento mais seguro contra duplicidade.
+- **Recusa certa (4xx, menos 408):** nada saiu; o mesmo balão vai por `/send/text` com as opções numeradas, motivo `provedor_recusou`.
+- **Ordem dos motivos** quando mais de um se aplica: `invalido` → `acima_do_limite` → `titulo_longo` → `desligado` → `canal_sem_botao`.
+- **Opção com `id` vazio** é descartada em silêncio (decisão do Marco); se sobrar alguma, vale a tabela.
+- **Aviso de plano B:** linha no log (`Botões enviados como texto numerado: <motivo>`, sem telefone e sem texto) e registro `botoes.fallback` na auditoria da empresa; o motivo fica em `mensagens.meta.botoes.motivo`.
+- **Envio de teste (`dry`):** nada é enviado; a mensagem fica gravada com a forma que teria saído.
+- **Métricas:** `enviados` conta só o que saiu como botão; tudo que tem motivo entra em `em_texto.por_motivo` (inclusive `provedor_incerto`). Clique cuja mensagem de origem não é do bot conta como `antigo`.

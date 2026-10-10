@@ -981,3 +981,7 @@ PY
 - Testes: **201 passed** (3 novos em `tests/test_botoes.py`, com a fixture real `tests/fixtures/uazapi/clique_botao.json`), só bancos `_test`. Backup `/home/twadmin/backups/gateway/pre-ux1-b1-20261010T225934Z/gateway.dump` (27 tabelas, 600).
 - Produção (só leituras): o clique real relido pelo código novo vira texto "Sim, funcionou" com `interacao.id = teste_sim`; `ultima_interacao` para ele hoje daria `atual: false` (o bot falou depois). 4 containers `healthy`, fila zerada, admin por fora 404, envio real só no piloto, zero erros nos logs.
 - Diagnóstico das 22:53 UTC (só leitura): a mensagem do piloto chegou e o turno foi `ignorado` porque, às 22:52:07, o mesmo texto foi enviado pelo WhatsApp Web da instância (fromMe, sem `wasSentByApi`) no chat do piloto → tratado como atendente → pausa de 60 min. Não retomei; na conferência das 23:00 a pausa já não existia (retomada por fora desta sessão).
+
+## Piloto: segundo contato — 2026-10-10 23:20 UTC
+
+- Por ordem explícita do Marco, `contatos_permitidos` do agente `bykoji/bykoji_atendimento` passou de `["5511942717046"]` para `["5511942717046", "5511947281513"]` (API admin, `X-Actor: marco`, auditado como `agentes.alterado`). Envio real continua em 1 de 5 agentes, piloto ligado, mesmo canal.
