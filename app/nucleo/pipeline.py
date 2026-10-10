@@ -2,7 +2,7 @@
 import asyncio
 from functools import partial
 from agentes.controle import Controle, CredencialRecusada, CircuitoAberto
-from agentes.erros import TempoEsgotado
+from agentes.erros import TempoEsgotado, SilencioSemMotivo
 import hashlib
 import json
 import logging
@@ -25,6 +25,13 @@ def motivo_fallback(falha):
     if isinstance(falha,CircuitoAberto): return 'circuito_aberto'
     if isinstance(falha,TempoEsgotado): return 'tempo_esgotado'
     return 'erro_agente'
+
+
+def campos_do_retorno(resultado):
+    """(acao, motivo_silencio, desfecho) do Retorno do agente para gravar no turno."""
+    if not resultado: return None,None,None
+    acao=resultado.get('acao')
+    return acao,(resultado.get('motivo') if acao=='silencio' else None),resultado.get('desfecho')
 
 
 async def marcar_aguardando(conn,tenant,conversa,motivo):
@@ -172,7 +179,7 @@ return 1
         try:
             await self.redis.zrem(self.prefixo+':due',chave)
             await self.redis.delete(self.prefixo+':first:'+chave)
-            itens=await self.db.fetch("SELECT id,conteudo,criado_em,origem,evento FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND processada_em IS NULL AND direcao='entrada' AND origem IN ('cliente','sistema') ORDER BY id LIMIT 100",tenant,conversa)
+            itens=await self.db.fetch("SELECT id,conteudo,criado_em,origem,evento,enviada_em,tipo FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND processada_em IS NULL AND direcao='entrada' AND origem IN ('cliente','sistema') ORDER BY id LIMIT 100",tenant,conversa)
             if not itens: return
             # Não misturar eventos de sistema com mensagens do cliente nem entre si.
             origem=itens[0]['origem']
@@ -187,10 +194,10 @@ return 1
                 status='ignorado'
             else:
                 try:
-                    payload=await skyone.pacote(self.repo,tenant,conversa,min(ids),'\n'.join(i['conteudo'] for i in itens),cfg,rid)
+                    payload=await skyone.pacote(self.repo,tenant,conversa,min(ids),'\n'.join(i['conteudo'] for i in itens),cfg,rid,lote=itens)
                     if origem=='sistema':
                         payload.update(tarefa='notificar',evento=json.loads(itens[0]['evento']) if isinstance(itens[0]['evento'],str) else itens[0]['evento'])
-                    tarefa=asyncio.create_task(self.chamar(self.http,self.repo,self.cofre,tenant,cfg,payload))
+                    tarefa=asyncio.create_task(self.consultar(tenant,cfg,payload))
                     try:
                         feito,_=await asyncio.wait({tarefa},timeout=cfg['slow_notice_s'])
                         if not feito and cfg['aviso_demora']:
@@ -210,6 +217,7 @@ return 1
                     erro='AGENT_TIMEOUT' if isinstance(falha,TempoEsgotado) else 'AGENT_ERROR'
                     status='erro';motivo=motivo_fallback(falha)
                     resultado={'resposta':[cfg['fallback']],'acao':'nenhuma'}
+                if resultado and resultado.get('silencio_sem_motivo'): status='erro';erro='SILENCE_WITHOUT_REASON'
                 fim_agente=datetime.now(timezone.utc)
                 try:
                     for texto in resultado['resposta']:
@@ -227,7 +235,9 @@ return 1
                     tenant,conversa,cfg['id'],conv['canal_id'],uuid.UUID(rid),len(itens),itens[0]['criado_em'],itens[-1]['criado_em'],inicio,fim_agente,
                     int((inicio-itens[-1]['criado_em']).total_seconds()*1000),int((fim_agente-inicio).total_seconds()*1000),
                     int((fim-itens[-1]['criado_em']).total_seconds()*1000),cfg['agente_mode'],status,erro,json.dumps(resultado) if resultado else None,fim if entregue else None,aviso)
-                await conn.execute('UPDATE turnos SET origem=$3,uso=$4::jsonb WHERE tenant_id=$1 AND request_id=$2',tenant,uuid.UUID(rid),origem,json.dumps(resultado.get('uso')) if resultado and resultado.get('uso') else None)
+                await conn.execute('UPDATE turnos SET origem=$3,uso=$4::jsonb,acao=$5,motivo_silencio=$6,desfecho=$7 WHERE tenant_id=$1 AND request_id=$2',tenant,uuid.UUID(rid),origem,json.dumps(resultado.get('uso')) if resultado and resultado.get('uso') else None,*campos_do_retorno(resultado))
+                if not motivo and status!='ignorado' and resultado and resultado.get('acao')=='transferir_humano':
+                    motivo='silencio_sem_motivo' if resultado.get('silencio_sem_motivo') else 'transferido_pelo_agente'
                 # Ordem de travas: consumo antes de auditoria em todos os turnos.
                 from nucleo.consumo import registrar,atualizar_cache
                 mes,total=await registrar(conn,tenant)
@@ -250,8 +260,18 @@ return 1
     def _trava(self,tenant,conversa):
         return self.prefixo+':lock:'+hashlib.sha256(self.chave(tenant,conversa).encode()).hexdigest()
 
+    async def consultar(self,tenant,cfg,payload):
+        """Chama o agente. Silêncio sem motivo (INV04): consulta mais uma vez e, persistindo,
+        transfere para humano sem enviar nada ao cliente."""
+        try: return await self.chamar(self.http,self.repo,self.cofre,tenant,cfg,payload)
+        except SilencioSemMotivo: pass
+        try: return await self.chamar(self.http,self.repo,self.cofre,tenant,cfg,payload)
+        except SilencioSemMotivo:
+            log.warning('Agente em silêncio sem motivo nas duas consultas; conversa vai para atendente')
+            return {'resposta':[],'acao':'transferir_humano','motivo':'silencio_sem_motivo','silencio_sem_motivo':True}
+
     async def _pendentes(self,conn,tenant,conversa):
-        itens=await conn.fetch("SELECT id,conteudo,criado_em,origem,evento FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND processada_em IS NULL AND direcao='entrada' AND origem IN ('cliente','sistema') ORDER BY id LIMIT 100",tenant,conversa)
+        itens=await conn.fetch("SELECT id,conteudo,criado_em,origem,evento,enviada_em,tipo FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND processada_em IS NULL AND direcao='entrada' AND origem IN ('cliente','sistema') ORDER BY id LIMIT 100",tenant,conversa)
         if not itens: return []
         # Não misturar eventos de sistema com mensagens do cliente nem entre si.
         if itens[0]['origem']=='sistema': return itens[:1]
@@ -298,10 +318,10 @@ return 1
             status='ignorado'
         else:
             try:
-                payload=await skyone.pacote(self.repo,tenant,conversa,min(ids),'\n'.join(i['conteudo'] for i in itens),cfg,str(rid))
+                payload=await skyone.pacote(self.repo,tenant,conversa,min(ids),'\n'.join(i['conteudo'] for i in itens),cfg,str(rid),lote=itens)
                 if origem=='sistema':
                     payload.update(tarefa='notificar',evento=json.loads(itens[0]['evento']) if isinstance(itens[0]['evento'],str) else itens[0]['evento'])
-                tarefa=asyncio.create_task(self.chamar(self.http,self.repo,self.cofre,tenant,cfg,payload))
+                tarefa=asyncio.create_task(self.consultar(tenant,cfg,payload))
                 try:
                     feito,_=await asyncio.wait({tarefa},timeout=cfg['slow_notice_s'])
                     if not feito and cfg['aviso_demora']:
@@ -319,10 +339,11 @@ return 1
                 erro='AGENT_TIMEOUT' if isinstance(falha,TempoEsgotado) else 'AGENT_ERROR'
                 status='erro';resultado={'resposta':[cfg['fallback']],'acao':'nenhuma'}
         # A resposta fica gravada antes de qualquer envio: se o worker cair, só falta enviar.
+        if resultado and resultado.get('silencio_sem_motivo'): status='erro';erro='SILENCE_WITHOUT_REASON'
         return await self.db.fetchrow('''UPDATE turnos SET etapa='respondido',status=$3,erro=$4,resposta=$5::jsonb,
-            agente_fim=now(),aviso_demora=$6,uso=$7::jsonb WHERE tenant_id=$1 AND id=$2 RETURNING *''',
+            agente_fim=now(),aviso_demora=$6,uso=$7::jsonb,acao=$8,motivo_silencio=$9,desfecho=$10 WHERE tenant_id=$1 AND id=$2 RETURNING *''',
             tenant,turno['id'],status,erro,json.dumps(resultado) if resultado else None,aviso,
-            json.dumps(resultado.get('uso')) if resultado and resultado.get('uso') else None)
+            json.dumps(resultado.get('uso')) if resultado and resultado.get('uso') else None,*campos_do_retorno(resultado))
 
     async def _enviar_parte(self,tenant,conversa,cfg,rid,parte,texto):
         """Grava 'enviando' antes do canal e 'enviada' depois. Parte já presa em 'enviando'
@@ -386,6 +407,8 @@ return 1
         resultado=json.loads(turno['resposta']) if isinstance(turno['resposta'],str) else turno['resposta']
         motivo={'SKYONE_CIRCUIT_OPEN':'circuito_aberto','AGENT_TIMEOUT':'tempo_esgotado',
                 'AGENT_ERROR':'erro_agente','SKYONE_CREDENTIAL_REJECTED':'erro_agente'}.get(turno['erro'])
+        if not motivo and status!='ignorado' and resultado and resultado.get('acao')=='transferir_humano':
+            motivo='silencio_sem_motivo' if resultado.get('silencio_sem_motivo') else 'transferido_pelo_agente'
         async with self.db.acquire() as conn,conn.transaction():
             await conn.execute('''UPDATE turnos SET etapa='concluido',status=$3,enviado_em=CASE WHEN $4 THEN now() END,
                 espera_ms=(extract(epoch FROM agente_inicio-ultima_msg_em)*1000)::int,

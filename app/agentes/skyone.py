@@ -12,22 +12,67 @@ from nucleo.banco import Repositorio
 from nucleo.credenciais import CredencialInvalida
 
 
-from .erros import FalhaAgente, FalhaTransitoria, TempoEsgotado
+from .erros import FalhaAgente, FalhaTransitoria, TempoEsgotado, SilencioSemMotivo
+import re
 import time
+from datetime import datetime,timezone,timedelta
 
 # Nova tentativa única (Fase 0.6): só depois deste intervalo e dentro do timeout_s.
 ESPERA_NOVA_TENTATIVA_S=2
 
 
-async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None):
+# Acima disto o cliente está voltando depois de um tempo: o agente deve retomar, não continuar (INV10).
+RETOMADA_APOS=timedelta(hours=12)
+MAX_BALOES=10
+ACOES=('nenhuma','silencio','transferir_humano','encerrar','pedido_fechado')
+
+
+def ha_quanto_tempo(intervalo):
+    """Texto para o agente: "há 2 minutos", "há 3 dias"."""
+    s=max(0,int(intervalo.total_seconds()))
+    if s<60: return 'há menos de 1 minuto'
+    for limite,divisor,um,varios in ((3600,60,'minuto','minutos'),(86400,3600,'hora','horas'),(None,86400,'dia','dias')):
+        if limite is None or s<limite:
+            n=s//divisor
+            return f'há {n} {um if n==1 else varios}'
+
+
+def baloes(resposta):
+    """Resposta do agente em balões: lista (um item = um balão) ou texto único
+    (parágrafos separados por linha em branco). Devolve None se o formato for inválido."""
+    if isinstance(resposta,dict): resposta=resposta.get('body')
+    if resposta is None: return []
+    if isinstance(resposta,str): partes=re.split(r'\n[ \t]*\n',resposta)
+    elif isinstance(resposta,list) and all(isinstance(p,str) for p in resposta): partes=resposta
+    else: return None
+    partes=[p.strip() for p in partes if p.strip()]
+    if len(partes)>MAX_BALOES:
+        # Nunca descarta texto: o excedente segue junto no último balão.
+        partes=partes[:MAX_BALOES-1]+['\n\n'.join(partes[MAX_BALOES-1:])]
+    return partes
+
+
+async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None,lote=None):
+    """Pacote do Apêndice A. `lote` são as mensagens pendentes do turno (enviada_em, tipo, conteudo)."""
     conv = await repo.obter(tenant_id,'conversas',conversa_id)
     if not conv or conv['agente_id']!=cfg['id'] or cfg['tenant_id']!=tenant_id:
         raise LookupError('Conversa não encontrada')
     tenant = await repo.tenant(tenant_id)
     if not tenant: raise LookupError('Tenant não encontrado')
     fuso = ZoneInfo(tenant['timezone'])
+    iso = lambda quando: quando.astimezone(fuso).isoformat(timespec='seconds')
     historico = await repo.historico(tenant_id,conversa_id,antes_id,cfg['history_turns'])
     rid = request_id or str(uuid.uuid4())
+    agora = datetime.now(timezone.utc)
+    do_lote = [{'enviada_em':iso(i.get('enviada_em') or i.get('criado_em') or agora),'tipo':i.get('tipo') or 'texto','texto':i['conteudo']}
+               for i in (dict(x) for x in (lote or []))] or [{'enviada_em':iso(agora),'tipo':'texto','texto':message}]
+    # Tempo explícito (INV10): da última mensagem da conversa antes deste lote até a primeira do lote.
+    anterior = await repo.db.fetchval('SELECT max(enviada_em) FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND id<$3',
+                                      tenant_id,conversa_id,antes_id)
+    primeira = min((i.get('enviada_em') or i.get('criado_em') or agora for i in (dict(x) for x in (lote or []))),default=agora)
+    intervalo = max(primeira-anterior,timedelta(0)) if anterior else None
+    contato = await repo.obter(tenant_id,'contatos',conv['contato_id']) if conv.get('contato_id') else None
+    canal = await repo.obter(tenant_id,'tenant_canais',conv['canal_id']) if conv.get('canal_id') else None
     from modulos import contextos
     from nucleo.horarios import pacote as unidades
     return {
@@ -36,9 +81,18 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
         'conversation_id':conversa_id,'request_id':rid,'session_id':rid,'message':message,
         'instrucoes_agente':cfg['instrucoes_agente'],
         'historico':[{'role':'user' if h['direcao']=='entrada' else 'assistant',
-                     'content':h['conteudo'],'enviada_em':h['enviada_em'].astimezone(fuso).isoformat()}
+                     'content':h['conteudo'],'enviada_em':iso(h['enviada_em'])}
                     for h in historico],
         'tenant_id':tenant_id,'agente_id':cfg['id'],'modelo_id':cfg['modelo_id'],
+        'canal':{'id':conv.get('canal_id'),'tipo':(canal or {}).get('tipo') or conv.get('canal'),'publico':(canal or {}).get('publico')},
+        'modo_resposta':cfg['modo_resposta'],'tarefa':'responder',
+        'agora':iso(agora),
+        # Nulo no primeiro contato: não há mensagem anterior.
+        'tempo_desde_ultima':ha_quanto_tempo(intervalo) if intervalo is not None else None,
+        'retomada':bool(intervalo is not None and intervalo>RETOMADA_APOS),
+        'mensagens_do_lote':do_lote,
+        'cliente':{'nome':(contato or {}).get('nome') or conv.get('nome'),'unidade_preferida':conv.get('unidade_preferida'),
+                   'resumo_anterior':(contato or {}).get('resumo')},
     }
 
 
@@ -76,7 +130,6 @@ async def _chamar(client,repo,cofre,tenant_id,cfg,payload):
             elif tipo=='bearer': headers['Authorization']='Bearer '+segredo
             elif tipo=='cabecalho':
                 nome=agente['skyone_auth_cabecalho']
-                import re
                 if not nome or not re.fullmatch(r'[A-Za-z0-9-]+',nome) or nome.lower() in ('host','content-length','transfer-encoding','connection'):
                     raise FalhaAgente('Cabeçalho inválido')
                 headers[nome]=segredo
@@ -97,21 +150,24 @@ async def _chamar(client,repo,cofre,tenant_id,cfg,payload):
         corpo=await asyncio.wait_for(requisitar(),timeout=cfg['timeout_s'])
         if not isinstance(corpo,dict) or corpo.get('request_id')!=payload['request_id'] or corpo.get('conversation_id')!=payload['conversation_id'] or corpo.get('status')!='success' or corpo.get('tipo')!='text':
             raise FalhaAgente('Contrato inválido')
-        resposta=corpo.get('resposta')
-        if isinstance(resposta,dict): resposta=resposta.get('body')
         acao=corpo.get('acao')
-        if acao not in ('nenhuma','silencio','transferir_humano','encerrar','pedido_fechado'):
+        if acao not in ACOES:
             raise FalhaAgente('Ação inválida')
+        textos=baloes(corpo.get('resposta'))
+        if textos is None: raise FalhaAgente('Resposta vazia/inválida')
+        motivo=corpo.get('motivo').strip()[:500] if isinstance(corpo.get('motivo'),str) else ''
         if acao=='silencio':
-            if not corpo.get('motivo'): raise FalhaAgente('Silêncio sem motivo')
+            # INV04: silêncio só vale com motivo declarado.
+            if not motivo: raise SilencioSemMotivo()
             textos=[]
-        else:
-            if not isinstance(resposta,str) or not resposta.strip(): raise FalhaAgente('Resposta vazia/inválida')
-            textos=[resposta]
+        elif not textos and acao in ('nenhuma','pedido_fechado'):
+            # Resposta vazia sem acao "silencio" é falha (INV04). Transferir e encerrar podem vir sem texto.
+            raise SilencioSemMotivo()
         # Guardar somente campos do contrato, sem eco arbitrário do provedor.
         result={'resposta':textos,'acao':acao}
-        for campo in ('motivo','desfecho'):
-            if isinstance(corpo.get(campo),str): result[campo]=corpo[campo]
+        if motivo: result['motivo']=motivo
+        desfecho=corpo.get('desfecho')
+        if isinstance(desfecho,str) and re.fullmatch(r'[a-z0-9_]{1,40}',desfecho.strip()): result['desfecho']=desfecho.strip()
         uso=corpo.get('uso')
         if isinstance(uso,dict) and all(isinstance(k,str) and type(v) is int and v>=0 for k,v in uso.items()): result['uso']=uso
         # Não permitir eco da credencial mesmo dentro de campos do contrato.

@@ -74,3 +74,90 @@ O checkpoint da Fase 0.3 em `PLANO_CURSOR.md` pede esses resultados antes da Fas
 Autenticação genérica: `bearer` ou `cabecalho`, com valor Fernet obtido do agente. Chamadas live sem credencial só são permitidas em tenant de teste. Timeout total por agente, DNS/URL validados imediatamente antes de chamar e redirects recusados. Retornos exigem IDs correspondentes, status success e tipo text; texto em `resposta` ou `resposta.body`. Credencial ecoada na resposta é recusada.
 
 Validação com Postgres e transporte HTTP simulado; não houve chamada real ao Skyone neste bloco. O tipo real de autenticação e sua validação 401/403 versus 200 continuam dependentes do Marco para concluir a Fase 0.5.
+
+---
+
+# Fluxo-modelo `atendente_delivery` e criação de agente novo — Fase 2
+
+> **Situação (10/10/2026):** o lado do gateway está implementado e testado (pacote e Retorno abaixo). O conteúdo dos nós do fluxo (JavaScript e prompt) entra aqui **depois que o Marco validar o fluxo no Skyone**; os trechos marcados com 🔲 estão aguardando esse conteúdo. Nada nesta seção foi conferido contra o fluxo real ainda.
+
+## Desenho do fluxo
+
+```
+Webhook (Basic) → JS "Normalizar Entrada" → AI Agent Call → JS "Interpretar Resposta" → Retorno
+```
+
+| Nó | Papel | Conteúdo |
+|---|---|---|
+| Webhook | Recebe o pacote do gateway. "Solicitar autenticação" ligado (Basic). | 🔲 URL e usuário ficam só no cadastro do agente no painel; nunca neste arquivo. |
+| JS "Normalizar Entrada" | Lê o pacote e monta o prompt: `instrucoes_agente`, tempo (`agora`, `tempo_desde_ultima`, `retomada`), `cliente`, `unidades`, `contexto_modulos`, `historico` e as mensagens do lote. | 🔲 código validado |
+| AI Agent Call | Chama o modelo (GPT-4.1 mini). Sessão nova por turno (`session_id` = `request_id`): a memória é o `historico` enviado pelo gateway. | 🔲 configuração validada |
+| JS "Interpretar Resposta" | Converte a saída do modelo no Retorno do contrato (balões, `acao`, `motivo`, `desfecho`). | 🔲 código validado |
+| Retorno | Devolve o JSON do contrato na mesma chamada (modo síncrono). | 🔲 corpo validado |
+
+## Pacote que o gateway envia (ida)
+
+Campos garantidos em toda chamada (teste de contrato: `tests/test_fase2_contrato.py`):
+
+| Campo | Conteúdo |
+|---|---|
+| `request_id`, `session_id` | UUID do turno; os dois são iguais. |
+| `conversation_id`, `tenant_id`, `agente_id`, `modelo_id` | Identificação. |
+| `instrucoes_agente` | Prompt complementar do agente (pode ser nulo). |
+| `canal` | `{"id", "tipo", "publico"}`. |
+| `modo_resposta`, `tarefa` | `"sync"`; `"responder"` (ou `"notificar"`, com `evento`). |
+| `agora` | Data e hora atuais, ISO, no fuso da empresa. |
+| `tempo_desde_ultima` | Texto: "há 2 minutos", "há 3 dias". **Nulo no primeiro contato.** Conta da última mensagem da conversa antes deste lote até a primeira mensagem do lote. |
+| `retomada` | `true` quando esse intervalo passa de 12 h: o agente deve retomar, não continuar a conversa antiga. |
+| `message` | Texto consolidado do lote (uma linha por mensagem). |
+| `mensagens_do_lote` | Lista `{"enviada_em", "tipo", "texto"}`. `tipo`: `texto`, `audio`, `imagem`, `video`, `documento`, `localizacao`, `figurinha`, `contato`, `desconhecido`. Localização vem como `[localização: lat, long — lugar]`; anexo que o gateway não lê, como `[não foi possível ler <tipo>: <motivo>]`. |
+| `historico` | Lista `{"role": "user"|"assistant", "content", "enviada_em"}`, limitada por `history_turns`; não inclui o lote. |
+| `cliente` | `{"nome", "unidade_preferida", "resumo_anterior"}` (valores podem ser nulos). |
+| `unidades` | Unidades da empresa com situação de funcionamento (lista vazia se não houver). |
+| `contexto_modulos` | Um bloco por módulo habilitado no agente (objeto vazio se não houver). |
+
+A credencial vai no cabeçalho `Authorization` (SEG13), nunca no corpo.
+
+## Retorno que o gateway aceita (volta)
+
+```json
+{
+  "request_id": "<o mesmo recebido>",
+  "conversation_id": "<o mesmo recebido>",
+  "status": "success",
+  "tipo": "text",
+  "resposta": ["balão 1", "balão 2"],
+  "acao": "nenhuma",
+  "motivo": null,
+  "desfecho": null
+}
+```
+
+- **Obrigatórios:** `request_id` e `conversation_id` iguais aos recebidos, `status: "success"`, `tipo: "text"` e `acao`. Sem eles o gateway trata como erro do agente e envia o fallback.
+- **`resposta`:** lista (cada item vira um balão, na ordem) **ou** texto único (parágrafos separados por linha em branco viram balões; quebra de linha simples fica no mesmo balão). Também aceita o formato já validado `{"body": "..."}`. Acima de 10 balões, o excedente segue junto no último.
+- **`acao`:**
+
+| Valor | O que o gateway faz |
+|---|---|
+| `nenhuma` | Envia os balões. |
+| `silencio` | Não envia nada. **`motivo` obrigatório**; fica gravado em `turnos.motivo_silencio`. Texto que venha junto é ignorado. |
+| `transferir_humano` | Envia os balões (se houver), pausa o bot e marca a conversa como aguardando atendente (`transferido_pelo_agente`). |
+| `encerrar` | Envia os balões (se houver) e grava `desfecho`. |
+| `pedido_fechado` | Reservado para o módulo de pedidos; hoje se comporta como `nenhuma`. |
+
+- **`desfecho`:** `pedido_feito`, `duvida_resolvida`, `reclamacao`, `sem_interesse` ou nulo (aceita qualquer identificador curto em minúsculas com `_`; fora disso é descartado).
+- **Silêncio sem motivo é falha (INV04):** `acao: "silencio"` sem `motivo`, ou `resposta` vazia com `acao: "nenhuma"`. O gateway consulta o agente **mais uma vez** com o mesmo pacote; se persistir, não envia nada ao cliente, pausa o bot e marca a conversa como aguardando atendente (`silencio_sem_motivo`).
+- `uso` (`{"tokens_entrada", "tokens_saida"}`) é opcional. Qualquer outro campo é descartado.
+
+## Passo a passo para criar um agente novo
+
+> **Nunca duplicar um fluxo existente:** o fluxo duplicado mantém a URL do original. Criar sempre do zero.
+
+1. 🔲 No Skyone, criar o fluxo do zero com os cinco nós na ordem do desenho acima.
+2. 🔲 Webhook: ligar "Solicitar autenticação" (Basic) e definir usuário e senha próprios do agente.
+3. 🔲 Colar o JavaScript "Normalizar Entrada".
+4. 🔲 Configurar o AI Agent Call (modelo, prompt do sistema).
+5. 🔲 Colar o JavaScript "Interpretar Resposta".
+6. 🔲 Configurar o Retorno com o corpo do contrato.
+7. No painel, no agente: cadastrar a URL do fluxo, o usuário e a senha; manter **envio de teste**. Usar "Testar conexão".
+8. Conferir uma conversa pelo Simular e, depois, rodar o benchmark (1, 5 e 10 clientes) antes de ligar o envio real.

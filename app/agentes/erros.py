@@ -15,3 +15,6 @@ class FalhaTransitoria(FalhaAgente):
     """Falha de conexão ou HTTP 502/503/504 antes de qualquer resposta: admite uma nova tentativa."""
     def __str__(self): return 'falha transitória na chamada ao agente'
 
+class SilencioSemMotivo(FalhaAgente):
+    """INV04: resposta vazia sem acao "silencio", ou silêncio sem motivo. Admite uma reconsulta."""
+    def __str__(self): return 'agente não respondeu e não declarou o motivo do silêncio'
