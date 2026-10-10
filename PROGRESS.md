@@ -797,3 +797,16 @@ PY
 - **Fase 2 concluída** (decisão do Marco). `total_p95` = 15,7 s com 5 clientes, **aceito com a ressalva** de que o debounce adaptativo da Fase 3 deve trazê-lo abaixo de 15 s.
 - **Modelo padrão de atendimento do By Koji: GPT-4.1 mini** (confirmado pelo Marco como o modelo da rodada das 14:25 UTC). **Gemini 3 Flash** testado como alternativa equivalente. **GPT OSS 20b proibido para atendimento.** Registrado em `docs/SKYONE.md`.
 - Pendência que fica: completar `docs/SKYONE.md` com o conteúdo dos nós quando o guia `docs/fase2_skyone_atendente_delivery.md` chegar ao servidor.
+
+## Fase 3 — Bloco 1: debounce adaptativo, aviso de demora e “digitando” — 2026-10-10
+
+- Status: **implantado e parado para validação.** Imagem `gateway:123ca72` (volta: `gateway:ccf5113`, conferida nos 4 containers), **migração 019** aplicada com a imagem antiga rodando (health OK), schema 19, `FILA_DURAVEL=on`. “Atendimento By Koji” inalterado: IA real, **envio de teste**, piloto ligado com `["5511942717046"]`.
+- Feito (`123ca72`):
+  - **Debounce adaptativo:** texto que termina com `?`, `.`, `!` ou `…` (ignorando emoji/aspas depois) ou com mais de `debounce_palavras` palavras espera `debounce_curto_s`; mensagem curta ou picada, mídia, localização e reação esperam `debounce_s`. A última mensagem do lote decide. O curto nunca aumenta a espera (`min(debounce_s, debounce_curto_s)`); teto `max_wait_s` inalterado. Padrões: 1,5 s e 6 palavras; configuráveis por empresa e por agente (migração 019).
+  - **Aviso de demora:** padrão de `slow_notice_s` de 15 para 20 s (vale para quem herda o padrão; o By Koji herda).
+  - **“Digitando”:** com envio real em canal uazapi, pedido ao canal quando a consulta ao agente começa (25 s) e de novo depois do aviso de demora; retirado (`paused`) quando nada será enviado (silêncio, transferência sem texto). Em envio de teste nada é chamado; falha no “digitando” nunca atrasa nem derruba o turno. Só no caminho da fila durável.
+- Sobre “nunca enviar aviso se a resposta final for silêncio”: **não é possível garantir**, porque o aviso sai enquanto o agente ainda não respondeu. Proposta registrada para decisão do Marco: não enviar o aviso quando o lote parece só um fechamento (texto curto sem pergunta, como “obrigado”, “ok”, “valeu”, “👍”); nesses casos a demora do agente fica só com o “digitando”. Não implementado.
+- Validações: `sh scripts/test_suite.sh` → 154 passed + 1 falha de montagem de um teste novo (id de envio repetido no provedor simulado), corrigida e conferida nos arquivos afetados (**155 testes**; 4 novos em `tests/test_fase3_bloco1.py`), só bancos `_test`. Backup `/home/twadmin/backups/gateway/pre-fase3-b1-20261010T144520Z/gateway.dump` (21 tabelas).
+- Produção (agente simulado `[teste]` do bykoji): “vocês entregam no Morumbi?” → espera 1,78 s; “oi” → 4,27 s; “quero” / “um temaki” / “de salmão?” → **um turno com as 3 mensagens**, espera 1,72 s depois da última. 4 containers `healthy`, fila zerada, `/health` público `{"ok":true}`, admin por fora 404, zero segredos nos logs.
+- Efeito esperado na latência: para pergunta completa, o total cai cerca de 2,5 s (de ~15,7 s para ~13 s no p95 medido). A medir com IA real quando o Marco autorizar novo bench.
+- Para o [PAINEL]: campos novos de configuração `debounce_curto_s` (0,5–15) e `debounce_palavras` (1–50).
