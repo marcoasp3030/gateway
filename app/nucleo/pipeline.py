@@ -112,12 +112,16 @@ return 1
                 SET agente_id=EXCLUDED.agente_id,atualizado_em=now()
                 WHERE conversas.tenant_id=EXCLUDED.tenant_id''',tenant,conversa,canal['tipo'],canal_id,cfg['id'],identificador,m.get('nome'))
             await conn.execute('UPDATE conversas SET contato_id=$3 WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa,contato)
-            msgid=await conn.fetchval('''INSERT INTO mensagens(tenant_id,conversation_id,direcao,origem,conteudo,message_id,enviada_em)
-                VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(tenant_id,message_id) DO NOTHING RETURNING id''',
+            reacao=m.get('tipo')=='reacao'
+            msgid=await conn.fetchval('''INSERT INTO mensagens(tenant_id,conversation_id,direcao,origem,conteudo,message_id,enviada_em,tipo,meta,processada_em)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,CASE WHEN $10 THEN now() END) ON CONFLICT(tenant_id,message_id) DO NOTHING RETURNING id''',
                 tenant,conversa,'saida' if humano else 'entrada','humano' if humano else 'cliente',m['texto'],
-                mensagem_id,m.get('enviada_em') or datetime.now(timezone.utc))
+                mensagem_id,m.get('enviada_em') or datetime.now(timezone.utc),m.get('tipo') or 'texto',
+                json.dumps(m['meta'],ensure_ascii=False) if m.get('meta') else None,reacao)
             if msgid:
                 await auditar(conn,tenant,'sistema','mensagem.humana' if humano else 'mensagem.recebida',conversa)
+            # Reação fica no histórico, mas não abre turno nem pausa o bot (um 👍 do atendente não é assumir a conversa).
+            if reacao: return {'ok':True,'reacao':True,'duplicada':msgid is None,'conversation_id':conversa,'mensagem_id':msgid}
             if humano and msgid:
                 await conn.execute('UPDATE conversas SET bot_pausado_ate=now()+make_interval(mins=>$3) '
                     'WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa,cfg['pause_minutes'])

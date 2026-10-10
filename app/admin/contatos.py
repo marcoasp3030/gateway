@@ -62,7 +62,7 @@ async def anonimizar(request:Request,tenant_id:str,cid:str,body:Confirmacao,acto
                 locks.append((key,token))
                 new=f'{t}:{conv["canal_id"]}:anon_{uuid.uuid4().hex}'
                 ident.append(old)
-                await c.execute("UPDATE mensagens SET conversation_id=$3,conteudo='[anonimizado]',message_id=NULL,evento=NULL,processada_em=now() WHERE tenant_id=$1 AND conversation_id=$2",t,old,new)
+                await c.execute("UPDATE mensagens SET conversation_id=$3,conteudo='[anonimizado]',message_id=NULL,evento=NULL,meta=NULL,processada_em=now() WHERE tenant_id=$1 AND conversation_id=$2",t,old,new)
                 await c.execute('UPDATE turnos SET conversation_id=$3,resposta=NULL,erro=NULL WHERE tenant_id=$1 AND conversation_id=$2',t,old,new)
                 await c.execute('UPDATE agente_callbacks SET conversation_id=$3 WHERE tenant_id=$1 AND conversation_id=$2',t,old,new)
                 await c.execute('UPDATE conversas SET conversation_id=$3,telefone=NULL,nome=NULL,unidade_preferida=NULL,bot_pausado_ate=NULL WHERE tenant_id=$1 AND conversation_id=$2',t,old,new)

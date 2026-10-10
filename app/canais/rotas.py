@@ -39,16 +39,19 @@ async def webhook(request:Request,tipo:str,canal_id:str,s:str=''):
     except ValueError: raise HTTPException(400,'JSON inválido') from None
     if not isinstance(bruto,dict): raise HTTPException(400,'Objeto JSON obrigatório')
     raw_id=await request.app.state.db.fetchval('INSERT INTO webhook_raw(tenant_id,fonte,payload) VALUES ($1,$2,$3::jsonb) RETURNING id',
-        tenant,tipo,json.dumps(sanitizar(bruto)))
+        tenant,tipo,json.dumps(uazapi.limpar_bruto(sanitizar(bruto)) if tipo=='uazapi' else sanitizar(bruto)))
+    # Sinal de vida do canal para o painel: qualquer evento autenticado conta.
+    await request.app.state.db.execute('UPDATE tenant_canais SET ultimo_evento_em=now() WHERE tenant_id=$1 AND id=$2',tenant,canal_id)
     if tipo=='api':
         m=Entrada.model_validate(bruto).model_dump()
     else:
         try: norm=uazapi.normalizar(bruto)
         except (TypeError,AttributeError,ValueError): raise HTTPException(400,'Payload inválido') from None
         if norm is None: return {'ok':True,'ignorado':True}
-        m=Entrada.model_validate({'identificador':norm['telefone'],
-            'texto':norm['texto'] or '[mídia ainda não interpretada]', 'message_id':norm['message_id']}).model_dump()
-        m.update(humano=norm['from_me'],via_api=norm['via_api'],nome=norm['nome'])
+        try: m=Entrada.model_validate({'identificador':norm['telefone'],'texto':norm['texto'],
+            'message_id':norm['message_id'],'enviada_em':norm['enviada_em']}).model_dump()
+        except ValueError: raise HTTPException(400,'Payload inválido') from None
+        m.update(humano=norm['from_me'],via_api=norm['via_api'],nome=norm['nome'],tipo=norm['tipo'],meta=norm['meta'])
     result=await request.app.state.pipeline.receber(tenant,canal_id,m)
     await request.app.state.db.execute('UPDATE webhook_raw SET contato_id=(SELECT contato_id FROM conversas WHERE tenant_id=$1 AND conversation_id=$3) WHERE tenant_id=$1 AND id=$2',tenant,raw_id,f'{tenant}:{canal_id}:{m["identificador"]}')
     return result
