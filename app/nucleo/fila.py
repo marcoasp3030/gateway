@@ -35,6 +35,23 @@ end
 return 0
 '''
 
+# Vagas compartilhadas entre todos os workers (INV07/INV15): a empresa tem no máximo
+# max_lotes_simultaneos e o agente max_concorrencia conversas em andamento.
+# Retorna 0 (vaga obtida), 1 (empresa no limite) ou 2 (agente no limite).
+ADQUIRIR = '''
+local agora=tonumber(ARGV[1])
+redis.call('ZREMRANGEBYSCORE',KEYS[1],'-inf',agora)
+redis.call('ZREMRANGEBYSCORE',KEYS[2],'-inf',agora)
+if redis.call('ZSCORE',KEYS[1],ARGV[5]) then return 0 end
+if redis.call('ZCARD',KEYS[1])>=tonumber(ARGV[3]) then return 1 end
+if redis.call('ZCARD',KEYS[2])>=tonumber(ARGV[4]) then return 2 end
+redis.call('ZADD',KEYS[1],ARGV[2],ARGV[5])
+redis.call('ZADD',KEYS[2],ARGV[2],ARGV[5])
+redis.call('PEXPIRE',KEYS[1],ARGV[6])
+redis.call('PEXPIRE',KEYS[2],ARGV[6])
+return 0
+'''
+
 RENOVAR = '''
 if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('PEXPIRE',KEYS[1],ARGV[2]) end
 return 0
@@ -68,6 +85,8 @@ class FilaDuravel:
         self.rodada = 0
         self.tarefas = set()
         self.lider = False
+        # Empresas no limite: o worker deixa de ler a fila delas por um instante.
+        self.cheias = {}
 
     # ---------------- chaves ----------------
     def stream(self, tenant): return f'{self.prefixo}:fila:{tenant}'
@@ -81,6 +100,7 @@ class FilaDuravel:
     def k_due(self): return f'{self.prefixo}:due'
     def k_worker(self, wid): return f'{self.prefixo}:fila:worker:{wid}'
     def k_ativos(self, tenant, agente): return f'{self.prefixo}:fila:ativos:{tenant}:{agente}'
+    def k_lotes(self, tenant): return f'{self.prefixo}:fila:lotes:{tenant}'
 
     # ---------------- sinais de vida ----------------
     def tocar_arquivo(self):
@@ -190,6 +210,10 @@ class FilaDuravel:
                 if not tenants:
                     await asyncio.sleep(bloqueio_ms / 1000); continue
                 # Rodízio entre empresas: um item de cada por leitura (INV07).
+                agora = time.monotonic()
+                tenants = [t for t in tenants if self.cheias.get(t, 0) <= agora]
+                if not tenants:
+                    await asyncio.sleep(0.1); continue
                 self.rodada = (self.rodada + 1) % len(tenants)
                 ordem = tenants[self.rodada:] + tenants[:self.rodada]
                 for t in ordem: await self.garantir_grupo(t)
@@ -218,22 +242,36 @@ class FilaDuravel:
     async def tratar(self, stream, item_id, chave):
         tenant, conversa = json.loads(chave)
         conv = await self.p.repo.obter(tenant, 'conversas', conversa)
-        ativo = self.k_ativos(tenant, conv['agente_id']) if conv else None
+        lotes = ativo = None
         try:
-            if ativo:
-                await self.redis.zadd(ativo, {chave: (time.time() + 600) * 1000})
-                await self.redis.expire(ativo, 900)
+            if conv:
+                cfg = await self.p.cfg.efetiva(tenant, conv['agente_id'])
+                lotes, ativo = self.k_lotes(tenant), self.k_ativos(tenant, conv['agente_id'])
+                agora = time.time() * 1000; validade = (cfg['timeout_s'] + 90) * 1000
+                vaga = await self.redis.eval(ADQUIRIR, 2, lotes, ativo, agora, agora + validade,
+                                             cfg['max_lotes_simultaneos'], cfg['max_concorrencia'], chave, int(validade))
+                if vaga:
+                    # Sem vaga: o item volta para o agendamento e o worker segue para as outras empresas.
+                    lotes = ativo = None
+                    if vaga == 1: self.cheias[tenant] = time.monotonic() + 0.3
+                    await self.redis.zadd(self.k_due, {chave: time.time() + 0.3})
+                    await self.confirmar(stream, item_id, chave)
+                    return 'sem_vaga'
             resultado = await self.p.processar_duravel(tenant, conversa)
             # 'ocupado': quem tem a trava reagenda o que sobrar ao terminar; este item sai.
-            await self.redis.xack(stream, GRUPO, item_id)
-            await self.redis.xdel(stream, item_id)
-            await self.redis.srem(self.k_na_fila, chave)
+            await self.confirmar(stream, item_id, chave)
             return resultado
         except Exception:
             # Fica pendente: outro worker retoma depois de ocioso_ms.
             log.warning('Falha ao processar item da fila; será retomado')
         finally:
-            if ativo: await self.redis.zrem(ativo, chave)
+            if lotes:
+                await self.redis.zrem(lotes, chave); await self.redis.zrem(ativo, chave)
+
+    async def confirmar(self, stream, item_id, chave):
+        await self.redis.xack(stream, GRUPO, item_id)
+        await self.redis.xdel(stream, item_id)
+        await self.redis.srem(self.k_na_fila, chave)
 
     # ---------------- indicadores e alertas ----------------
     async def _chaves(self, padrao):

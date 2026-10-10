@@ -11,7 +11,11 @@ from nucleo.banco import Repositorio
 from nucleo.credenciais import CredencialInvalida
 
 
-from .erros import FalhaAgente, TempoEsgotado
+from .erros import FalhaAgente, FalhaTransitoria, TempoEsgotado
+import time
+
+# Nova tentativa única (Fase 0.6): só depois deste intervalo e dentro do timeout_s.
+ESPERA_NOVA_TENTATIVA_S=2
 
 
 async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None):
@@ -78,6 +82,7 @@ async def _chamar(client,repo,cofre,tenant_id,cfg,payload):
             async with client.stream('POST',cfg['skyone_webhook_url'],json=payload,headers=headers,
                                      timeout=cfg['timeout_s'],follow_redirects=False) as response:
                 if response.status_code in (401,403): raise CredencialRecusada()
+                if response.status_code in (502,503,504): raise FalhaTransitoria()
                 if not 200<=response.status_code<300: raise FalhaAgente('HTTP do agente recusado')
                 partes=[]; tamanho=0
                 async for parte in response.aiter_bytes():
@@ -111,6 +116,9 @@ async def _chamar(client,repo,cofre,tenant_id,cfg,payload):
         return result
     except (httpx.TimeoutException,TimeoutError):
         raise TempoEsgotado() from None
+    except httpx.ConnectError:
+        # Não chegou a conectar: nada foi processado do outro lado.
+        raise FalhaTransitoria() from None
     except (httpx.HTTPError,TimeoutError,ValueError,TypeError,CredencialInvalida):
         raise FalhaAgente('Falha na comunicação com o agente') from None
 
@@ -123,9 +131,17 @@ async def chamar(client,repo,cofre,tenant_id,cfg,payload,controle=None):
     geracao=None
     async def executar():
         nonlocal geracao
+        inicio=time.monotonic()
         await controle.esperar(cfg['skyone_webhook_url'])
         geracao=await controle.iniciar(tenant_id,cfg['id'],cfg['timeout_s'])
-        return await _chamar(client,repo,cofre,tenant_id,cfg,payload)
+        try:
+            return await _chamar(client,repo,cofre,tenant_id,cfg,payload)
+        except FalhaTransitoria:
+            # Uma única nova tentativa, rápida, e só se couber no timeout_s. Nunca em tempo esgotado.
+            if time.monotonic()-inicio+ESPERA_NOVA_TENTATIVA_S>=cfg['timeout_s']: raise
+            await asyncio.sleep(ESPERA_NOVA_TENTATIVA_S)
+            await controle.esperar(cfg['skyone_webhook_url'])
+            return await _chamar(client,repo,cofre,tenant_id,cfg,payload)
     try:
         result=await asyncio.wait_for(executar(),timeout=cfg['timeout_s'])
     except Exception as erro:

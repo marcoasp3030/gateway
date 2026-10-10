@@ -50,7 +50,20 @@ def validar(modelo, dados):
     for campo in OBRIGATORIOS.get(modelo.__name__, ()):
         if campo in result and result[campo] is None:
             raise HTTPException(400,{"campo":campo})
+    if 'fallback' in result: result['fallback'] = fallback_valido(result['fallback'])
     return result
+
+
+FALLBACK_MINIMO = 15
+
+
+def fallback_valido(texto):
+    """Texto que o cliente recebe quando o agente falha. Vazio ou nulo = usa o padrão (herda).
+    Senão, pelo menos FALLBACK_MINIMO caracteres e uma letra; caso contrário 400 com o campo."""
+    if texto is None or not texto.strip(): return None
+    if len(texto.strip()) < FALLBACK_MINIMO or not any(c.isalpha() for c in texto):
+        raise HTTPException(400,{"campo":"fallback"})
+    return texto
 
 
 async def auditar(conn, tenant, actor, acao, alvo):

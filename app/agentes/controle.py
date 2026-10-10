@@ -79,3 +79,17 @@ async def estado(request:Request,tenant:str,agente:str):
       CASE WHEN aberto_ate>now() THEN 'aberto' WHEN aberto_ate IS NOT NULL THEN 'meio_aberto' ELSE 'fechado' END AS estado
       FROM agente_circuitos WHERE tenant_id=$1 AND agente_id=$2''',tenant,agente)
     return dict(row) if row else {'estado':'fechado','falhas':0,'aberto_ate':None,'ultimo_alerta':None}
+
+
+@router.post('/tenants/{tenant}/agentes/{agente}/circuito/fechar')
+async def fechar(request:Request,tenant:str,agente:str,actor=Depends(painel)):
+    """Fechamento manual, auditado: zera as falhas e libera as chamadas ao Skyone.
+    Avança a geração para que uma chamada de prova em andamento não reabra o estado antigo."""
+    db=request.app.state.db
+    if not await Repositorio(db).obter(tenant,'agentes',agente):raise HTTPException(404,'NOT_FOUND')
+    async with db.acquire() as c,c.transaction():
+        await c.execute("""UPDATE agente_circuitos SET falhas=0,aberto_ate=NULL,sonda_ate=NULL,janela_inicio=now(),
+            geracao=geracao+1 WHERE tenant_id=$1 AND agente_id=$2""",tenant,agente)
+        await auditar(c,tenant,actor,'agente.circuito_fechado',agente)
+    return await estado(request,tenant,agente)
+

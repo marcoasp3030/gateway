@@ -32,7 +32,7 @@ def campos_conhecidos():
     campos=set().union(*(m.model_fields for m in (Tenant,Agente,Canal,Chave,Comportamento)))
     campos.update(('texto','message','identificador','canal_id','message_id','enviada_em','minutos','limite','antes',
                    'cursor','desde','status','agente','canal','busca','tenant','tenant_id','conv','conversation_id',
-                   'evento','dados','instrucao','confirmacao','usar_provedor_real','url','eventos','horarios','telefone_whatsapp',
+                   'evento','dados','instrucao','confirmacao','usar_provedor_real','aguardando','url','eventos','horarios','telefone_whatsapp',
                    'escopos','ips_permitidos','expira_em','credenciais','modulos','comportamento_padrao',
                    'desfechos','followups_padrao','skyone_fluxo_modelo','ativo','config','modelo_versao'))
     return campos
