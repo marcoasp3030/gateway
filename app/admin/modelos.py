@@ -20,6 +20,8 @@ class Tenant(Estrito):
 
 class Comportamento(Estrito):
     debounce_s: int | None = Field(None,ge=1,le=15)
+    debounce_curto_s: float | None = Field(None,ge=0.5,le=15)
+    debounce_palavras: int | None = Field(None,ge=1,le=50)
     max_wait_s: int | None = Field(None,ge=1,le=30)
     media_wait_s: int | None = Field(None,ge=0,le=60)
     pause_minutes: int | None = Field(None,ge=0)

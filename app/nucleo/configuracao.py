@@ -9,10 +9,12 @@ COMPORTAMENTO = {
     'debounce_s','max_wait_s','media_wait_s','pause_minutes','history_turns','slow_notice_s',
     'aviso_demora','fallback','alerta_telefone','send_mode','agente_mode','modo_piloto',
     'contatos_permitidos','encerrar_vazia_min','max_lotes_simultaneos','max_concorrencia',
-    'skyone_dominios_permitidos',
+    'skyone_dominios_permitidos','debounce_curto_s','debounce_palavras',
 }
-PADROES = dict(debounce_s=4,max_wait_s=12,media_wait_s=30,pause_minutes=60,history_turns=20,
-    slow_notice_s=15,aviso_demora='Só um instante, estou verificando.',fallback=FALLBACK_PADRAO,
+# debounce_curto_s vale quando a mensagem parece completa (pontuação final ou mais de
+# debounce_palavras palavras); mensagem curta/picada espera debounce_s.
+PADROES = dict(debounce_s=4,debounce_curto_s=1.5,debounce_palavras=6,max_wait_s=12,media_wait_s=30,pause_minutes=60,history_turns=20,
+    slow_notice_s=20,aviso_demora='Só um instante, estou verificando.',fallback=FALLBACK_PADRAO,
     send_mode='dry',agente_mode='mock',modo_piloto=True,contatos_permitidos=[],
     encerrar_vazia_min=30,max_lotes_simultaneos=5,max_concorrencia=5,skyone_dominios_permitidos=[])
 

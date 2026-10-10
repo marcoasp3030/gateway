@@ -34,6 +34,24 @@ def campos_do_retorno(resultado):
     return acao,(resultado.get('motivo') if acao=='silencio' else None),resultado.get('desfecho')
 
 
+FIM_DE_FRASE=('?','.','!','…')
+# Segundos de "digitando" pedidos ao canal por vez; o canal cancela sozinho ao enviar.
+DIGITANDO_S=25
+
+
+def debounce_da_mensagem(cfg,m):
+    """Espera antes de chamar o agente. Texto que parece completo (termina com pontuação de
+    fim de frase ou tem mais de debounce_palavras palavras) espera menos; mensagem curta ou
+    picada, mídia, localização e reação esperam o debounce normal."""
+    normal=cfg['debounce_s']
+    if (m.get('tipo') or 'texto')!='texto': return normal
+    texto=str(m.get('texto') or '').strip()
+    # Emoji e fechamentos depois da pontuação não contam ("tudo bem? 🙂").
+    sem_enfeite=texto.rstrip(' \t\n)"\'*_~'+''.join(c for c in texto[-6:] if ord(c)>0x2000 and c not in FIM_DE_FRASE))
+    completa=sem_enfeite.endswith(FIM_DE_FRASE) or len(texto.split())>cfg['debounce_palavras']
+    return min(normal,cfg['debounce_curto_s']) if completa else normal
+
+
 async def marcar_aguardando(conn,tenant,conversa,motivo):
     """Marca a conversa como aguardando atendente; evento só na primeira marcação."""
     novo=await conn.fetchval("""UPDATE conversas SET aguardando_atendente_desde=now(),aguardando_motivo=$3
@@ -78,7 +96,7 @@ class Pipeline:
     def chave(self,tenant,conversa):
         return json.dumps([tenant,conversa],separators=(',',':'))
 
-    async def enfileirar(self,tenant,conversa,cfg):
+    async def enfileirar(self,tenant,conversa,cfg,debounce=None):
         chave=self.chave(tenant,conversa)
         # Uma transação Lua mantém first e vencimento coerentes sob concorrência.
         await self.redis.eval('''
@@ -88,7 +106,7 @@ local primeira=tonumber(redis.call('GET',KEYS[1])) or agora
 redis.call('SET',KEYS[1],primeira,'EX',86400)
 redis.call('ZADD',KEYS[2],math.min(agora+tonumber(ARGV[2]),primeira+tonumber(ARGV[3])),ARGV[1])
 return 1
-''',2,self.prefixo+':first:'+chave,self.prefixo+':due',chave,cfg['debounce_s'],cfg['max_wait_s'])
+''',2,self.prefixo+':first:'+chave,self.prefixo+':due',chave,cfg['debounce_s'] if debounce is None else debounce,cfg['max_wait_s'])
 
     async def contexto(self,tenant,canal_id,repo=None,configuracoes=None):
         repo=repo or self.repo
@@ -137,7 +155,8 @@ return 1
                 await conn.execute('UPDATE mensagens SET processada_em=now() WHERE tenant_id=$1 AND id=$2',tenant,msgid)
                 return {'ok':True,'ignorado':True,'conversation_id':conversa,'mensagem_id':msgid}
         # Em retry de webhook duplicado, o agendamento é reparado se a primeira chamada falhou no Redis.
-        await self.enfileirar(tenant,conversa,cfg)
+        # A última mensagem decide a espera: a que parece completa encurta, a picada mantém.
+        await self.enfileirar(tenant,conversa,cfg,debounce_da_mensagem(cfg,m) if msgid else None)
         return {'ok':True,'duplicada':msgid is None,'conversation_id':conversa,'mensagem_id':msgid}
 
     async def permitido(self,tenant,conversa,agente_id,repo=None,configuracoes=None):
@@ -270,6 +289,19 @@ return 1
             log.warning('Agente em silêncio sem motivo nas duas consultas; conversa vai para atendente')
             return {'resposta':[],'acao':'transferir_humano','motivo':'silencio_sem_motivo','silencio_sem_motivo':True}
 
+    async def digitando(self,tenant,conv,cfg,presenca='composing'):
+        """"Digitando..." no canal enquanto o agente processa. Só com envio real e canal que
+        suporta; é cortesia: qualquer falha é ignorada e nunca atrasa nem derruba o turno."""
+        try:
+            if cfg['send_mode']!='live': return False
+            canal=await self.repo.obter(tenant,'tenant_canais',conv['canal_id'])
+            if not canal or canal['tipo']!='uazapi' or not canal['ativo']: return False
+            await asyncio.wait_for(uazapi.digitando(self.http,self.cofre,tenant,canal,conv['telefone'],DIGITANDO_S*1000,presenca),timeout=5)
+            return True
+        except asyncio.CancelledError: raise
+        except Exception:
+            return False
+
     async def _pendentes(self,conn,tenant,conversa):
         itens=await conn.fetch("SELECT id,conteudo,criado_em,origem,evento,enviada_em,tipo FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND processada_em IS NULL AND direcao='entrada' AND origem IN ('cliente','sistema') ORDER BY id LIMIT 100",tenant,conversa)
         if not itens: return []
@@ -316,7 +348,7 @@ return 1
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now(),$9,'em_andamento',$10,'processando',$11) RETURNING *''',
             tenant,conversa,cfg['id'],conv['canal_id'],rid,len(itens),itens[0]['criado_em'],itens[-1]['criado_em'],
             cfg['agente_mode'],origem,ids)
-        resultado=None;erro=None;status='ok';aviso=False
+        resultado=None;erro=None;status='ok';aviso=False;presenca=None
         if not await self.permitido(tenant,conversa,cfg['id']):
             status='ignorado'
         else:
@@ -325,12 +357,18 @@ return 1
                 if origem=='sistema':
                     payload.update(tarefa='notificar',evento=json.loads(itens[0]['evento']) if isinstance(itens[0]['evento'],str) else itens[0]['evento'])
                 tarefa=asyncio.create_task(self.consultar(tenant,cfg,payload))
+                presenca=asyncio.create_task(self.digitando(tenant,conv,cfg))
                 try:
                     feito,_=await asyncio.wait({tarefa},timeout=cfg['slow_notice_s'])
                     if not feito and cfg['aviso_demora']:
                         # Aviso de demora é a parte 0 do turno: nunca sai duas vezes no mesmo turno.
                         aviso=await self._enviar_parte(tenant,conversa,cfg,rid,0,cfg['aviso_demora'])=='enviada'
+                        # Enviar mensagem cancela o "digitando" no canal: pede de novo.
+                        if aviso: await self.digitando(tenant,conv,cfg)
                     resultado=await tarefa
+                    await asyncio.gather(presenca,return_exceptions=True)
+                    # Nada vai ser enviado (silêncio ou transferência sem texto): tira o "digitando".
+                    if not resultado.get('resposta'): await self.digitando(tenant,conv,cfg,'paused')
                 finally:
                     if not tarefa.done():
                         tarefa.cancel()
@@ -341,6 +379,8 @@ return 1
             except Exception as falha:
                 erro='AGENT_TIMEOUT' if isinstance(falha,TempoEsgotado) else 'AGENT_ERROR'
                 status='erro';resultado={'resposta':[cfg['fallback']],'acao':'nenhuma'}
+            finally:
+                if presenca and not presenca.done(): presenca.cancel()
         # A resposta fica gravada antes de qualquer envio: se o worker cair, só falta enviar.
         if resultado and resultado.get('silencio_sem_motivo'): status='erro';erro='SILENCE_WITHOUT_REASON'
         return await self.db.fetchrow('''UPDATE turnos SET etapa='respondido',status=$3,erro=$4,resposta=$5::jsonb,

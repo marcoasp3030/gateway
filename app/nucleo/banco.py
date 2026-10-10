@@ -12,7 +12,7 @@ JSON = {'credenciais_enc', 'triagem', 'dados', 'config', 'resposta', 'perfil', '
 COLUNAS = {
     'nome','modelo_id','modelo_versao','status','provedor','skyone_estrategia','skyone_webhook_url',
     'skyone_auth_tipo','skyone_auth_cabecalho','skyone_auth_enc','skyone_auth_usuario_enc','timeout_s','instrucoes_agente',
-    'modo_resposta','debounce_s','max_wait_s','media_wait_s','pause_minutes','history_turns',
+    'modo_resposta','debounce_s','debounce_curto_s','debounce_palavras','max_wait_s','media_wait_s','pause_minutes','history_turns',
     'slow_notice_s','aviso_demora','fallback','alerta_telefone','send_mode','agente_mode',
     'modo_piloto','contatos_permitidos','encerrar_vazia_min','max_lotes_simultaneos',
     'max_concorrencia','skyone_dominios_permitidos','tipo','agente_id','triagem','webhook_secret',

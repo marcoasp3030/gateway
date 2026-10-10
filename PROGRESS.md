@@ -791,3 +791,9 @@ PY
 
 - Simular (GPT-4.1 mini): 10,0 s (`nenhuma`), 11,5 s (`silencio`, `agradecimento_final`), 9,5 s (`transferir_humano`, `pediu_humano`, pausada e aguardando atendente). Tudo em português; 0 de 8 respostas com indício de texto fora do formato.
 - Dúvida registrada: os textos das duas rodadas são quase iguais em estilo e os tempos parecidos; conferir no Skyone se a troca de modelo estava ativa. Detalhes e textos exatos em `docs/SKYONE_RESULTADOS.md`.
+
+## Fase 2 — Fechamento — 2026-10-10
+
+- **Fase 2 concluída** (decisão do Marco). `total_p95` = 15,7 s com 5 clientes, **aceito com a ressalva** de que o debounce adaptativo da Fase 3 deve trazê-lo abaixo de 15 s.
+- **Modelo padrão de atendimento do By Koji: GPT-4.1 mini** (confirmado pelo Marco como o modelo da rodada das 14:25 UTC). **Gemini 3 Flash** testado como alternativa equivalente. **GPT OSS 20b proibido para atendimento.** Registrado em `docs/SKYONE.md`.
+- Pendência que fica: completar `docs/SKYONE.md` com o conteúdo dos nós quando o guia `docs/fase2_skyone_atendente_delivery.md` chegar ao servidor.

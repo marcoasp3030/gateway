@@ -81,6 +81,13 @@ Validação com Postgres e transporte HTTP simulado; não houve chamada real ao 
 
 > **Situação (10/10/2026):** o lado do gateway está implementado e testado (pacote e Retorno abaixo). O conteúdo dos nós do fluxo (JavaScript e prompt) entra aqui **depois que o Marco validar o fluxo no Skyone**; os trechos marcados com 🔲 estão aguardando esse conteúdo. Nada nesta seção foi conferido contra o fluxo real ainda.
 
+## Modelo do agente (decisão do Marco, 10/10/2026)
+
+- **Padrão de atendimento do By Koji: GPT-4.1 mini** (chave própria da OpenAI), sem base de conhecimento e sem Skills no agente.
+- **Gemini 3 Flash:** testado como alternativa equivalente (mesmo comportamento e tempos parecidos).
+- **GPT OSS 20b: proibido para atendimento.**
+- Medições e textos das rodadas em `docs/SKYONE_RESULTADOS.md`. Com 5 clientes simultâneos: GPT-4.1 mini agente_p50 10,7 s / agente_p95 11,3 s / total_p95 15,7 s; Gemini 3 Flash 8,8 s / 10,6 s / 15,8 s.
+
 ## Desenho do fluxo
 
 ```
