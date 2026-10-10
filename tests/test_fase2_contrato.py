@@ -169,3 +169,25 @@ def test_INV04_turno_grava_acao_motivo_e_desfecho(duravel):
             t,c,bot=await turno('u7',skyone.FalhaAgente('x'))
             assert len(chamadas)==1 and len(bot)==1 and (t['status'],t['erro'],c['aguardando_motivo'])==('erro','AGENT_ERROR','erro_agente')
     banco(cenario)
+
+
+@pytest.mark.skipif(not DSN,reason='Postgres de teste obrigatório')
+@pytest.mark.parametrize('duravel',[True,False])
+def test_debounce_recomeca_a_cada_lote(duravel):
+    """A marca da primeira mensagem do lote sai quando o lote é lido; senão a mensagem seguinte
+    da conversa seria despachada na hora, sem esperar o cliente terminar de digitar."""
+    async def cenario(conn):
+        await migrar.aplicar(conn)
+        app,client=preparar(conn);fila=RedisFila();app.state.redis=fila;app.state.pipeline.redis=fila
+        p=app.state.pipeline
+        async def agente(http,repo,cofre,tenant,cfg,payload): return {'resposta':['ok'],'acao':'nenhuma'}
+        p.chamar=agente
+        async with client:
+            a,can=await criar(client)
+            await ativo(client,'alpha',a,can,debounce_s=4,max_wait_s=12)
+            r=await client.post(f'/admin/v1/tenants/alpha/agentes/{a}/simular',json={'canal_id':can,'identificador':'u','texto':'oi','message_id':'m1'})
+            conv=r.json()['conversation_id'];marca=p.prefixo+':first:'+p.chave('alpha',conv)
+            fila.dados[marca]='1700000000'   # como o agendamento deixa no Redis
+            await (p.processar_duravel if duravel else p.processar)('alpha',conv)
+            assert marca not in fila.dados
+    banco(cenario)

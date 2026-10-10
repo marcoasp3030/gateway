@@ -295,6 +295,9 @@ return 1
                 await self.db.execute("UPDATE turnos SET etapa='abandonado',status='abandonado' WHERE tenant_id=$1 AND id=$2",tenant,turno['id'])
                 turno=None
             if turno is None:
+                # O lote vai ser lido agora: a próxima mensagem começa uma espera (debounce) nova.
+                # Sem isto a marca da primeira mensagem ficava por 24 h e as seguintes saíam sem debounce.
+                await self.redis.delete(self.prefixo+':first:'+self.chave(tenant,conversa))
                 turno=await self._responder(tenant,conversa,conv,cfg)
                 if turno is None: return 'vazio'
             await self._concluir(tenant,conversa,cfg,turno,await self._enviar_partes(tenant,conversa,cfg,turno))
