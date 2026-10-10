@@ -22,7 +22,8 @@ class Unidade(Estrito):
     codigo:str|None=Field(None,pattern=r'^[a-z0-9][a-z0-9_]{0,39}$')
     endereco:str|None=Field(None,max_length=500)
     telefone:str|None=Field(None,max_length=40)
-    whatsapp_pedidos:str|None=Field(None,pattern=r'^\d{8,16}$')
+    # E.164 sem "+": só dígitos, de 10 a 15, com DDI.
+    whatsapp_pedidos:str|None=Field(None,pattern=r'^\d{10,15}$')
     formas_pagamento:str|None=Field(None,max_length=500)
     taxa_entrega:float|None=Field(None,ge=0,le=99999)
     pedido_minimo:float|None=Field(None,ge=0,le=99999)

@@ -1,4 +1,4 @@
-# Skills do agente — catálogo e pedidos (Fase 4)
+# Skills do agente — catálogo, pedidos e unidades
 
 Especificação das Skills que o agente do Skyone usa para consultar o catálogo e montar o pré-pedido.
 Cada Skill é uma chamada HTTP ao gateway. As regras de negócio são validadas no gateway: o agente só
@@ -234,6 +234,54 @@ Depois de fechado, o pedido não muda. Se o cliente quiser outra coisa, `adicion
 **Descrição para o agente:** Cancela um pedido desta conversa a pedido do cliente. Só funciona enquanto a unidade ainda não confirmou nem recusou. Se já foi decidido, transfira para a equipe.
 
 `POST /api/v1/pedidos/{numero}/cancelar` — corpo: `{"conversation_id": "<conversa>", "motivo": "cliente desistiu"}`
+
+---
+
+### 11. `info_unidades`
+
+**Descrição para o agente:** Consulta os dados das unidades: se está aberta agora, quando abre ou fecha, os horários dos próximos 7 dias, endereço, telefone, se aceita retirada, taxa de entrega, pedido mínimo, formas de pagamento e regras. Use quando o cliente perguntar sobre horário, endereço, entrega ou pagamento, ou antes de afirmar qualquer uma dessas coisas. Campo `null` significa "não informado": não invente; diga que a unidade confirma.
+
+`GET /api/v1/unidades` — escopo `ferramentas:catalogo` (a chave atual já serve).
+
+| Parâmetro | Obrigatório | Descrição |
+|---|---|---|
+| `conversation_id` | sim | Conversa atual |
+| `unidade` | não | Código da unidade (`morumbi`, `einstein`, `vila_nova_conceicao`, `patio_guedala`). Sem ele, vêm todas as unidades ativas, em ordem de nome |
+
+Retorno:
+
+```json
+{"unidades": [
+  {"codigo": "patio_guedala", "nome": "Pátio Guedala", "ativa": true,
+   "endereco": "Av. Comendador Adibo Ares, 9", "telefone": null, "fuso": "America/Sao_Paulo",
+   "situacao": {"aberta_agora": false, "motivo": "horario", "fecha_as": null,
+                "proxima_abertura": "2026-10-11T12:00-03:00", "pausada_ate": null, "pausa_motivo": null},
+   "agenda": [
+     {"data": "2026-10-10", "dia": "sab", "origem": "grade", "fechado": false, "faixas": [["12:00","16:00"],["19:00","23:00"]], "motivo": null},
+     {"data": "2026-10-12", "dia": "seg", "origem": "excecao", "fechado": true, "faixas": [], "motivo": "feriado"}
+   ],
+   "delivery": null, "retirada": true, "area_entrega": null,
+   "taxa": {"modo": "fixa", "valor": 12.0}, "pedido_minimo": 80.0,
+   "formas_pagamento": "Pix, crédito e débito", "regras": null}
+]}
+```
+
+| Campo | Significado |
+|---|---|
+| `ativa` | `false` só aparece quando a unidade foi pedida pelo código e está desativada: não ofereça essa unidade |
+| `situacao.aberta_agora` | `true`, `false` ou `null` (nenhum horário cadastrado: não informado) |
+| `situacao.motivo` | `null` (aberta), `horario` (fora do horário), `excecao` (feriado ou data especial), `pausa` (fechada agora pela unidade; ver `pausada_ate` e `pausa_motivo`), `sem_horario`, `inativa` |
+| `situacao.fecha_as`, `proxima_abertura`, `pausada_ate` | Data e hora no fuso da unidade, ou `null`. Pausa sem prazo não tem `proxima_abertura` |
+| `agenda` | Hoje e os 6 dias seguintes, já com feriados e datas especiais. `faixas` com fim menor que o início cruza a meia-noite. `fechado: true` em todos os dias com `motivo: sem_horario` na situação = horário não informado |
+| `delivery` | Se a unidade faz entrega. Hoje sempre `null` (ainda não há esse cadastro): a unidade confirma |
+| `retirada` | `true`, `false` ou `null` |
+| `taxa` | `null` (não informada) ou `{"modo": "fixa", "valor": 12.0}`. Outros modos (por bairro, por CEP) virão depois, no mesmo campo |
+| `pedido_minimo` | Valor em reais ou `null` |
+| `area_entrega`, `formas_pagamento`, `regras` | Texto livre cadastrado pela unidade, ou `null` |
+
+Erros: sem chave 401; chave sem o escopo 403; conversa inexistente ou de outro agente 404; `unidade` com código que não existe 404; sem `conversation_id` 400. O WhatsApp interno de pedidos da unidade nunca aparece.
+
+O pacote de cada turno continua trazendo o bloco `unidades` resumido; esta Skill serve para o detalhe (agenda dos próximos dias e situação na hora da pergunta).
 
 ---
 

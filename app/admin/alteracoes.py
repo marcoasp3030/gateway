@@ -40,15 +40,42 @@ async def registrar(conn,tenant,actor,entidade,entidade_id,acao,antes=None,depoi
     return True
 
 
+LIMITE_MAX=200
+
+
+def _instante(nome,valor):
+    """Data e hora ISO 8601 com fuso. Em query string o "+" do fuso chega como espaço: aceito."""
+    if valor is None: return None
+    try: d=datetime.fromisoformat(valor.strip().replace(' ','+'))
+    except ValueError: raise HTTPException(400,{'campo':nome}) from None
+    if d.tzinfo is None: raise HTTPException(400,{'campo':nome})
+    return d
+
+
 @router.get('/tenants/{tenant_id}/gestao/alteracoes')
-async def lista(request:Request,tenant_id:str,entidade:str|None=None,entidade_id:str|None=None,limite:int=50,cursor:int=0):
-    if not await Repositorio(request.app.state.db).tenant(tenant_id): raise HTTPException(404,'NOT_FOUND')
-    if not 1<=limite<=200 or cursor<0: raise HTTPException(400,'VALIDATION_ERROR')
-    rows=await request.app.state.db.fetch('''SELECT id,actor,entidade,entidade_id,acao,antes,depois,criado_em FROM gestao_alteracoes
+async def lista(request:Request,tenant_id:str,entidade:str|None=None,entidade_id:str|None=None,unidade_id:str|None=None,
+                desde:str|None=None,ate:str|None=None,limite:int=50,cursor:int=0):
+    """Mais novas primeiro. desde (inclusivo) e ate (exclusivo) com fuso; unidade_id traz a unidade e
+    todas as exceções dela (inclusive as já removidas) e não combina com entidade/entidade_id."""
+    db=request.app.state.db
+    if not await Repositorio(db).tenant(tenant_id): raise HTTPException(404,'NOT_FOUND')
+    if not 1<=limite<=LIMITE_MAX: raise HTTPException(400,{'campo':'limite'})
+    if cursor<0: raise HTTPException(400,{'campo':'cursor'})
+    de,ha=_instante('desde',desde),_instante('ate',ate)
+    if de and ha and de>ha: raise HTTPException(400,{'campo':'ate'})
+    if unidade_id is not None:
+        if entidade is not None or entidade_id is not None: raise HTTPException(400,{'campo':'unidade_id'})
+        if not await db.fetchval('SELECT EXISTS(SELECT 1 FROM tenant_unidades WHERE tenant_id=$1 AND id=$2)',tenant_id,unidade_id):
+            raise HTTPException(404,'NOT_FOUND')
+    # A exceção é gravada com entidade_id "<id da unidade>:<data>".
+    rows=await db.fetch("""SELECT id,actor,entidade,entidade_id,acao,antes,depois,criado_em FROM gestao_alteracoes
         WHERE tenant_id=$1 AND ($2::text IS NULL OR entidade=$2) AND ($3::text IS NULL OR entidade_id=$3) AND ($4=0 OR id<$4)
-        ORDER BY id DESC LIMIT $5''',tenant_id,entidade,entidade_id,cursor,limite+1)
+        AND ($6::text IS NULL OR (entidade='unidade' AND entidade_id=$6) OR (entidade='excecao' AND split_part(entidade_id,':',1)=$6))
+        AND ($7::timestamptz IS NULL OR criado_em>=$7) AND ($8::timestamptz IS NULL OR criado_em<$8)
+        ORDER BY id DESC LIMIT $5""",tenant_id,entidade,entidade_id,cursor,limite+1,unidade_id,de,ha)
     def linha(r):
         d=dict(r)
         for c in ('antes','depois'): d[c]=json.loads(d[c]) if isinstance(d[c],str) else d[c]
+        d['criado_em']=d['criado_em'].isoformat()
         return d
     return {'itens':[linha(r) for r in rows[:limite]],'proximo_cursor':rows[limite-1]['id'] if len(rows)>limite else None}
