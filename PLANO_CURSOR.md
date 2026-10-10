@@ -17,7 +17,7 @@
 | Fase 2 | ✅ **Concluída em 10/10/2026.** Fluxo `atendente_delivery` validado no Skyone e cadastrado no “Atendimento By Koji” (IA real, envio de teste). Pacote e Retorno do Apêndice A, INV04 e INV10 em produção (migração 018). **Modelo padrão de atendimento do By Koji: GPT-4.1 mini**; Gemini 3 Flash testado como alternativa equivalente; GPT OSS 20b proibido para atendimento. Bench com 5 clientes (GPT-4.1 mini): 0 erros, agente_p50 10,7 s, agente_p95 11,3 s, **total_p95 15,7 s — aceito pelo Marco com a ressalva de que o debounce adaptativo da Fase 3 deve trazê-lo abaixo de 15 s**. Silêncio com motivo e transferência conferidos no Simular | `PROGRESS.md`, `docs/SKYONE_RESULTADOS.md` |
 | Fase 2.5 | ⏳ Não iniciada | — |
 | Fase 3 | 🟡 **Em andamento (10/10/2026): os três blocos de código implantados; falta o teste do Marco pelo celular.** Em produção: `gateway:7b7c6f3`, migrações 019 e 020. Bloco 1: debounce adaptativo, aviso de demora em 20 s (não sai para fechamento), “digitando”. Bloco 2: **envio real ligado só no “Atendimento By Koji”, canal uazapi de teste, piloto com um contato**; primeiro envio real conferido (id do provedor gravado; varredura não confundiu com atendente). Bloco 3: INV03 antes do envio com registro, `#bot`, encerramento com desfecho e reabertura, conversa vazia, SEG07 por contato, LGPD04. `total_p95` 15,6 s aceito; meta de 15 s sob observação. **Falta:** roteiro de 30 a 50 conversas pelo celular; alerta de transbordo para `alerta_telefone` | `PROGRESS.md` |
-| Fase 4 | 🟡 **Em andamento (10/10/2026), em blocos.** Em produção: `gateway:4cb04d9`, migrações 021 e 022. Bloco 1: catálogo por CSV, busca tolerante, unidades; catálogo real do By Koji importado (888 itens, 193 vendáveis, só no Pátio Guedala). Bloco 2: carrinho e pré-pedido para as Skills (regras 1–3, SEG06, webhooks `pedido.criado`/`pedido.cancelado`, carrinho no pacote ao agente). **Falta o bloco 3:** notificação da unidade, confirmação pelo painel e pelo WhatsApp, avisos ao cliente, alerta de transbordo e `docs/SKILLS.md` | `PROGRESS.md` |
+| Fase 4 | 🟡 **Código dos três blocos implantado (10/10/2026); falta o teste do Marco e criar as Skills no Skyone.** Em produção: `gateway:9a77e6d`, migrações 021–023. Bloco 1: catálogo por CSV (888 itens do By Koji; só o Pátio Guedala tem preço), busca tolerante, unidades. Bloco 2: carrinho e pré-pedido para as Skills (regras 1–3, SEG06). Bloco 3: aviso do pedido à unidade, confirmação pelo painel e por `OK/NÃO <numero>` no WhatsApp (o primeiro vale), aviso ao cliente, alerta de transbordo, chave definitiva das Skills e `docs/SKILLS.md`. Números de unidade e de alerta temporários (o da instância de teste). **Falta:** criar as Skills no Skyone, pedido completo pelo celular, números e regras reais das unidades | `PROGRESS.md` |
 | Fases 3.5, 4.5 em diante | ⏳ Não iniciadas | — |
 
 **Fechamento da Fase 0.5 (09/10/2026):** últimos ajustes do contrato implantados com um commit por item: erros padronizados (códigos fixos, mensagem em português, `detalhes.campo`, mesmo envelope nos middlewares e no 404), histórico paginado, lista de agentes com `circuito_estado`/`canais`, null em campo obrigatório e integridade com campo, **`/testar` com `{"usar_provedor_real": true}`** (chama o Skyone sem alterar o agente) e `/simular` com IA real quando o envio é dry. Imagem de volta `gateway:39e1a53`; backup `gateway-pre-contrato-20261009T173104Z.dump`. Detalhes em `PROGRESS.md`.
@@ -513,12 +513,12 @@ curl -s "$GW/admin/v1/tenants/$T/metricas" "${AUTH[@]}"
 > Sem EPOC, o pedido é um **pré-pedido**: só vale após a confirmação da unidade.
 
 ### Tarefas
-- [ ] Criar as migrações **dentro dos módulos** (o mecanismo já existe desde a Fase 0.5). Nomes genéricos: o módulo fala em "itens do catálogo", não em "cardápio"; o termo "cardápio" fica só no prompt/modelo de agente:
+- [x] Criar as migrações **dentro dos módulos** (o mecanismo já existe desde a Fase 0.5). Nomes genéricos: o módulo fala em "itens do catálogo", não em "cardápio"; o termo "cardápio" fica só no prompt/modelo de agente: — *feitas como migrações 021–023 em `app/migrations`, registradas nos módulos.*
   - `carrinhos` (conversation_id, unidade, modalidade `delivery|retirada`, endereço, horário, observação, status)
   - `carrinho_itens` (carrinho_id, item_id, quantidade, preço unitário **copiado do cardápio**, observação)
   - `pedidos` (número curto legível, conversation_id, unidade, itens jsonb, total, status `aguardando_loja | confirmado | recusado | cancelado`, timestamps)
-- [ ] 🛑 **PARE:** obter do Marco o cardápio real (CSV), números de WhatsApp de cada unidade, formas de pagamento e regras de entrega.
-- [ ] Endpoints para Skills (header `X-API-Key`), todos exigindo `conversation_id` válido e ativo:
+- [x] 🛑 **PARE:** obter do Marco o cardápio real (CSV), números de WhatsApp de cada unidade, formas de pagamento e regras de entrega. — *parcial: CSV recebido; números de WhatsApp temporários (o da instância de teste); formas de pagamento e regras de entrega ainda vazias.*
+- [x] Endpoints para Skills (header `X-API-Key`), todos exigindo `conversation_id` válido e ativo: *Implementados sob `/api/v1/...` (ver `docs/SKILLS.md`).*
 
   | Método e rota | Função |
   |---|---|
@@ -531,15 +531,15 @@ curl -s "$GW/admin/v1/tenants/$T/metricas" "${AUTH[@]}"
   | `POST /api/pedidos` | fecha o carrinho; recusa se faltar dado obrigatório |
   | `GET /api/pedidos/{numero}` | status do pedido |
 
-- [ ] Toda resposta de escrita devolve o **carrinho completo atualizado**, para o agente não precisar de outra chamada.
-- [ ] Ao fechar o pedido: enviar resumo para o WhatsApp da unidade. A unidade confirma pelo **painel web** (`POST /admin/v1/tenants/{id}/pedidos/{numero}/confirmar|recusar`) ou respondendo `OK <numero>` / `NÃO <numero> <motivo>` no WhatsApp; o status é atualizado e o cliente é avisado.
-- [ ] Expor cardápio (CRUD + importação CSV) e pedidos na API administrativa (`docs/API_ADMIN.md`, seção Fase 4).
-- [ ] O módulo `pedidos` preenche `contexto_modulos.pedidos.carrinho` no payload ao Skyone.
-- [ ] Ao fechar e ao confirmar o pedido, disparar os webhooks de saída `pedido.criado` / `pedido.confirmado` e usar `/notificar` para avisar o cliente.
-- [ ] Rotas sob `/api/v1/catalogo/...` e `/api/v1/pedidos/...`, exigindo os escopos `ferramentas:catalogo` e `ferramentas:pedidos` (SEG11). Atualizar o modelo `atendente_delivery` com a função de contexto do carrinho.
-- [ ] Documentar em `docs/SKILLS.md` a especificação de cada Skill para o Marco criar no Skyone: nome, descrição para o agente, parâmetros e exemplo de retorno.
-- [ ] **SEG06:** cancelamento e alterações após o fechamento validados no gateway (status do pedido, janela de tempo, dono da conversa), independentemente do que o agente pedir.
-- [ ] Testes: preço sempre do banco; item inativo recusado; `conversation_id` inexistente → 404; pedido sem endereço em delivery → 422; total = soma dos itens.
+- [x] Toda resposta de escrita devolve o **carrinho completo atualizado**, para o agente não precisar de outra chamada.
+- [x] Ao fechar o pedido: enviar resumo para o WhatsApp da unidade. A unidade confirma pelo **painel web** (`POST /admin/v1/tenants/{id}/pedidos/{numero}/confirmar|recusar`) ou respondendo `OK <numero>` / `NÃO <numero> <motivo>` no WhatsApp; o status é atualizado e o cliente é avisado.
+- [x] Expor cardápio (CRUD + importação CSV) e pedidos na API administrativa (`docs/API_ADMIN.md`, seção Fase 4).
+- [x] O módulo `pedidos` preenche `contexto_modulos.pedidos.carrinho` no payload ao Skyone.
+- [x] Ao fechar e ao confirmar o pedido, disparar os webhooks de saída `pedido.criado` / `pedido.confirmado` e usar `/notificar` para avisar o cliente. — *webhooks feitos; o aviso ao cliente é um texto fixo do gateway na conversa, não passa pelo agente (`/notificar` não foi usado).*
+- [x] Rotas sob `/api/v1/catalogo/...` e `/api/v1/pedidos/...`, exigindo os escopos `ferramentas:catalogo` e `ferramentas:pedidos` (SEG11). Atualizar o modelo `atendente_delivery` com a função de contexto do carrinho.
+- [x] Documentar em `docs/SKILLS.md` a especificação de cada Skill para o Marco criar no Skyone: nome, descrição para o agente, parâmetros e exemplo de retorno.
+- [x] **SEG06:** cancelamento e alterações após o fechamento validados no gateway (status do pedido, janela de tempo, dono da conversa), independentemente do que o agente pedir.
+- [x] Testes: preço sempre do banco; item inativo recusado; `conversation_id` inexistente → 404; pedido sem endereço em delivery → 422; total = soma dos itens.
 
 ### Validação
 ```bash
