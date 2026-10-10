@@ -3,7 +3,7 @@ import asyncio,json
 from urllib.parse import urlsplit,parse_qs
 import httpx,pytest
 from canais import uazapi
-from nucleo.pipeline import debounce_da_mensagem
+from nucleo.pipeline import debounce_da_mensagem,parece_fechamento
 from nucleo.configuracao import PADROES
 from test_migrations import banco,migrar,DSN
 from test_admin import preparar,criar
@@ -137,4 +137,49 @@ def test_aviso_de_demora_uma_vez_e_digitando_de_novo(monkeypatch):
             assert chamadas==[('/message/presence','composing',None),('/send/text',None,'Só um instante.'),
                               ('/message/presence','composing',None),('/send/text',None,'pronto')]
             assert await conn.fetchval('SELECT aviso_demora FROM turnos WHERE conversation_id=$1',conv) is True
+    banco(cenario)
+
+
+def test_parece_fechamento():
+    f=lambda *textos,tipo='texto': parece_fechamento([{'conteudo':t,'tipo':tipo} for t in textos])
+    for lote in (('obrigado',),('Obrigada!',),('ok',),('valeu',),('blz',),('👍',),('🙏🙏',),('Ok, valeu!',),('tá bom, obrigado',),
+                 ('muito obrigado',),('show',),('perfeito, até mais',),('obg',),('ok','obrigado'),('é isso, valeu',),('nada, só isso',)):
+        assert f(*lote),lote
+    # Pergunta, pedido, saudação ou qualquer palavra fora da lista: não é fechamento.
+    for lote in (('obrigado, e a taxa?',),('ok?',),('oi',),('bom dia',),('quero um temaki',),('ok, pode mandar dois',),('sim, quero',),('sim',),('pode',),('tudo bem',),
+                 ('obrigado mas ainda não chegou',),('valeu','qual o prazo'),('obrigado obrigado obrigado obrigado obrigado obrigado obrigado',),('',)):
+        assert not f(*lote) or lote==('',),lote
+    assert f('') is True   # só pontuação/vazio: nada a responder
+    assert not f('obrigado',tipo='audio') and not parece_fechamento([{'conteudo':'ok','tipo':'texto'},{'conteudo':'[localização: 1, 2]','tipo':'localizacao'}])
+
+
+@pytest.mark.skipif(not DSN,reason='Postgres de teste obrigatório')
+@pytest.mark.parametrize('duravel',[True,False])
+def test_fechamento_nao_recebe_aviso_de_demora(duravel):
+    async def cenario(conn):
+        await migrar.aplicar(conn)
+        app,client=preparar(conn);fila=RedisFila();app.state.redis=fila;app.state.pipeline.redis=fila
+        p=app.state.pipeline;roteiro=[]
+        async def lento(http,repo,cofre,tenant,cfg,payload):
+            await asyncio.sleep(1.3);return roteiro.pop(0)
+        p.chamar=lento
+        async with client:
+            a,can=await criar(client)
+            await ativo(client,'alpha',a,can,debounce_s=1,max_wait_s=1,slow_notice_s=1,aviso_demora='Só um instante.')
+            n=0
+            async def turno(usuario,texto,resultado):
+                nonlocal n;n+=1;roteiro[:]=[resultado]
+                conv=(await client.post(f'/admin/v1/tenants/alpha/agentes/{a}/simular',json={'canal_id':can,'identificador':usuario,'texto':texto,'message_id':f'm{n}'})).json()['conversation_id']
+                await (p.processar_duravel if duravel else p.processar)('alpha',conv)
+                t=await conn.fetchrow('SELECT aviso_demora,acao,motivo_silencio FROM turnos WHERE conversation_id=$1 ORDER BY id DESC LIMIT 1',conv)
+                return t,[r[0] for r in await conn.fetch("SELECT conteudo FROM mensagens WHERE conversation_id=$1 AND origem='bot' ORDER BY id",conv)]
+            # Fechamento + silêncio: o cliente não recebe nada, nem o aviso.
+            t,bot=await turno('u1','obrigado',{'resposta':[],'acao':'silencio','motivo':'agradecimento_final'})
+            assert bot==[] and not t['aviso_demora'] and (t['acao'],t['motivo_silencio'])==('silencio','agradecimento_final')
+            # Fechamento em que o agente decide responder: sai só a resposta, sem aviso antes.
+            t,bot=await turno('u2','valeu!',{'resposta':['Por nada!'],'acao':'nenhuma'})
+            assert bot==['Por nada!'] and not t['aviso_demora']
+            # Pergunta com agente lento: o aviso continua saindo, uma vez.
+            t,bot=await turno('u3','vocês entregam no Morumbi?',{'resposta':['Sim!'],'acao':'nenhuma'})
+            assert bot==['Só um instante.','Sim!'] and t['aviso_demora']
     banco(cenario)

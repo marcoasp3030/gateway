@@ -39,6 +39,31 @@ FIM_DE_FRASE=('?','.','!','…')
 DIGITANDO_S=25
 
 
+# Palavras de quem só está encerrando ou agradecendo. Saudações ("oi", "bom dia", "tudo bem") e
+# respostas a perguntas ("sim", "pode") ficam de fora: esperam resposta.
+FECHAMENTOS=frozenset("""obrigado obrigada obrigadao obrigadão obg obgd brigado brigada brigadao brigadão valeu vlw vlww
+ok okay okk oks blz beleza belezinha certo certinho ta tá tah bom otimo ótimo perfeito show top legal massa joia jóia
+combinado fechado fechou entendi entendido tendi isso so só era nada de por enquanto muito muita mto mt demais
+tchau ate até mais logo abraco abraço abracos abraços tmj flw falou agradeco agradeço grato grata e é eh""".split())
+MAX_PALAVRAS_FECHAMENTO=6
+
+
+def parece_fechamento(itens):
+    """O lote é só um fechamento ("obrigado", "ok, valeu", "👍", "blz")? Texto curto, sem pergunta,
+    só com palavras de encerramento ou emoji. Usado para não mandar aviso de demora antes de um
+    provável silêncio; na dúvida devolve False (o aviso sai normalmente)."""
+    palavras=[]
+    for i in itens:
+        if (i.get('tipo') or 'texto')!='texto': return False
+        texto=str(i.get('conteudo') or '')
+        if '?' in texto: return False
+        # Pontuação e emoji viram espaço; sobra só o que tem letra ou número.
+        palavras+=''.join(c if c.isalnum() else ' ' for c in texto.lower()).split()
+    if len(palavras)>MAX_PALAVRAS_FECHAMENTO: return False
+    # Sem nenhuma palavra = só emoji/pontuação ("👍", "🙏🙏").
+    return all(p in FECHAMENTOS for p in palavras)
+
+
 def debounce_da_mensagem(cfg,m):
     """Espera antes de chamar o agente. Texto que parece completo (termina com pontuação de
     fim de frase ou tem mais de debounce_palavras palavras) espera menos; mensagem curta ou
@@ -219,7 +244,7 @@ return 1
                     tarefa=asyncio.create_task(self.consultar(tenant,cfg,payload))
                     try:
                         feito,_=await asyncio.wait({tarefa},timeout=cfg['slow_notice_s'])
-                        if not feito and cfg['aviso_demora']:
+                        if not feito and cfg['aviso_demora'] and not parece_fechamento(itens):
                             aviso=await self.enviar(tenant,conversa,cfg['id'],cfg['aviso_demora'])
                             entregue=aviso
                         resultado=await tarefa
@@ -360,7 +385,8 @@ return 1
                 presenca=asyncio.create_task(self.digitando(tenant,conv,cfg))
                 try:
                     feito,_=await asyncio.wait({tarefa},timeout=cfg['slow_notice_s'])
-                    if not feito and cfg['aviso_demora']:
+                    # Lote que parece só fechamento não recebe aviso: se a resposta for silêncio, nada é enviado.
+                    if not feito and cfg['aviso_demora'] and not parece_fechamento(itens):
                         # Aviso de demora é a parte 0 do turno: nunca sai duas vezes no mesmo turno.
                         aviso=await self._enviar_parte(tenant,conversa,cfg,rid,0,cfg['aviso_demora'])=='enviada'
                         # Enviar mensagem cancela o "digitando" no canal: pede de novo.
