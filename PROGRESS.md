@@ -703,3 +703,14 @@ PY
   - Varredura: mensagem da instância (`fromMe`) que não corresponde a nenhum envio do gateway = atendente pelo celular → gravada como `humano`, `origem_recebimento='varredura'`, conversa pausada (INV03). Se houver, na mesma conversa e a até 3 min, envio do gateway sem id (ou em andamento/incerto), a mensagem é contada como `ambiguas` e **não** é gravada. Registros de ligação são ignorados. Indicadores novos: `do_atendente`, `ambiguas`.
 - **Não confirmado na prática:** a documentação da uazapi diz que `/send/text` devolve `messageid`/`id`, mas nenhum envio real foi feito (tudo em envio de teste). Se a resposta real vier sem id, a proteção acima evita pausa indevida e o indicador `ambiguas` mostra; conferir no primeiro envio real.
 - Validações: `sh scripts/test_suite.sh` → **143 passed**, só bancos `_test`. Produção: 4 containers `healthy`, fila zerada, varredura sem erros, `/health` público `{"ok":true}`, modos inalterados.
+
+## Fase 1 — Fechamento: teste ao vivo da varredura — 2026-10-10
+
+- Status: **Fase 1 concluída.** Imagem `gateway:675b350`, schema 17, `FILA_DURAVEL=on`; bykoji em simulação com envio de teste e piloto com um contato; nada enviado ao WhatsApp.
+- Teste ao vivo (só a recepção parada, de 03:20:03 a 03:22:30 UTC; workers, agendador, Redis e Postgres no ar):
+  - Na instância, durante a queda: 6 mensagens na conversa de teste — 3 do cliente (03:20:48, 03:21:24 “Teste queda 1”, 03:21:34 “Teste queda 2”) e 3 do atendente pelo celular da instância (03:21:05, 03:21:10, 03:21:55 “Resposta atendente”).
+  - A uazapi tentou o webhook uma vez por mensagem, recebeu 502 e **não reenviou**; nenhum payload novo chegou pela recepção.
+  - A varredura recuperou as 6 em duas rodadas (03:21:32, ainda com a recepção parada, e 03:23:03): 3 como `cliente`/entrada e 3 como `humano`/saída, todas com `origem_recebimento='varredura'`, `enviada_em` com a hora original do provedor, 0 duplicadas; `bot_pausado_ate` renovado a cada mensagem do atendente (final 04:23:03); 2 alertas `canal.varredura_recuperou` na auditoria; indicador `do_atendente` e `ambiguas: 0`.
+  - Conferência cruzada: as 10 mensagens que a instância tem dos últimos 15 min nessa conversa estão todas no gateway (4 pelo webhook, 6 pela varredura).
+- Depois: recepção `healthy`, fila zerada, `status_conexao = conectado`.
+- Ficam para as próximas fases: confirmar no primeiro envio real que `/send/text` devolve o id (proteção `ambiguas` ativa até lá); formato real do evento `connection`; ligar `digitando()` ao envio; leitura de anexos (Fase 5).
