@@ -548,3 +548,24 @@ PY
 - Pendência pequena: `aguardando` com valor inválido devolve `campo: corpo`; incluir o nome nos campos conhecidos no bloco 3.
 - Volta: `docker compose down` só de `worker` e `agendador` não é necessário com a chave desligada; para voltar o código, restaurar os Composes de `pre-bloco2-20261009T200721Z/` e recriar o gateway com `gateway:219d71a` (schema 15 é compatível: a 015 só altera dados).
 - Próximo bloco (aguarda validação do Marco): 3 — justiça entre empresas com limites compartilhados no Redis (INV07), fechamento manual do circuito e nova tentativa (INV15).
+
+
+## Fase 0.6 — Bloco 3: justiça entre empresas, circuito e nova tentativa — 2026-10-10
+
+- Status: concluído e implantado; `FILA_DURAVEL=off` mantido; nenhum modo de agente alterado; sem migração.
+- Feito (`2efffd1`):
+  - **INV07:** vagas compartilhadas no Redis entre todos os workers, obtidas num único script Lua: `max_lotes_simultaneos` por empresa (`gw05:fila:lotes:<tenant>`) e `max_concorrencia` por agente (`gw05:fila:ativos:<tenant>:<agente>`), com validade `timeout_s + 90 s`. Sem vaga, o item volta ao agendamento (0,3 s) e o worker deixa de ler a fila da empresa cheia por um instante, seguindo para as outras. Vale para o caminho da fila durável; o caminho atual mantém os limites em processo.
+  - **INV15:** `POST /admin/v1/tenants/{t}/agentes/{a}/circuito/fechar` (manual, auditado `agente.circuito_fechado`, avança a geração); **uma única nova tentativa** 2 s depois, só para falha de conexão (`ConnectError`) ou HTTP 502/503/504 antes de qualquer resposta e se couber no `timeout_s`; nunca em tempo esgotado. Cada tentativa passa pela cota por URL; o circuito conta uma chamada.
+  - Filtro `aguardando` inválido → 400 com `detalhes.campo=aguardando`.
+  - **Fallback validado** (agente e config da empresa): mínimo de 15 caracteres e ao menos uma letra; vazio/nulo = usa o padrão; inválido → 400 `campo: fallback`. Registros existentes não foram alterados.
+- **Fallbacks gravados que não passariam na regra** (só listados): 1 agente — `bykoji/bykoji_atendimento` (“Atendimento By Koji”), fallback `/` (1 caractere, sem letra), definido pelo Marco no painel em 09/10 às 18:00 UTC. Nenhuma config de empresa nem modelo fora da regra. Enquanto não for corrigido, uma falha desse agente envia só “/” ao cliente.
+- Validações (comando → resultado):
+  - `sh scripts/test_suite.sh` → **126 passed** (10 novos em `tests/test_fila_justica.py`), somente bancos `_test`. INV07: 50 conversas de uma empresa + 1 de outra, 2 workers → a conversa da outra empresa sai junto com a primeira leva (≤ 10 da grande antes dela) e o pico da grande fica em 5. **Mutação:** sem a checagem de vaga, o pico vai a 39 e o teste falha. INV15: limite de 2 por agente respeitado entre 2 workers; nova tentativa nos 6 casos (503→200, 502→504, conexão recusada, 500, tempo esgotado, não cabe no prazo); circuito abre em 3 falhas, a 4ª conversa recebe fallback sem chamada HTTP, agente da outra empresa responde normalmente, fechamento manual auditado e isolado por tenant.
+  - Pré-implantação: `gateway:a0128b4` = imagem em uso (volta); schema 15; zero pendentes; `due` vazio. Backup em `/home/twadmin/backups/gateway/pre-bloco3-20261010T001758Z/` (dump `pg_restore --list` OK, SHA-256 `8f76ac44df48c0c19d77ed2f8d24e8329ee886cf53af25c9cc9ed060cb8600e1`; `.env` e os 3 Composes; 600).
+  - Build `gateway:2efffd1`; recriados gateway, 2 workers e agendador (todos `healthy`); postgres/redis/painel com os mesmos IDs.
+  - Produção: benchmark bykoji pelo caminho atual **4/4, zero erros, p50 4,374 s, máx. 4,418 s**; 4 turnos novos, todos do caminho atual, nenhum da fila nova; nenhuma fila por empresa no Redis; 2 workers vivos; `/health` interno com a fila zerada, público só `{"ok":true}`.
+  - Novidades em produção: `aguardando=talvez` → 400 `campo: aguardando`; PATCH de fallback `"/"`, `"curto demais"` e `"123456789012345678"` no agente de teste → 400 `campo: fallback`, valor inalterado; `circuito/fechar` no agente de teste → 200 `fechado`; mesmo agente por outro tenant → 404.
+  - Segurança: `circuito/fechar`, admin e docs públicos → 404; interno com `X-Forwarded-For` → 404; sem chave → 401.
+  - Logs gateway/worker/agendador/Postgres/Redis/Caddy: **zero ocorrências** de 10 segredos. Modos: só `postman_teste/ag_dba38…` em live/dry.
+- Volta: recriar gateway, workers e agendador com `gateway:a0128b4` (mesmo schema 15; sem migração neste bloco).
+- Próximo bloco (aguarda validação do Marco): 4 — callback assíncrono com provedor simulado (item D).

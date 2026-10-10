@@ -4,7 +4,7 @@ Banco `gateway`, Postgres próprio do gateway. O backend do painel autentica seu
 
 **Legenda:** ✅ implantado e em produção · ⏳ planejado, **não disponível** (a fase está indicada). Não construir telas sobre rotas ⏳.
 
-**Publicação atual (09/10/2026):** imagem `gateway:a0128b4`, migrações 001–015, serviço em mock/dry. Processos: recepção (`gateway`), 2 `worker` e 1 `agendador`, com a **fila durável desligada** (`FILA_DURAVEL=off`): quem processa ainda é o agendador da recepção. Tudo marcado ✅ abaixo foi conferido no serviço em produção. Histórico em `PROGRESS.md`.
+**Publicação atual (10/10/2026):** imagem `gateway:2efffd1`, migrações 001–015, serviço em mock/dry. Processos: recepção (`gateway`), 2 `worker` e 1 `agendador`, com a **fila durável desligada** (`FILA_DURAVEL=off`): quem processa ainda é o agendador da recepção. Tudo marcado ✅ abaixo foi conferido no serviço em produção. Histórico em `PROGRESS.md`.
 
 Rotas relativas a `/admin/v1`, salvo indicação de rota absoluta. Escritas confirmadas gravam auditoria na mesma transação, sem corpos nem segredos. Suspender/pausar usa PATCH.
 
@@ -80,6 +80,8 @@ Os códigos são fixos e são os únicos emitidos; o painel decide pelo código 
 
 **Fallback padrão da plataforma** (quem não define o próprio): “Tive uma instabilidade agora. Pode repetir sua mensagem em instantes? 🙏” — sem prometer retorno. A migração 015 trocou para ele só os textos antigos gravados; textos personalizados não mudam.
 
+**Regra do `fallback` ✅ (agente e config da empresa):** pelo menos **15 caracteres e uma letra**; vazio ou `null` = usa o padrão (herda). Fora da regra → 400 `VALIDATION_ERROR` com `campo: fallback`. Registros já gravados fora da regra não são alterados nem impedem outras edições do agente.
+
 **Módulos:** `GET /modulos` devolve nome, migrações, rotas e escopos. Registro atual: `catalogo` (busca/contexto) e `pedidos` (interface reservada, sem ferramentas até a Fase 4). PUT do módulo exige `{ "ativo":true, "config":{} }` e altera só o tenant indicado. Módulo desabilitado → 404 nas rotas do módulo.
 
 ## 5. Modelos de agente
@@ -102,7 +104,7 @@ POST exige `id`, `nome`; aceita `tenant_id` opcional (ausente/nulo = global), `t
 | POST | `/tenants/{tenant}/agentes/{agente}/testar` | ✅ Teste sintético; mock ou provedor real (`usar_provedor_real`) |
 | POST | `/tenants/{tenant}/agentes/{agente}/simular` | ✅ Conversa de teste; IA real permitida com envio dry |
 | GET | `/tenants/{tenant}/agentes/{agente}/circuito` | ✅ Estado do circuito do Skyone |
-| POST | `/tenants/{tenant}/agentes/{agente}/circuito/fechar` | ⏳ Fase 0.6 |
+| POST | `/tenants/{tenant}/agentes/{agente}/circuito/fechar` | ✅ Fechamento manual, auditado |
 
 **Criação:** `{ "modelo_id":"assistente_generico", "nome":"Assistente" }`. Nasce em rascunho, provedor mock. O detalhe traz `configuracao_efetiva` com `origem_config` (plataforma/modelo/tenant/agente).
 
@@ -148,7 +150,11 @@ Exige canal API do mesmo tenant ligado ao agente. **Aceita `agente_mode=mock` ou
 
 ### Circuito
 
-Estado persistente por agente: três falhas consecutivas em cinco minutos abrem por 60 s; depois, uma chamada de prova. Sucesso fecha; falha da prova reabre. Chamadas bloqueadas não chegam ao Skyone e usam fallback (`SKYONE_CIRCUIT_OPEN`). `GET .../circuito` → `estado`, `falhas`, `aberto_ate`, `ultimo_alerta`, isolado por tenant. Após corrigir a credencial, aguardar o período aberto antes de testar de novo. Fechamento manual, workers, justiça de filas e garantias completas de INV15 ficam na Fase 0.6. Não há retry automático.
+Estado persistente por agente: três falhas consecutivas em cinco minutos abrem por 60 s; depois, uma chamada de prova. Sucesso fecha; falha da prova reabre. Chamadas bloqueadas não chegam ao Skyone e usam fallback (`SKYONE_CIRCUIT_OPEN`). `GET .../circuito` → `estado`, `falhas`, `aberto_ate`, `ultimo_alerta`, isolado por tenant. Após corrigir a credencial, aguardar o período aberto antes de testar de novo. **Fechamento manual ✅:** `POST .../circuito/fechar` (sem corpo; exige `X-Actor`) zera as falhas, libera as chamadas e devolve o estado (`fechado`); auditado como `agente.circuito_fechado`. Agente de outro tenant → 404.
+
+**Nova tentativa ✅:** uma única, 2 s depois, só para **falha de conexão ou HTTP 502/503/504 antes de qualquer resposta** e apenas se couber no `timeout_s`. Nunca em tempo esgotado nem em outros erros. Cada tentativa passa pela cota por URL; para o circuito conta uma chamada só.
+
+**Limites compartilhados (fila durável, ativos quando `FILA_DURAVEL=on`):** `max_lotes_simultaneos` por empresa e `max_concorrencia` por agente valem somados entre todos os workers (vagas no Redis). Empresa no limite não atrasa as outras (INV07).
 
 ## 7. Skyone: autenticação Basic, limite por URL e credencial recusada ✅
 
@@ -235,7 +241,7 @@ O pacote ao agente inclui só unidades ativas do tenant, com `id`, `nome`, `aber
 | GET | `/tenants/{tenant}/eventos?desde=` | ✅ Polling |
 | GET | `/tenants/{tenant}/eventos/cursor` | ✅ Último ID de evento confirmado do tenant, sem listar histórico |
 
-**Lista:** filtros opcionais `agente`, `canal`, `status=ativa|pausada`, `busca` (substring literal de nome/telefone), `desde` (ISO com fuso; filtra `atualizado_em`). `limite` 1–100, `cursor=<conversation_id>`, ordem crescente por ID; resposta `itens`/`proximo_cursor`. Agente/canal de outro tenant → 404. `ativa` = bot sem pausa vigente; encerramento/desfecho na Fase 3. Itens trazem agente/canal, nome/telefone, última mensagem/horário, `bot_pausado_ate`, **`aguardando_atendente_desde`** e **`aguardando_motivo`**. Filtro opcional **`aguardando=true|false`** (outro valor → 400 `VALIDATION_ERROR`; hoje com `campo: corpo`, passa a `campo: aguardando` no bloco 3 da Fase 0.6).
+**Lista:** filtros opcionais `agente`, `canal`, `status=ativa|pausada`, `busca` (substring literal de nome/telefone), `desde` (ISO com fuso; filtra `atualizado_em`). `limite` 1–100, `cursor=<conversation_id>`, ordem crescente por ID; resposta `itens`/`proximo_cursor`. Agente/canal de outro tenant → 404. `ativa` = bot sem pausa vigente; encerramento/desfecho na Fase 3. Itens trazem agente/canal, nome/telefone, última mensagem/horário, `bot_pausado_ate`, **`aguardando_atendente_desde`** e **`aguardando_motivo`**. Filtro opcional **`aguardando=true|false`** (outro valor → 400 `VALIDATION_ERROR` com `campo: aguardando`).
 
 **Aguardando atendente ✅:** a conversa que recebe fallback por erro do agente, tempo esgotado ou circuito aberto fica marcada com `aguardando_atendente_desde` (instante da primeira marcação) e `aguardando_motivo` = `erro_agente | tempo_esgotado | circuito_aberto | entrega_incerta`, e gera o evento **`conversa.aguardando_atendente`** no `/eventos` (só na primeira marcação; `alvo` = conversa). A marcação sai quando um atendente **assume, devolve ou responde** a conversa (os dois campos voltam a `null`). `entrega_incerta` só ocorre no caminho da fila durável (parte da resposta presa em envio quando o worker caiu; nunca é reenviada; evento `mensagem.entrega_incerta`).
 
