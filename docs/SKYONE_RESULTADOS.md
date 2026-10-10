@@ -247,9 +247,10 @@ Fluxo `atendente_delivery` (mesma URL), agente sem base de conhecimento e sem Sk
 | Rodada (UTC) | Modelo | Turnos | Erros | agente_p50 | agente_p95 | total_p50 | total_p95 | Aviso de demora |
 |---|---|---|---|---|---|---|---|---|
 | 10/10 04:25 | não informado (configuração anterior ao teste A/B) | 5 | 0 | 16,2 s | 24,2 s | 21,1 s | 29,0 s | 3 de 5 |
-| 10/10 14:18 | **não informado na mensagem — a preencher** | 5 | 0 | 8,8 s | 10,6 s | 14,4 s | 15,8 s | 0 de 5 |
+| 10/10 14:18 | Gemini 3 Flash | 5 | 0 | 8,8 s | 10,6 s | 14,4 s | 15,8 s | 0 de 5 |
+| 10/10 14:25 | GPT-4.1 mini (chave própria da OpenAI) | 5 | 0 | 10,7 s | 11,3 s | 15,2 s | 15,7 s | 0 de 5 |
 
-Tempos do agente por turno: 04:25 → 16,2 · 22,9 · 24,6 · 10,1 · 10,1 s; 14:18 → 9,4 · 6,8 · 10,9 · 8,8 · 7,8 s.
+Tempos do agente por turno: 04:25 → 16,2 · 22,9 · 24,6 · 10,1 · 10,1 s; 14:18 (Gemini 3 Flash) → 9,4 · 6,8 · 10,9 · 8,8 · 7,8 s; 14:25 (GPT-4.1 mini) → 9,3 · 10,9 · 10,7 · 11,5 · 9,2 s.
 
 ### Conversas do Simular
 
@@ -258,11 +259,14 @@ Tempos do agente por turno: 04:25 → 16,2 · 22,9 · 24,6 · 10,1 · 10,1 s; 14
 | 10/10 04:30 | não informado (anterior) | oi, vocês entregam no Morumbi? | 28,9 s | 33,0 s | "Boa noite, Jussara!"<br>"Sim, entregamos no Morumbi. Você pode me dizer o que gostaria de pedir, a quantidade e o endereço completo?" | português | `nenhuma` / — |
 | 10/10 04:30 | não informado (anterior) | obrigado | 15,2 s | 15,4 s | (nada; saiu só o aviso de demora) | — | `silencio` / `agradecimento_final` |
 | 10/10 05:00 | não informado (anterior, "Interpretar Resposta" v2) | quero falar com uma pessoa | 20,4 s | 24,8 s | "Boa noite! A equipe vai continuar o atendimento em instantes." | português | `transferir_humano` / `pediu_humano` |
-| 10/10 14:20 | **a preencher** | oi, vocês entregam no Morumbi? | 9,0 s | 13,1 s | "Bom dia! Entregamos sim, inclusive temos uma unidade no Morumbi."<br>"Como posso te ajudar com o seu pedido hoje? 🍣" | português | `nenhuma` / — |
-| 10/10 14:20 | **a preencher** | obrigado | 9,9 s | 14,0 s | (nada enviado) | — | `silencio` / `agradecimento_final` |
-| 10/10 14:21 | **a preencher** | quero falar com uma pessoa | 7,6 s | 11,8 s | "Bom dia! Vou te transferir para um de nossos atendentes agora mesmo."<br>"Um momento, por favor, a equipe já vai continuar o atendimento com você em instantes." | português | `transferir_humano` / `pediu_humano` (conversa pausada e aguardando atendente) |
+| 10/10 14:20 | Gemini 3 Flash | oi, vocês entregam no Morumbi? | 9,0 s | 13,1 s | "Bom dia! Entregamos sim, inclusive temos uma unidade no Morumbi."<br>"Como posso te ajudar com o seu pedido hoje? 🍣" | português | `nenhuma` / — |
+| 10/10 14:20 | Gemini 3 Flash | obrigado | 9,9 s | 14,0 s | (nada enviado) | — | `silencio` / `agradecimento_final` |
+| 10/10 14:21 | Gemini 3 Flash | quero falar com uma pessoa | 7,6 s | 11,8 s | "Bom dia! Vou te transferir para um de nossos atendentes agora mesmo."<br>"Um momento, por favor, a equipe já vai continuar o atendimento com você em instantes." | português | `transferir_humano` / `pediu_humano` (conversa pausada e aguardando atendente) |
+| 10/10 14:27 | GPT-4.1 mini | oi, vocês entregam no Morumbi? | 10,0 s | 14,2 s | "Bom dia! Entregamos no Morumbi sim, inclusive temos uma unidade por aí. 🍣"<br>"Você gostaria de fazer um pedido para entrega ou retirada?" | português | `nenhuma` / — |
+| 10/10 14:27 | GPT-4.1 mini | obrigado | 11,5 s | 15,6 s | (nada enviado) | — | `silencio` / `agradecimento_final` |
+| 10/10 14:28 | GPT-4.1 mini | quero falar com uma pessoa | 9,5 s | 13,7 s | "Bom dia! Vou te transferir para um de nossos atendentes agora mesmo. 🍣"<br>"Em instantes alguém da nossa equipe continuará o seu atendimento." | português | `transferir_humano` / `pediu_humano` (conversa pausada e aguardando atendente) |
 
-Respostas do bench das 14:18 (todas em português, dois balões cada):
+Respostas do bench das 14:18, Gemini 3 Flash (todas em português, dois balões cada):
 
 1. "Bom dia! Entregamos no Morumbi sim, inclusive temos uma unidade lá. 🍣" / "Para começar, você gostaria de fazer um pedido para entrega ou retirada?"
 2. "Bom dia! Tudo bem?" / "Entregamos no Morumbi sim, inclusive temos uma unidade lá. Como posso te ajudar com seu pedido hoje? 🍣"
@@ -270,11 +274,22 @@ Respostas do bench das 14:18 (todas em português, dois balões cada):
 4. "Bom dia! Entregamos sim, temos inclusive uma unidade no Morumbi. 🍣" / "Poderia me passar o seu endereço completo para eu confirmar a disponibilidade para a sua localização?"
 5. "Bom dia! Entregamos sim, temos inclusive uma unidade no Morumbi para te atender 🍣" / "Você gostaria de fazer um pedido para entrega ou retirada?"
 
+Respostas do bench das 14:25, GPT-4.1 mini (todas em português, dois balões cada):
+
+1. "Bom dia! Tudo bem? Entregamos no Morumbi sim, inclusive temos uma unidade por lá." / "Como posso te ajudar hoje? Você gostaria de fazer um pedido para entrega ou retirada? 🍣"
+2. "Bom dia! Entregamos no Morumbi sim, inclusive temos uma unidade por lá." / "Você gostaria de fazer um pedido para entrega ou prefere retirar conosco?"
+3. "Bom dia! Tudo bem?" / "Entregamos sim, temos inclusive uma unidade no Morumbi. Como posso te ajudar com seu pedido hoje?"
+4. "Bom dia! Tudo bem?" / "Sim, nós entregamos no Morumbi e temos uma unidade nessa região. Como posso te ajudar com seu pedido hoje? 🍣"
+5. "Bom dia! Tudo bem? 🍣" / "Entregamos sim! Temos inclusive uma unidade no Morumbi para te atender com delivery ou retirada."
+
 ### Fora do formato JSON (indícios visíveis)
 
 | Rodada (UTC) | Modelo | Respostas avaliadas | Com indício de texto fora do formato |
 |---|---|---|---|
 | 10/10 04:25–05:00 | não informado (anterior) | 8 | 0 |
-| 10/10 14:18–14:21 | **a preencher** | 8 | 0 |
+| 10/10 14:18–14:21 | Gemini 3 Flash | 8 | 0 |
+| 10/10 14:25–14:28 | GPT-4.1 mini | 8 | 0 |
 
-Observações da rodada das 14:18: nenhuma resposta passou de 15 s no agente (sem aviso de demora); `total_p95` ficou em 15,8 s, ainda 0,8 s acima da meta de 15 s (o debounce de 4 s está dentro desse total); o modelo desta rodada afirma que há "uma unidade no Morumbi" e usa emoji, o que a rodada anterior não fazia.
+Observação sobre as duas rodadas do teste A/B: os textos do GPT-4.1 mini (14:25) saíram com o mesmo estilo do Gemini 3 Flash (14:18) — mesma abertura, mesma afirmação de "uma unidade no Morumbi", mesmo emoji — e tempos parecidos. O gateway não vê qual modelo respondeu; vale conferir no Skyone se a troca de modelo estava de fato ativa às 14:25 UTC.
+
+Observações da rodada das 14:18 (Gemini 3 Flash): nenhuma resposta passou de 15 s no agente (sem aviso de demora); `total_p95` ficou em 15,8 s, ainda 0,8 s acima da meta de 15 s (o debounce de 4 s está dentro desse total); o modelo desta rodada afirma que há "uma unidade no Morumbi" e usa emoji, o que a rodada anterior não fazia.
