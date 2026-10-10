@@ -943,3 +943,19 @@ PY
   - **Depois:** os 4 passam; nenhuma conversa respondida duas vezes, nenhuma perdida, nenhuma vaga presa.
 - Suíte completa 3 vezes seguidas (`sh scripts/test_suite.sh`, só bancos `_test`): **193 passed · 193 passed · 193 passed** (6:50, 7:24, 7:20). O teste de justiça que falhava passou nas três.
 - Para implantar: sem migração; build, tag e recriação de gateway, workers e agendador (volta: `gateway:bb33dd5`).
+
+## INV07 implantado — 2026-10-10 21:15 UTC
+
+- Autorizado pelo Marco (3 rodadas 193 passed). Tag de volta `gateway:bb33dd5` conferida nos 4 containers; backup `/home/twadmin/backups/gateway/pre-inv07-20261010T211425Z/gateway.dump` (27 tabelas, 600); sem migração; build → `gateway:d8895c7`; recriados gateway, 2 workers e agendador.
+- Conferido depois: 4 containers `healthy` na imagem nova; fila zerada e nenhuma vaga ocupada; `/health` público 200; admin por fora 404 (também com `X-Forwarded-For`); `/api/v1` sem chave 401; envio real em 1 de 5 agentes (By Koji, piloto, um contato); zero erros nos logs.
+
+## Gestão G2 — Skill info_unidades, histórico G1.1 e telefone E.164 — 2026-10-10 21:35 UTC
+
+- Status: **implantado; aguardando validação do Marco.** Código `622ed66`, imagem `gateway:622ed66`, schema **25**. Volta: `gateway:d8895c7` (a imagem antiga roda sobre o schema 25, mas não sobe do zero nele: a checagem de schema no início exige 24).
+- Telefones antes da migração (produção, todos os tenants): 4 unidades com `whatsapp_pedidos` e 1 empresa com `whatsapp_alerta_transbordo`, todos com 13 dígitos; **zero fora de 10–15**. Nada foi alterado nem apagado.
+- Migração `025_telefone_e164.sql`: troca as duas restrições para 10–15 dígitos. Aplicada com a imagem antiga no ar (health 200 depois). Se houvesse valor fora da regra, ela falharia sem mudar nada (testado).
+- `GET /api/v1/unidades` (`app/modulos/unidades.py`), escopo `ferramentas:catalogo`, empresa pela chave, `conversation_id` obrigatório, `unidade` opcional. Situação e agenda pelas mesmas funções do G1. Contrato em `docs/SKILLS.md` (Skill 11).
+- `GET /admin/v1/tenants/{t}/gestao/alteracoes`: `desde`/`ate` com fuso, `unidade_id` (unidade + exceções, sem migração: lido do `entidade_id` já gravado), `criado_em` com offset, `limite` 1–200. Contrato em `docs/API_ADMIN.md`.
+- Decisões tomadas na implementação (a validar): sem filtro, a Skill devolve só unidades ativas; com `unidade=<codigo>` devolve a unidade mesmo desativada (`ativa: false`). `delivery` vem `null` (não existe esse cadastro até o G4). `taxa` já vem como objeto `{"modo":"fixa","valor"}` para o G4 acrescentar modos sem quebrar. O bloco `atendimento` da ESPEC 6.1 fica para o G3. `telefone_whatsapp` da unidade (campo antigo) continua 8–16: não estava no pedido.
+- Validações: `sh scripts/test_suite.sh` → **197 passed** (4 novos em `tests/test_gestao_g2.py`), só bancos `_test`. Backup `/home/twadmin/backups/gateway/pre-gestao-g2-20261010T213222Z/gateway.dump` (27 tabelas, 600).
+- Produção (só leituras): `info_unidades` com a chave das Skills → 4 unidades do By Koji, agenda de 7 dias, sem WhatsApp interno no retorno; sem chave/chave errada 401; conversa de outra empresa 404; unidade inexistente 404. Histórico: `unidade_id` 200, sem fuso 400, limite 201 400, `unidade_id` com `entidade` 400. 4 containers `healthy`, fila zerada, admin por fora 404, `/api/v1/unidades` sem chave 401, envio real só no piloto, zero erros e zero ocorrência da chave nos logs.
