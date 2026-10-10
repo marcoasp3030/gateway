@@ -150,10 +150,12 @@ return 1
             if not await self.permitido(tenant,conversa,agente_id,repo,configuracoes): return False
             conv=await repo.obter(tenant,'conversas',conversa)
             canal,empresa,cfg=await self.contexto(tenant,conv['canal_id'],repo,configuracoes)
+            marca=(None,None)
             if cfg['send_mode']=='live':
                 if canal['tipo']!='uazapi': raise ValueError('Envio live deste canal ainda não implementado')
-                await uazapi.enviar(self.http,self.cofre,tenant,canal,conv['telefone'],texto)
-            await conn.execute("INSERT INTO mensagens(tenant_id,conversation_id,direcao,origem,conteudo,processada_em) VALUES ($1,$2,'saida','bot',$3,now())",tenant,conversa,texto)
+                marca=uazapi.marca_do_envio(canal['id'],await uazapi.enviar(self.http,self.cofre,tenant,canal,conv['telefone'],texto))
+            await conn.execute("""INSERT INTO mensagens(tenant_id,conversation_id,direcao,origem,conteudo,processada_em,message_id,meta)
+                VALUES ($1,$2,'saida','bot',$3,now(),$4,$5::jsonb) ON CONFLICT(tenant_id,message_id) DO NOTHING""",tenant,conversa,texto,*marca)
             await conn.execute('UPDATE conversas SET atualizado_em=now() WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa)
             await auditar(conn,tenant,'sistema','mensagem.enviada',conversa)
         return True
@@ -339,15 +341,16 @@ return 1
                 canal,empresa,efetiva=await self.contexto(tenant,conv['canal_id'],repo,configuracoes)
                 await conn.execute('''INSERT INTO mensagens(tenant_id,conversation_id,direcao,origem,conteudo,processada_em,turno_request_id,parte,entrega)
                     VALUES ($1,$2,'saida','bot',$3,now(),$4,$5,'enviando')''',tenant,conversa,texto,rid,parte)
+                marca=(None,None)
                 try:
                     if efetiva['send_mode']=='live':
                         if canal['tipo']!='uazapi': raise ValueError('Envio live deste canal ainda não implementado')
-                        await uazapi.enviar(self.http,self.cofre,tenant,canal,conv['telefone'],texto)
+                        marca=uazapi.marca_do_envio(canal['id'],await uazapi.enviar(self.http,self.cofre,tenant,canal,conv['telefone'],texto))
                 except Exception:
                     # Não se sabe se o canal entregou: não reenviar, revisão humana.
                     await self._incerta(conn,tenant,conversa,rid,parte);raise
                 async with conn.transaction():
-                    await conn.execute("UPDATE mensagens SET entrega='enviada',enviada_em=now() WHERE tenant_id=$1 AND turno_request_id=$2 AND parte=$3",tenant,rid,parte)
+                    await conn.execute("UPDATE mensagens SET entrega='enviada',enviada_em=now(),message_id=$4,meta=$5::jsonb WHERE tenant_id=$1 AND turno_request_id=$2 AND parte=$3",tenant,rid,parte,*marca)
                     await conn.execute('UPDATE conversas SET atualizado_em=now() WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa)
                     await auditar(conn,tenant,'sistema','mensagem.enviada',conversa)
                 return 'enviada'

@@ -268,7 +268,7 @@ def test_varredura_recupera_o_que_o_webhook_nao_entregou(monkeypatch):
                 da_busca('texto',70),                                   # já recebida pelo webhook
                 da_busca('audio_ptt',60),                               # perdida → recuperar
                 da_busca('localizacao_ao_vivo',50),                     # perdida → recuperar
-                da_busca('atendente_celular',45),                       # "minha": a varredura não toca
+                da_busca('texto',47,messageid='LIGACAO1',fromMe=True,messageType='call',source='call_log'),  # registro de ligação
                 da_busca('texto',40,messageid='GRUPO1',chatid='120363000000000000@g.us',isGroup=True),
                 da_busca('texto',35,messageid='LID1',chatid='100000000000009@lid'),   # sem telefone identificável
                 da_busca('texto',5,messageid='RECENTE1'),               # dentro da carência: o webhook ainda pode chegar
@@ -276,7 +276,7 @@ def test_varredura_recupera_o_que_o_webhook_nao_entregou(monkeypatch):
             ]
             agendados=len(fila.agendados)
             r=await v.rodar()
-            assert (r['canais'],r['recuperadas'],r['sem_telefone'],r['erros'])==(1,2,1,0)
+            assert (r['canais'],r['recuperadas'],r['sem_telefone'],r['do_atendente'],r['ambiguas'],r['erros'])==(1,2,1,0,0,0)
             linhas=await conn.fetch('SELECT tipo,origem,origem_recebimento,processada_em,enviada_em,criado_em FROM mensagens WHERE conversation_id=$1 ORDER BY id',conv)
             assert [(l['tipo'],l['origem'],l['origem_recebimento']) for l in linhas]==[('texto','cliente','webhook'),('audio','cliente','varredura'),('localizacao','cliente','varredura')]
             # Entram na ordem em que foram enviadas, com a hora do provedor, e abrem turno normalmente.
@@ -296,6 +296,27 @@ def test_varredura_recupera_o_que_o_webhook_nao_entregou(monkeypatch):
             assert (await client.post(f'/webhooks/uazapi/{canal}',params={'s':segredo},json=atrasado)).json()['duplicada']
             assert await conn.fetchval('SELECT count(*) FROM mensagens WHERE conversation_id=$1',conv)==4
 
+            # Mensagens "minhas" (fromMe). A busca não diz se saíram pela API; vale o id guardado no envio.
+            total=lambda: conn.fetchval('SELECT count(*) FROM mensagens WHERE conversation_id=$1',conv)
+            pausa=lambda: conn.fetchval('SELECT bot_pausado_ate FROM conversas WHERE conversation_id=$1',conv)
+            # a) enviada pelo bot, id guardado → já está no gateway: não duplica nem pausa.
+            await conn.execute("INSERT INTO mensagens(tenant_id,conversation_id,direcao,origem,conteudo,processada_em,message_id) VALUES ('alpha',$1,'saida','bot','resposta',now(),$2)",conv,f'{canal}:BOTENVIO0001')
+            prov.mensagens.append(da_busca('atendente_celular',30,messageid='BOTENVIO0001'))
+            antes=await total();r=await v.rodar()
+            assert (r['recuperadas'],r['do_atendente'],r['ambiguas'])==(0,0,0) and await total()==antes and await pausa() is None
+            # b) envio do gateway sem id do provedor perto do mesmo instante → ambígua: não grava nem pausa.
+            await conn.execute("INSERT INTO mensagens(tenant_id,conversation_id,direcao,origem,conteudo,processada_em,meta) VALUES ('alpha',$1,'saida','bot','sem id',now(),'{\"envio_sem_id\": true}')",conv)
+            prov.mensagens.append(da_busca('atendente_celular',28,messageid='SEMORIGEM0001'))
+            r=await v.rodar();assert (r['recuperadas'],r['ambiguas'])==(0,1) and await pausa() is None
+            await conn.execute("DELETE FROM mensagens WHERE conversation_id=$1 AND meta->>'envio_sem_id'='true'",conv)
+            # c) sem nenhum envio do gateway correspondente → atendente pelo celular: humano e pausa (INV03).
+            r=await v.rodar();assert (r['recuperadas'],r['do_atendente'],r['ambiguas'])==(1,1,0)
+            m=await conn.fetchrow('SELECT origem,direcao,origem_recebimento,conteudo FROM mensagens WHERE conversation_id=$1 ORDER BY id DESC LIMIT 1',conv)
+            assert tuple(m)==('humano','saida','varredura','Olá, tudo bem?') and await pausa() is not None
+            assert await conn.fetchval("SELECT count(*) FROM mensagens WHERE conversation_id=$1 AND message_id LIKE '%LIGACAO1'",conv)==0
+            r=await v.rodar();assert r['recuperadas']==0
+            base_msgs=await total()
+
             # Estado da conexão: alerta uma vez por mudança.
             prov.estado='disconnected';await v.rodar();await v.rodar()
             assert await conn.fetchval('SELECT status_conexao FROM tenant_canais WHERE id=$1',canal)=='desconectado'
@@ -305,7 +326,7 @@ def test_varredura_recupera_o_que_o_webhook_nao_entregou(monkeypatch):
             # Evento "connection" do webhook também atualiza, sem virar mensagem.
             r=await client.post(f'/webhooks/uazapi/{canal}',params={'s':segredo},json={'EventType':'connection','instance':{'status':'disconnected'},'token':'tok-1'})
             assert r.json()=={'ok':True,'ignorado':True} and await auditoria('canal.desconectado')==2
-            assert await conn.fetchval('SELECT count(*) FROM mensagens WHERE conversation_id=$1',conv)==4
+            assert await total()==base_msgs
             # Canal sem credencial, inativo ou de outro tipo não é varrido; falha do provedor não derruba a rodada.
             await client.patch(f'/admin/v1/tenants/alpha/canais/{canal}',json={'ativo':False})
             assert (await v.rodar())['canais']==0
@@ -314,4 +335,42 @@ def test_varredura_recupera_o_que_o_webhook_nao_entregou(monkeypatch):
             r=await v.rodar();assert (r['canais'],r['erros'],r['recuperadas'])==(1,1,0)
             # Nenhuma chamada de envio foi feita pela varredura.
             assert not [c for c in prov.chamadas if c[1] in ('/send/text','/message/presence')]
+    banco(cenario)
+
+
+def test_id_do_envio_e_marca():
+    assert uazapi.id_do_envio({'messageid':'3EB0ABCDEF0123456789','id':'5511900000002:3EB0ABCDEF0123456789','status':'Sent'})=='3EB0ABCDEF0123456789'
+    assert uazapi.id_do_envio({'id':'5511900000002:3EB0ABCDEF0123456789'})=='3EB0ABCDEF0123456789'
+    assert uazapi.id_do_envio({'message':{'messageid':'A5AC313F195EBDC8A5E8C34EE6BB4712'},'response':{'status':'success'}})=='A5AC313F195EBDC8A5E8C34EE6BB4712'
+    for sem in ({'response':'ok'},{'messageid':''},{'messageid':'curto'},{'messageid':'com espaço e ; injeção'},[],None): assert uazapi.id_do_envio(sem) is None
+    assert uazapi.marca_do_envio('can_1','ABCDEFGH1')==('can_1:ABCDEFGH1',None)
+    assert uazapi.marca_do_envio('can_1',None)==(None,'{"envio_sem_id": true}')
+
+
+@pytest.mark.skipif(not DSN,reason='Postgres de teste obrigatório')
+def test_envio_ao_vivo_guarda_o_id_do_provedor(monkeypatch):
+    async def cenario(conn):
+        await migrar.aplicar(conn)
+        app,client=preparar(conn);fila=RedisFila();app.state.redis=fila;app.state.pipeline.redis=fila
+        async def livre(url): return None
+        monkeypatch.setattr(uazapi.seguranca,'validar_url_saida',livre)
+        respostas=[{'messageid':'3EB0ENVIODOBOT000001','id':'5511900000002:3EB0ENVIODOBOT000001','response':{'status':'success'}},{'response':{'status':'success'}}]
+        app.state.pipeline.http=httpx.AsyncClient(transport=httpx.MockTransport(lambda q: httpx.Response(200,json=respostas.pop(0))))
+        async with client:
+            a,_=await criar(client)
+            r=await client.post('/admin/v1/tenants/alpha/canais',json={'nome':'WhatsApp','tipo':'uazapi','agente_id':a,
+                'credenciais':{'base_url':'https://instancia.exemplo.com','token':'tok-1'}})
+            canal=r.json()['id'];segredo=parse_qs(urlsplit(r.json()['webhook_url']).query)['s'][0]
+            await ativo(client,'alpha',a,canal)
+            p=fx('texto');p['message']['messageTimestamp']=int(time.time()*1000)
+            conv=(await client.post(f'/webhooks/uazapi/{canal}',params={'s':segredo},json=p)).json()['conversation_id']
+            await conn.execute("UPDATE agentes SET send_mode='live' WHERE id=$1",a);app.state.configuracoes.invalidar('alpha')
+            assert await app.state.pipeline.enviar('alpha',conv,a,'primeira') and await app.state.pipeline.enviar('alpha',conv,a,'segunda')
+            linhas=await conn.fetch("SELECT conteudo,message_id,meta FROM mensagens WHERE conversation_id=$1 AND origem='bot' ORDER BY id",conv)
+            assert (linhas[0]['message_id'],linhas[0]['meta'])==(f'{canal}:3EB0ENVIODOBOT000001',None)
+            assert linhas[1]['message_id'] is None and json.loads(linhas[1]['meta'])=={'envio_sem_id':True}
+            # O webhook do próprio envio (wasSentByApi) continua ignorado e não pausa.
+            eco=fx('atendente_celular');eco['message'].update(wasSentByApi=True,messageid='3EB0ENVIODOBOT000001')
+            assert (await client.post(f'/webhooks/uazapi/{canal}',params={'s':segredo},json=eco)).json()['ignorado']
+            assert await conn.fetchval('SELECT bot_pausado_ate FROM conversas WHERE conversation_id=$1',conv) is None
     banco(cenario)

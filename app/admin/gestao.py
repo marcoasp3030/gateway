@@ -184,10 +184,11 @@ async def mensagem(request: Request, tenant: str, conv: str, body: MensagemHuman
             canal, empresa, cfg = await state.pipeline.contexto(tenant, conversa['canal_id'], repo, Configuracoes(repo))
             if not canal['ativo'] or empresa['status']!='ativo': raise HTTPException(409, 'CHANNEL_UNAVAILABLE')
             await conn.execute('UPDATE conversas SET bot_pausado_ate=now()+make_interval(mins=>$3),atualizado_em=now() WHERE tenant_id=$1 AND conversation_id=$2',tenant,conv,cfg['pause_minutes'])
+            marca = (None, None)
             if cfg['send_mode']=='live':
                 if canal['tipo']!='uazapi': raise HTTPException(501, 'Envio deste canal não implementado')
-                await uazapi.enviar(state.http, state.cofre, tenant, canal, conversa['telefone'], body.texto)
-            msgid = await conn.fetchval("INSERT INTO mensagens(tenant_id,conversation_id,direcao,origem,conteudo,processada_em) VALUES ($1,$2,'saida','humano',$3,now()) RETURNING id",tenant,conv,body.texto)
+                marca = uazapi.marca_do_envio(canal['id'], await uazapi.enviar(state.http, state.cofre, tenant, canal, conversa['telefone'], body.texto))
+            msgid = await conn.fetchval("INSERT INTO mensagens(tenant_id,conversation_id,direcao,origem,conteudo,processada_em,message_id,meta) VALUES ($1,$2,'saida','humano',$3,now(),$4,$5::jsonb) RETURNING id",tenant,conv,body.texto,*marca)
             await auditar(conn, tenant, actor, 'mensagem.humana', conv)
     except HTTPException:
         raise

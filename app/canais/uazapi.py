@@ -154,11 +154,34 @@ async def _chamar(client,cofre,tenant_id,canal,metodo,caminho,corpo=None,timeout
     return response
 
 
+def id_do_envio(corpo):
+    """messageid devolvido pelo envio (o mesmo que aparece no webhook e na busca). None se não vier."""
+    if not isinstance(corpo,dict): return None
+    for origem in (corpo,corpo.get('message'),corpo.get('response')):
+        if not isinstance(origem,dict): continue
+        for campo in ('messageid','messageId','id'):
+            valor=origem.get(campo)
+            if isinstance(valor,str) and valor.strip():
+                # "id" vem como "<dono>:<messageid>".
+                valor=valor.strip().split(':')[-1] if campo=='id' else valor.strip()
+                if 8<=len(valor)<=200 and all(c.isalnum() or c in '-_.' for c in valor): return valor
+    return None
+
+
 async def enviar(client,cofre,tenant_id,canal,telefone,texto):
-    """POST /send/text {number,text} (documentação uazapi). Erro HTTP sobe para o pipeline."""
-    try: await _chamar(client,cofre,tenant_id,canal,'POST','/send/text',{'number':telefone,'text':texto})
+    """POST /send/text {number,text} (documentação uazapi). Erro HTTP sobe para o pipeline.
+    Devolve o messageid do provedor (ou None), para a varredura reconhecer o que o bot enviou."""
+    try: response=await _chamar(client,cofre,tenant_id,canal,'POST','/send/text',{'number':telefone,'text':texto})
     except ValueError as erro:
         raise ValueError('Envio recusado' if 'HTTP' in str(erro) else str(erro)) from None
+    try: return id_do_envio(response.json())
+    except ValueError: return None
+
+
+def marca_do_envio(canal_id,provedor_id):
+    """(message_id, meta) da mensagem enviada ao vivo: com o id do provedor, ou marcada como sem id."""
+    if provedor_id: return f'{canal_id}:{provedor_id}',None
+    return None,'{"envio_sem_id": true}'
 
 
 async def digitando(client,cofre,tenant_id,canal,telefone,duracao_ms=10000,presenca='composing'):
