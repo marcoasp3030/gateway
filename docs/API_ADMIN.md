@@ -4,7 +4,7 @@ Banco `gateway`, Postgres próprio do gateway. O backend do painel autentica seu
 
 **Legenda:** ✅ implantado e em produção · ⏳ planejado, **não disponível** (a fase está indicada). Não construir telas sobre rotas ⏳.
 
-**Publicação atual (10/10/2026):** imagem `gateway:9a77e6d`, migrações 001–023, serviço em mock/dry. Processos: recepção (`gateway`), 2 `worker` e 1 `agendador`, com a **fila durável ligada** (`FILA_DURAVEL=on`, desde 10/10/2026): a recepção só valida, grava e agenda; quem processa são os workers. Voltar: `sh scripts/fila_duravel.sh desligar` (ver `docs/CAPACIDADE.md`); a chave não muda nenhuma rota deste contrato. Tudo marcado ✅ abaixo foi conferido no serviço em produção. Histórico em `PROGRESS.md`.
+**Publicação atual (10/10/2026):** imagem `gateway:bb33dd5`, migrações 001–024, serviço em mock/dry. Processos: recepção (`gateway`), 2 `worker` e 1 `agendador`, com a **fila durável ligada** (`FILA_DURAVEL=on`, desde 10/10/2026): a recepção só valida, grava e agenda; quem processa são os workers. Voltar: `sh scripts/fila_duravel.sh desligar` (ver `docs/CAPACIDADE.md`); a chave não muda nenhuma rota deste contrato. Tudo marcado ✅ abaixo foi conferido no serviço em produção. Histórico em `PROGRESS.md`.
 
 Rotas relativas a `/admin/v1`, salvo indicação de rota absoluta. Escritas confirmadas gravam auditoria na mesma transação, sem corpos nem segredos. Suspender/pausar usa PATCH.
 
@@ -205,6 +205,26 @@ Estado persistente por agente: três falhas consecutivas em cinco minutos abrem 
 - **Alerta de transbordo:** `whatsapp_alerta_transbordo` na empresa (`PATCH /admin/v1/tenants/{t}`; 8–16 dígitos; nulo = desligado). Quando uma conversa entra em “aguardando atendente”, sai um aviso curto com o telefone mascarado, o motivo, o último pedido e o endereço do painel (`PAINEL_URL`).
 - **Avisos internos:** `GET /admin/v1/tenants/{t}/avisos` lista os avisos (`tipo`: `pedido_unidade | resposta_unidade | transbordo | pedido_cliente`; `status`: `pendente | enviando | enviado | simulado | descartado | falhou`; sem o texto). Saem pelo agendador em até ~2 s. Aviso para unidade/alerta só é enviado de verdade quando o agente do canal uazapi está com envio real; senão fica `simulado`. Falha: 3 tentativas para unidade/alerta; aviso ao cliente nunca é reenviado.
 - Auditoria: `pedido.confirmado`, `pedido.recusado`. Especificação das Skills do agente: `docs/SKILLS.md`.
+
+**Gestão G1 — horários da unidade** (`docs/ESPEC_GESTAO.md`). Todas sob `/admin/v1/tenants/{t}/unidades`, rede interna, chave do painel e `X-Actor`.
+
+| Rota | Corpo | Resposta |
+|---|---|---|
+| `GET /unidades`, `GET /unidades/{id}` | — | Unidade com os campos de sempre mais `fuso`, `fuso_efetivo`, `pausa_ate`, `pausa_indefinida`, `pausa_motivo` e `situacao` |
+| `POST /unidades`, `PATCH /unidades/{id}` | campos atuais + `fuso` (fuso IANA, ex. `America/Sao_Paulo`; nulo herda o da empresa) | Unidade com `situacao`. `horarios` com turnos sobrepostos → 400 |
+| `POST /unidades/{id}/pausar` | `{"ate": "<data e hora com fuso>"}` **ou** `{"indefinida": true}`; `motivo` opcional (até 200) | Unidade. `ate` precisa estar no futuro e a no máximo 60 dias; os dois juntos ou nenhum → 400 |
+| `POST /unidades/{id}/reabrir` | — | Unidade sem pausa |
+| `PUT /unidades/{id}/horarios` | grade inteira: `{"seg": [["12:00","15:00"],["19:00","22:00"]], "sex": [["19:00","02:00"]]}` | Unidade. Dia ausente = fechado; até 12 turnos por dia; `HH:MM`; fim menor que o início = cruza a meia-noite; sobreposição → 400 |
+| `GET /unidades/{id}/excecoes?desde=&ate=` | — | `{"itens": [{"id","data","fechado","faixas","motivo"}]}`; sem filtro, de ontem em diante |
+| `POST /unidades/{id}/excecoes` | `{"data": "2026-12-25", "fechado": true, "motivo": "Natal"}` ou `{"data": "...", "faixas": [["12:00","16:00"]]}` | A exceção (cria ou substitui a da data). `fechado` e `faixas` juntos, ou nenhum → 400 |
+| `DELETE /unidades/{id}/excecoes/{eid}` | — | `{"ok": true}`; inexistente → 404 |
+| `GET /unidades/{id}/agenda?dias=7` | — | `{"fuso", "situacao", "dias": [{"data","dia","origem": "grade|excecao","fechado","faixas","motivo"}]}`; `dias` 1–62 |
+| `GET /gestao/alteracoes?entidade=&entidade_id=&limite=&cursor=` | — | `{"itens": [{"id","actor","entidade","entidade_id","acao","antes","depois","criado_em"}], "proximo_cursor"}` |
+
+- **`situacao`** = `{"aberta_agora": true|false|null, "motivo": null|"inativa"|"pausa"|"excecao"|"horario"|"sem_horario", "fecha_as", "proxima_abertura", "pausada_ate"}`, com datas ISO no fuso da unidade. `aberta_agora: null` com `sem_horario` = nenhum horário cadastrado (não informado). Pausa indefinida não tem `proxima_abertura`. Pausa vencida é ignorada sozinha.
+- A exceção substitui a grade **daquele dia**; um turno da véspera que cruza a meia-noite vai até o fim.
+- **Histórico (`gestao/alteracoes`):** `entidade` = `unidade` (`entidade_id` = id da unidade; `acao`: `criado`, `alterado`, `pausado`, `reaberto`, `horarios`) ou `excecao` (`entidade_id` = `<id da unidade>:<data>`; `acao`: `criado`, `alterado`, `removido`). `antes` e `depois` trazem só os campos que mudaram; `whatsapp_pedidos` vai mascarado. Alteração que não muda nada não gera linha. Mais novos primeiro; `cursor` = `id`.
+- No pacote ao agente, cada unidade ganhou `motivo_fechada`, `fecha_as`, `pausada_ate` e `pausa_motivo`; `aberta_agora` e `proxima_abertura` passam a considerar exceções, pausa e o fuso da unidade.
 
 **Limites compartilhados (fila durável, ativos quando `FILA_DURAVEL=on`):** `max_lotes_simultaneos` por empresa e `max_concorrencia` por agente valem somados entre todos os workers (vagas no Redis). Padrão 5 e 5; os dois valem ao mesmo tempo (uma conversa precisa de vaga na empresa **e** no agente). Por empresa: `PUT /admin/v1/tenants/{t}/config`; por agente: `PATCH /admin/v1/tenants/{t}/agentes/{a}` (1–100; nulo herda). Como dimensionar: `docs/CAPACIDADE.md`. Empresa no limite não atrasa as outras (INV07).
 
