@@ -810,3 +810,16 @@ PY
 - Produção (agente simulado `[teste]` do bykoji): “vocês entregam no Morumbi?” → espera 1,78 s; “oi” → 4,27 s; “quero” / “um temaki” / “de salmão?” → **um turno com as 3 mensagens**, espera 1,72 s depois da última. 4 containers `healthy`, fila zerada, `/health` público `{"ok":true}`, admin por fora 404, zero segredos nos logs.
 - Efeito esperado na latência: para pergunta completa, o total cai cerca de 2,5 s (de ~15,7 s para ~13 s no p95 medido). A medir com IA real quando o Marco autorizar novo bench.
 - Para o [PAINEL]: campos novos de configuração `debounce_curto_s` (0,5–15) e `debounce_palavras` (1–50).
+
+## Fase 3 — Bloco 1: aviso de demora em fechamento e novo bench — PARADO (total_p95 > 15 s) — 2026-10-10
+
+- Bloco 1 validado pelo Marco. Ajuste pedido, implantado em `gateway:962c0d7` (volta `gateway:123ca72`, conferida nos 4 containers; sem migração; backup `pre-fechamento-20261010T150231Z`): lote que parece só fechamento (“obrigado”, “ok”, “valeu”, “blz”, emoji e afins; até 6 palavras, sem pergunta, só texto) **não recebe aviso de demora**; se o agente responder silêncio, nada é enviado. Saudações (“oi”, “bom dia”, “tudo bem”) e respostas (“sim”, “pode”) não contam como fechamento. Suíte: **158 passed**, só bancos `_test`.
+- Bench de 5 clientes com IA real, envio de teste (15:03 UTC; piloto desligado só durante o bench e religado com `["5511942717046"]`, conferido). O Marco avisou que acabara de ligar uma chave própria da OpenAI (projeto “bykoji”) no agente: **não houve erro** (5/5, zero fallback).
+
+| Rodada | Espera na fila | agente_p50 | agente_p95 | total_p50 | total_p95 |
+|---|---|---|---|---|---|
+| 14:25 UTC, debounce fixo de 4 s | 4,3–4,6 s | 10,7 s | 11,3 s | 15,2 s | **15,7 s** |
+| 15:03 UTC, debounce adaptativo | 2,4–2,5 s | 12,4 s | 13,0 s | 15,0 s | **15,6 s** |
+
+- **Parado pela regra combinada (total_p95 acima de 15 s): bloco 2 não iniciado.** O debounce tirou ~2 s da espera, mas o agente respondeu ~1,7 s mais devagar nesta rodada (4 de 5 chamadas entre 12,4 e 13,2 s), e o ganho foi consumido.
+- Da espera de 2,4 s, 1,5 s é o debounce curto e ~0,9 s é o caminho do gateway (agendador, fila, vaga, montagem do pacote).

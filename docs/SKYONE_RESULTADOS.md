@@ -249,6 +249,9 @@ Fluxo `atendente_delivery` (mesma URL), agente sem base de conhecimento e sem Sk
 | 10/10 04:25 | não informado (configuração anterior ao teste A/B) | 5 | 0 | 16,2 s | 24,2 s | 21,1 s | 29,0 s | 3 de 5 |
 | 10/10 14:18 | Gemini 3 Flash | 5 | 0 | 8,8 s | 10,6 s | 14,4 s | 15,8 s | 0 de 5 |
 | 10/10 14:25 | GPT-4.1 mini (chave própria da OpenAI) | 5 | 0 | 10,7 s | 11,3 s | 15,2 s | 15,7 s | 0 de 5 |
+| 10/10 15:03 | GPT-4.1 mini (chave OpenAI do projeto "bykoji"), **com debounce adaptativo** | 5 | 0 | 12,4 s | 13,0 s | 15,0 s | 15,6 s | 0 de 5 |
+
+Rodada das 15:03 (gateway `962c0d7`, debounce adaptativo): espera na fila caiu de 4,3–4,6 s para 2,4–2,5 s, mas o agente ficou mais lento nesta rodada (8,5 · 12,4 · 12,4 · 12,5 · 13,2 s); o total praticamente não mudou.
 
 Tempos do agente por turno: 04:25 → 16,2 · 22,9 · 24,6 · 10,1 · 10,1 s; 14:18 (Gemini 3 Flash) → 9,4 · 6,8 · 10,9 · 8,8 · 7,8 s; 14:25 (GPT-4.1 mini) → 9,3 · 10,9 · 10,7 · 11,5 · 9,2 s.
 
