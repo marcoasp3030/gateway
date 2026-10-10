@@ -18,6 +18,7 @@ import uuid
 from pathlib import Path
 
 from admin.servico import auditar
+from nucleo.pipeline import insistir
 
 log = logging.getLogger('gateway.fila')
 
@@ -226,7 +227,8 @@ class FilaDuravel:
                 log.warning('Worker temporariamente indisponível')
                 await asyncio.sleep(1)
         if self.tarefas:
-            await asyncio.wait(self.tarefas, timeout=60)
+            # Parada graciosa: termina o que está em andamento antes de sair.
+            await asyncio.wait(self.tarefas, timeout=float(os.getenv('PARADA_GRACIOSA_S', '75') or 0) or None)
 
     async def retomar(self, livres):
         """Itens parados com um worker morto por mais que ocioso_ms são assumidos (XAUTOCLAIM)."""
@@ -259,14 +261,19 @@ class FilaDuravel:
                     return 'sem_vaga'
             resultado = await self.p.processar_duravel(tenant, conversa)
             # 'ocupado': quem tem a trava reagenda o que sobrar ao terminar; este item sai.
-            await self.confirmar(stream, item_id, chave)
+            await insistir(lambda: self.confirmar(stream, item_id, chave), self.p.insistir_s)
             return resultado
-        except Exception:
-            # Fica pendente: outro worker retoma depois de ocioso_ms.
-            log.warning('Falha ao processar item da fila; será retomado')
+        except Exception as erro:
+            # Fica pendente: outro worker retoma depois de ocioso_ms. Só o tipo do erro: a mensagem pode ter conteúdo.
+            log.warning('Falha ao processar item da fila (%s); será retomado', type(erro).__name__)
         finally:
             if lotes:
-                await self.redis.zrem(lotes, chave); await self.redis.zrem(ativo, chave)
+                # Devolve a vaga mesmo se o Redis caiu no meio do lote (insiste até ele voltar).
+                try:
+                    await insistir(lambda: self.redis.zrem(lotes, chave), self.p.insistir_s)
+                    await insistir(lambda: self.redis.zrem(ativo, chave), self.p.insistir_s)
+                except Exception:
+                    log.warning('Vaga não devolvida; expira sozinha pela validade')
 
     async def confirmar(self, stream, item_id, chave):
         await self.redis.xack(stream, GRUPO, item_id)

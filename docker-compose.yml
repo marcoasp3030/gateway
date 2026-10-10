@@ -37,6 +37,8 @@ services:
   gateway:
     build: ./app
     restart: unless-stopped
+    # Parada graciosa: termina os lotes em andamento (PARADA_GRACIOSA_S, padrão 75 s).
+    stop_grace_period: 90s
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -70,6 +72,8 @@ services:
     pull_policy: never
     command: ["python", "processos.py", "worker"]
     restart: unless-stopped
+    # Parada graciosa: termina os lotes em andamento (PARADA_GRACIOSA_S, padrão 75 s).
+    stop_grace_period: 90s
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -100,6 +104,8 @@ services:
     pull_policy: never
     command: ["python", "processos.py", "agendador"]
     restart: unless-stopped
+    # Parada graciosa: termina os lotes em andamento (PARADA_GRACIOSA_S, padrão 75 s).
+    stop_grace_period: 20s
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}

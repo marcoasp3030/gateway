@@ -1,6 +1,7 @@
 """Contrato Skyone e credenciais isolados do pipeline."""
 import asyncio
 import base64
+import os
 from .controle import CredencialRecusada, CircuitoAberto
 import json
 import uuid
@@ -45,6 +46,9 @@ async def _chamar(client,repo,cofre,tenant_id,cfg,payload):
     if cfg['tenant_id']!=tenant_id or payload['tenant_id']!=tenant_id or payload['agente_id']!=cfg['id']:
         raise FalhaAgente('Contexto inválido')
     if cfg['agente_mode']=='mock':
+        # MOCK_ATRASO_S simula o tempo de resposta do agente em testes de carga; padrão 0.
+        atraso=float(os.getenv('MOCK_ATRASO_S','0') or 0)
+        if atraso>0: await asyncio.sleep(min(atraso,120))
         return {'resposta':['Resposta simulada.'],'acao':'nenhuma'}
     if cfg['provedor']!='skyone' or cfg['modo_resposta']!='sync':
         raise FalhaAgente('Provedor/modo indisponível')

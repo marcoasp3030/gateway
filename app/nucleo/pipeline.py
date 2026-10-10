@@ -6,6 +6,7 @@ from agentes.erros import TempoEsgotado
 import hashlib
 import json
 import logging
+import os
 import time
 import uuid
 from datetime import datetime,timezone,timedelta
@@ -35,6 +36,17 @@ async def marcar_aguardando(conn,tenant,conversa,motivo):
     return bool(novo)
 
 
+async def insistir(operacao,limite_s=60,intervalo=1):
+    """Liberações no Redis (trava, vaga, confirmação) insistem enquanto ele volta de uma queda.
+    Sem isso a trava/vaga ficaria presa até a validade e a empresa pararia por mais de um minuto."""
+    fim=time.monotonic()+limite_s
+    while True:
+        try: return await operacao()
+        except Exception:
+            if time.monotonic()>=fim: raise
+            await asyncio.sleep(intervalo)
+
+
 def sanitizar(valor):
     if isinstance(valor,dict):
         return {k:('***' if k.lower() in ('s','key') or any(s in k.lower() for s in ('token','secret','password','authorization','api_key','credencial'))
@@ -53,6 +65,8 @@ class Pipeline:
         self.saida_task=None
         # Com a fila durável ligada, este agendador em processo não processa nada (exclusividade).
         self.fila_duravel=fila_duravel
+        # Por quanto tempo as liberações no Redis insistem durante uma queda.
+        self.insistir_s=60
 
     def chave(self,tenant,conversa):
         return json.dumps([tenant,conversa],separators=(',',':'))
@@ -260,9 +274,9 @@ return 1
             await self._concluir(tenant,conversa,cfg,turno,await self._enviar_partes(tenant,conversa,cfg,turno))
             return 'concluido'
         finally:
-            await self.redis.eval("if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end",1,lock,token)
+            await insistir(lambda: self.redis.eval("if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end",1,lock,token),self.insistir_s)
             if await self.db.fetchval("SELECT EXISTS(SELECT 1 FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND processada_em IS NULL AND direcao='entrada' AND origem IN ('cliente','sistema'))",tenant,conversa):
-                await self.enfileirar(tenant,conversa,cfg)
+                await insistir(lambda: self.enfileirar(tenant,conversa,cfg),self.insistir_s)
 
     async def _responder(self,tenant,conversa,conv,cfg):
         itens=await self._pendentes(self.db,tenant,conversa)
@@ -429,9 +443,15 @@ return 1
             except Exception: log.warning('Agendador temporariamente indisponível')
             await asyncio.sleep(.25)
 
-    async def fechar(self):
+    async def fechar(self,espera_s=None):
+        """Parada graciosa: espera os lotes em andamento terminarem (até espera_s) antes de cancelar.
+        Evita cortar um lote no meio na troca para a fila durável ou num reinício."""
         if self.saida_task:
             self.saida_task.cancel()
             await asyncio.gather(self.saida_task,return_exceptions=True)
+        if espera_s is None: espera_s=float(os.getenv('PARADA_GRACIOSA_S','75') or 0)
+        pendentes=[t for t in self.tarefas.values() if not t.done()]
+        if pendentes and espera_s>0:
+            await asyncio.wait(pendentes,timeout=espera_s)
         for tarefa in self.tarefas.values(): tarefa.cancel()
         await asyncio.gather(*self.tarefas.values(),return_exceptions=True)
