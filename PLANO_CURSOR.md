@@ -4,7 +4,7 @@
 
 ---
 
-## 0. Estado atual (atualizado em 09/10/2026)
+## 0. Estado atual (atualizado em 10/10/2026)
 
 | Etapa | Situação | Onde está o registro |
 |---|---|---|
@@ -12,7 +12,7 @@
 | Publicação no domínio | ✅ `https://painel.luxbrain.com.br/gateway/health` via **Caddy** do projeto `painel_koji` (rede `luxbrain_gateway_proxy`, `docker-compose.proxy.yml`) | `PROGRESS.md`, `docs/PUBLICACAO.md`, `docs/Caddyfile.painel.example` |
 | Fase 0.3 — descobertas no Skyone | 🟡 Probe, memória/histórico e comparação de modelos respondidos. **Autenticação Basic validada também pelo `/testar` do gateway: 200, 8.194 ms; limite 300/min no Skyone e 240/min por URL no gateway concluídos.** **10 simultâneas: 10/10 em paralelo, lote em 7,89 s; tempo limite: síncrono até ~66 s, sem resposta entre ~66 e ~127 s → `timeout_s` padrão 60 s (09/10/2026).** Callback real do Skyone pendente para a 6.5; comparação direta OpenAI (não executada) para decisão da 2.5 | `docs/SKYONE_RESULTADOS.md`, `PROGRESS.md` |
 | Fase 0.5 | ✅ **Concluída formalmente em 09/10/2026.** Contrato `docs/API_ADMIN.md` revisado e reorganizado por assunto; modelos iniciais `atendente_delivery` e `assistente_generico` confirmados pelo Marco. Em produção: imagem `gateway:7423fac`, migrações 001–015, 130 testes; recepção + 2 workers + agendador, fila durável desligada. Painel integrado pela rede interna. Agente live/dry: só `postman_teste/ag_dba38a6fae985abf584d512f`, por escolha do Marco (“[teste] Bench segundo agente” voltou à simulação); nenhum envio live | `docs/API_ADMIN.md`, `docs/MIGRACOES.md`, `PROGRESS.md` |
-| Fase 0.6 | 🟡 **Em andamento (desde 09/10/2026).** Concluídos: tempo limite padrão 60 s (013), **bloco 1 — schema e estados** (014) e **bloco 2 — fila e workers** (filas por empresa, workers, agendador com trava de liderança, reconciliação; fallback novo e “aguardando atendente” já ativos no caminho atual; restart/healthcheck; indicadores e alertas). **bloco 3 — justiça e circuito** (vagas compartilhadas no Redis por empresa e por agente — INV07; fechamento manual do circuito e nova tentativa única — INV15; validação do fallback). Fila durável publicada **desligada** (`FILA_DURAVEL=off`), exclusividade conferida em produção. **Bloco 4 (callback assíncrono) ADIADO para antes da Fase 6.5** (decisão do Marco, 10/10/2026). **Bloco 5 — troca preparada (10/10/2026):** parada graciosa, liberações insistentes na queda do Redis, teste de carga de 200 conversas só com agente simulado (2 workers: espera mediana 16,9 s, máxima 32,8 s; 3 workers: 10,2 s e 23,9 s; sem perda nem duplicidade) e INV14 conferido na pilha isolada (Redis e worker derrubados). **Falta só o Marco ligar a chave** (`sh scripts/fila_duravel.sh ligar`) e conferir em produção; a fase fecha depois disso | `PROGRESS.md` |
+| Fase 0.6 | ✅ **Concluída em 10/10/2026.** Fila durável **ligada em produção** (`FILA_DURAVEL=on`, ligada pelo Marco): recepção só recebe, 2 workers processam, agendador com trava de liderança. Entregue em blocos: tempo limite 60 s (013), schema e estados (014), fila e workers, justiça e circuito (INV07, INV15), troca com parada graciosa e liberações insistentes. Teste de carga de 200 conversas só com agente simulado (2 workers: espera mediana 16,9 s, máxima 32,8 s; 3 workers: 10,2 s e 23,9 s). **INV14 conferido em produção** no `postman_teste` com agente simulado: 600 conversas, um worker morto e mantido parado e o Redis fora por 10 s → 600/600 respondidas, 0 perdidas, 0 duplicadas, bykoji sem impacto. Limite do bykoji: `max_lotes_simultaneos=30` (regra em `docs/CAPACIDADE.md`). **Callback assíncrono (bloco 4) continua ADIADO para antes da Fase 6.5** (decisão do Marco, 10/10/2026). Voltar a chave: `sh scripts/fila_duravel.sh desligar` | `PROGRESS.md` |
 | Fases 1 em diante | ⏳ Não iniciadas | — |
 
 **Fechamento da Fase 0.5 (09/10/2026):** últimos ajustes do contrato implantados com um commit por item: erros padronizados (códigos fixos, mensagem em português, `detalhes.campo`, mesmo envelope nos middlewares e no 404), histórico paginado, lista de agentes com `circuito_estado`/`canais`, null em campo obrigatório e integridade com campo, **`/testar` com `{"usar_provedor_real": true}`** (chama o Skyone sem alterar o agente) e `/simular` com IA real quando o envio é dry. Imagem de volta `gateway:39e1a53`; backup `gateway-pre-contrato-20261009T173104Z.dump`. Detalhes em `PROGRESS.md`.
@@ -336,27 +336,27 @@ curl -s "$GW/admin/v1/tenants/$T/metricas?agente=$A" "${AUTH[@]}"
 **Objetivo:** como toda conversa passa pelo gateway, ele não pode perder mensagem nem deixar um cliente ou agente lento afetar os outros.
 
 ### Tarefas
-- [ ] **Redis durável:** conferir o AOF já ligado no `docker-compose.yml` (`--appendonly yes --appendfsync everysec`, volume `redisdata`). Mesmo assim, o Postgres é a fonte da verdade: a mensagem é gravada antes de entrar na fila.
-- [ ] **Separar processos** (mesma imagem, comandos diferentes no compose):
+- [x] **Redis durável:** conferir o AOF já ligado no `docker-compose.yml` (`--appendonly yes --appendfsync everysec`, volume `redisdata`). Mesmo assim, o Postgres é a fonte da verdade: a mensagem é gravada antes de entrar na fila.
+- [x] **Separar processos** (mesma imagem, comandos diferentes no compose):
   - `gateway-api`: recepção de webhooks + `/api` + `/admin`. Valida, grava a mensagem, enfileira e responde. **Nunca chama o Skyone nem o canal dentro da requisição.**
   - `gateway-worker` (N réplicas): debounce, montagem do contexto, chamada ao agente, envio, turnos.
   - `gateway-agendador` (1 réplica, com trava de liderança no Redis): lotes vencidos, follow-ups, limpezas.
-- [ ] Corrigir pendência registrada no `PROGRESS.md`: hoje o buffer é retirado do Redis **antes** de concluir o processamento; com a fila durável, o lote só sai depois do turno gravado.
-- [ ] **Fila durável:** Redis Streams com grupo de consumidores (`XREADGROUP` + `XACK`); item só é confirmado após o turno gravado; itens pendentes de worker morto são retomados (`XAUTOCLAIM`). Reconciliação na subida: mensagens no Postgres sem turno e fora da fila voltam para a fila (INV01/INV14).
-- [ ] **Trava por conversa** mantida (um lote por conversa por vez) e **justiça** por tenant e por agente (INV07): limites `max_lotes_simultaneos` (tenant) e `max_concorrencia` (agente).
-- [ ] **Adaptador de agente** (`app/agentes/`): interface `enviar(pacote) -> Resposta | Pendente`. Implementações `mock` e `skyone`. O núcleo não importa nada do Skyone diretamente.
-- [ ] **Circuit breaker por agente (INV15):** após N falhas/timeouts em uma janela, o agente entra em "aberto" por alguns minutos: novas mensagens recebem o fallback (ou vão para humano, conforme configuração), sem chamar o Skyone; depois um teste "meio aberto" decide se volta. Estado visível na API administrativa e alertado.
-- [ ] **Retry com backoff** só para falhas transitórias (timeout de conexão, 502/503/504), com limite; nunca reenviar se o Skyone já pode ter respondido ao cliente.
+- [x] Corrigir pendência registrada no `PROGRESS.md`: hoje o buffer é retirado do Redis **antes** de concluir o processamento; com a fila durável, o lote só sai depois do turno gravado.
+- [x] **Fila durável:** Redis Streams com grupo de consumidores (`XREADGROUP` + `XACK`); item só é confirmado após o turno gravado; itens pendentes de worker morto são retomados (`XAUTOCLAIM`). Reconciliação na subida: mensagens no Postgres sem turno e fora da fila voltam para a fila (INV01/INV14).
+- [x] **Trava por conversa** mantida (um lote por conversa por vez) e **justiça** por tenant e por agente (INV07): limites `max_lotes_simultaneos` (tenant) e `max_concorrencia` (agente).
+- [x] **Adaptador de agente** (`app/agentes/`): interface `enviar(pacote) -> Resposta | Pendente`. Implementações `mock` e `skyone`. O núcleo não importa nada do Skyone diretamente.
+- [x] **Circuit breaker por agente (INV15):** após N falhas/timeouts em uma janela, o agente entra em "aberto" por alguns minutos: novas mensagens recebem o fallback (ou vão para humano, conforme configuração), sem chamar o Skyone; depois um teste "meio aberto" decide se volta. Estado visível na API administrativa e alertado.
+- [x] **Retry com backoff** só para falhas transitórias (timeout de conexão, 502/503/504), com limite; nunca reenviar se o Skyone já pode ter respondido ao cliente.
 - [ ] **Modo assíncrono (callback) — ⏸ ADIADO para antes da Fase 6.5 (decisão do Marco, 10/10/2026).** Motivo: o atendimento do By Koji responde em 5–9 s pelo caminho síncrono; callback só é necessário para agentes internos com tarefas longas. O schema já existe (tabela `agente_callbacks`, etapa `aguardando_callback`, migração 014) e fica sem uso até lá. Descrição original mantida: para agentes com `modo_resposta=async`, o worker envia o pacote com `callback_url` e `callback_token` de uso único e libera; o Skyone chama `POST /api/v1/agentes/callback/{request_id}` (escopo `callback`) com o mesmo formato do Retorno. Callback repetido é ignorado (idempotência por `request_id`); callback que não chega até `callback_timeout_s` gera fallback/transbordo. Mensagens intermediárias (`"parcial": true`) são permitidas. **Implementado e testado nesta fase com o provedor simulado; a validação com um callback real do Skyone fica pendente para a Fase 6.5.** Atendimento síncrono usa `timeout_s` 60 s (teste de 09/10/2026); acima disso, só assíncrono.
-- [ ] **Saúde dos componentes:** `/health` interno mostra fila (tamanho, pendentes, idade do mais antigo), workers vivos e agentes com circuito aberto.
-- [ ] Atualizar a Regra 5 no `PROGRESS.md` como concluída e ajustar `bench.py` para medir com 1 e 3 workers.
+- [x] **Saúde dos componentes:** `/health` interno mostra fila (tamanho, pendentes, idade do mais antigo), workers vivos e agentes com circuito aberto.
+- [x] Atualizar a Regra 5 no `PROGRESS.md` como concluída e ajustar `bench.py` para medir com 1 e 3 workers. — *bench.py não foi alterado: a medição com 2 e 3 workers foi feita por `scripts/carga_fila.sh` (ver `docs/CAPACIDADE.md`).*
 
 ### Testes obrigatórios
-- [ ] **INV14:** derrubar o Redis com mensagens enfileiradas e subir de novo → todas respondidas; matar um worker no meio de um lote → outro worker retoma.
-- [ ] **INV15:** agente A com Skyone mockado em timeout; agente B normal → B mantém a latência; A entra em circuito aberto e envia fallback.
-- [ ] **INV07:** 50 conversas no tenant A e 1 no tenant B → B despachada sem esperar A.
+- [x] **INV14:** derrubar o Redis com mensagens enfileiradas e subir de novo → todas respondidas; matar um worker no meio de um lote → outro worker retoma. — *conferido em produção em 10/10/2026 (`postman_teste`, agente simulado).*
+- [x] **INV15:** agente A com Skyone mockado em timeout; agente B normal → B mantém a latência; A entra em circuito aberto e envia fallback.
+- [x] **INV07:** 50 conversas no tenant A e 1 no tenant B → B despachada sem esperar A.
 - [ ] ⏸ ADIADO com o modo assíncrono (antes da Fase 6.5) — Callback (provedor simulado): resposta via callback chega ao cliente; callback duplicado ignorado; callback com token errado → 401; sem callback no prazo → fallback.
-- [ ] O webhook de entrada responde em < 200 ms mesmo com o agente mock configurado para 30 s.
+- [x] O webhook de entrada responde em < 200 ms mesmo com o agente mock configurado para 30 s. — *com a fila ligada a recepção não chama o agente; medido em produção: mediana 14 ms, máxima 93 ms (20 mensagens simuladas).*
 
 ### Pronto quando
 - Testes verdes; bench com 3 workers e dois tenants sem perda e sem interferência.

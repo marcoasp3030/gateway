@@ -18,6 +18,18 @@ Capacidade nominal: `WORKERS × CONCORRENCIA_POR_WORKER` conversas em andamento 
 4. Aplicar só nos serviços da fila: `docker compose up -d --no-deps worker` (réplicas) ou recriar `worker` (concorrência). A recepção não precisa reiniciar.
 5. Repetir o teste de carga na pilha isolada (`scripts/carga_fila.sh`, abaixo) e registrar no `PROGRESS.md` a mediana e o máximo de espera na fila, sem perda nem duplicidade.
 
+## Limite por empresa e por agente
+
+Regra: **limite por empresa ≈ cota do fluxo Skyone/min × duração média da chamada em minutos.**
+
+Exemplo (By Koji): 240 chamadas/min × (8 s ÷ 60) ≈ 32 → `max_lotes_simultaneos = 30`. Acima disso as conversas a mais só esperariam a cota.
+
+- `max_lotes_simultaneos` (por empresa, padrão 5): conversas em andamento somando todos os agentes da empresa. Ajuste: `PUT /admin/v1/tenants/{t}/config` com `{"max_lotes_simultaneos": N}` (1–100; nulo volta ao padrão).
+- `max_concorrencia` (por agente, padrão 5): conversas em andamento de um agente. Ajuste: `PATCH /admin/v1/tenants/{t}/agentes/{a}` com `{"max_concorrencia": N}`, ou no `/config` da empresa para valer como padrão dos agentes dela.
+- Os dois valem ao mesmo tempo. Como a cota do Skyone é por URL (por fluxo, isto é, por agente), o agente só chega perto do teto da empresa se o `max_concorrencia` dele também subir.
+- Em 10/10/2026: bykoji com `max_lotes_simultaneos = 30`; demais empresas no padrão 5. `max_concorrencia` continua 5 em todos os agentes.
+- A capacidade dos workers (`WORKERS × CONCORRENCIA_POR_WORKER`, hoje 40) é o teto de tudo somado.
+
 ## Alertas
 
 - **Fila atrasada:** mensagem mais antiga esperando na fila de uma empresa por mais de 30 s → evento `fila.atrasada` na auditoria da empresa (agrupado a cada 10 min) e log.
@@ -53,6 +65,21 @@ Leitura:
 | Um worker morto (SIGKILL) e mantido parado | O outro worker seguiu sozinho: 180/200 em 74 s. As 20 conversas que estavam com o worker morto (agente no meio da resposta, nada enviado ao cliente) foram refeitas e respondidas em ~170–180 s. 0 perdidas, 0 duplicadas, 0 partes incertas. |
 
 O tempo de ~3 min no caso do worker morto vem da validade da trava da conversa (`timeout_s + 90 s` = 150 s) mais a reconciliação (a cada 60 s). Não foi encurtado de propósito: assumir a trava de um worker “que parece morto” abriria a chance de responder duas vezes. Em reinício normal isso não acontece, porque o worker termina os lotes antes de sair (`PARADA_GRACIOSA_S`, padrão 75 s).
+
+### INV14 em produção (10/10/2026, `FILA_DURAVEL=on`)
+
+Só no `postman_teste`, com um agente simulado criado para o teste (mock, envio de teste); 600 conversas em fluxo contínuo (8 por segundo, 75 s), limites padrão (5 por empresa). No meio do fluxo: um worker morto (SIGKILL) e mantido parado, e 20 s depois o Redis morto (SIGKILL) por 10 s.
+
+| Medida | Resultado |
+|---|---|
+| Conversas respondidas | 600/600 |
+| Perdidas / duplicadas | 0 / 0 |
+| Turnos refeitos, em aberto, com erro, partes incertas | 0 / 0 / 0 / 0 |
+| Recusas da recepção com o Redis fora (503), todas reenviadas com o mesmo `message_id` | 370 |
+| Tempo total | 85 s (10 s depois do fim do envio) |
+| bykoji | Nenhuma mensagem nem turno a mais durante o teste; benchmark simulado depois: 5/5, zero erros |
+
+Como o agente simulado de produção responde na hora (sem `MOCK_ATRASO_S`), nenhum lote estava nas mãos do worker no instante em que ele morreu (0 turnos refeitos). A retomada de um lote cortado no meio ficou provada na pilha isolada (tabela acima).
 
 ### Como repetir
 

@@ -621,3 +621,21 @@ PY
   - **Ligar a chave (Marco):** `sh scripts/fila_duravel.sh ligar`; voltar: `sh scripts/fila_duravel.sh desligar`. Depois de ligada, repetir em produção um lote do agente simulado e, se o Marco quiser, a queda do Redis e do worker lá; só então fechar a Fase 0.6.
   - Worker morto à força: as conversas que estavam com ele levam ~3 min para serem refeitas. Não encurtado de propósito (risco de resposta dupla); decidir se vale revisar.
   - Fallback `"/"` do `bykoji/bykoji_atendimento` continua fora da regra (listado no bloco 3).
+
+## Fase 0.6 — Fechamento: fila durável ligada e INV14 em produção — 2026-10-10
+
+- Status: **Fase 0.6 concluída.** `FILA_DURAVEL=on` em produção (ligada pelo Marco, ~01:19 UTC). Imagem `gateway:7423fac`, schema 15, sem build nem migração neste fechamento. **Callback assíncrono continua adiado para antes da Fase 6.5.**
+- Pré-checagem antes de derrubar o Redis: todos os canais são do tipo API de teste (nenhum uazapi); nas últimas 24 h só há mensagens de bench/simulação. Nenhum cliente real.
+- Backup: `/home/twadmin/backups/gateway/pre-inv14-prod-20261010T012219Z/gateway.dump` (`pg_restore --list` OK, 21 tabelas).
+- **INV14 em produção** (só `postman_teste`, agente simulado `ag_002430f4999ada600015605f` “[teste] INV14 fila durável (simulado)”, canal `can_0c276f791ffdd5b141eeaaf5`, criados para o teste; limites padrão):
+  - 600 conversas em fluxo contínuo (8/s, 75 s). 01:22:55 worker-2 morto (SIGKILL) e mantido parado; 01:23:16 Redis morto (SIGKILL); 01:23:27 Redis de volta.
+  - Resultado: **600/600 respondidas, 0 perdidas, 0 duplicadas**, 0 turnos refeitos/em aberto/com erro, 0 partes incertas; 370 recusas 503 da recepção durante a queda, todas resolvidas pelo reenvio da mesma mensagem; tudo concluído em 85 s.
+  - Limite do teste: o agente simulado de produção responde na hora, então nenhum lote estava com o worker quando ele morreu. A retomada de lote cortado no meio está provada na pilha isolada (bloco 5).
+  - bykoji: 158 mensagens e 54 turnos antes e depois (nada tocado durante o teste); benchmark simulado depois, pela fila durável: **5/5, zero erros**, ~4,4 s.
+  - Depois: worker-2 religado; `estado` → `ligada: true`, 2 workers vivos, agendador ativo, 0 pendentes, 0 turnos em aberto, 0 partes incertas. Avisos nos logs só da janela da queda (“temporariamente indisponível”, “Cache de consumo indisponível; Postgres preservado”).
+  - Recepção com a fila ligada: 20 mensagens simuladas → mediana 14 ms, máxima 93 ms.
+- **Limite por empresa:** `PUT /admin/v1/tenants/bykoji/config` com `max_lotes_simultaneos=30` (antes: nulo = padrão 5). Demais empresas no padrão 5. Regra registrada em `docs/CAPACIDADE.md`. **Atenção:** `max_concorrencia` (por agente) continua 5; enquanto não subir, cada agente do bykoji segue limitado a 5 conversas ao mesmo tempo.
+- Painel: os campos `max_lotes_simultaneos` e `max_concorrencia` não aparecem no código do painel (busca em `painel_koji/src`, só leitura); não são editáveis por lá hoje.
+- Limpeza: removida só a imagem `gateway-carga:latest` (sem prune). Mantidos: agente e canal do caso “aguardando” (até o Marco validar o painel), agente/canal/conversas do teste INV14, `.local/teste_skyone_tempo.py`. Nenhuma alteração no Skyone.
+- Observação: a conversa do caso “aguardando” foi assumida pelo Marco no painel às 01:15 UTC (auditoria `conversa.assumida`); por isso saiu do filtro `aguardando=true`.
+- Pendências: decidir `max_concorrencia` do bykoji; limpeza dos dois agentes `[teste]` do `postman_teste` quando o Marco pedir; fallback `"/"` do `bykoji/bykoji_atendimento`; ~3 min do worker morto à força. Próxima: Fase 1 (uazapi real).
