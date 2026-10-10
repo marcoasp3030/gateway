@@ -4,7 +4,7 @@ Banco `gateway`, Postgres próprio do gateway. O backend do painel autentica seu
 
 **Legenda:** ✅ implantado e em produção · ⏳ planejado, **não disponível** (a fase está indicada). Não construir telas sobre rotas ⏳.
 
-**Publicação atual (10/10/2026):** imagem `gateway:8646078`, migrações 001–021, serviço em mock/dry. Processos: recepção (`gateway`), 2 `worker` e 1 `agendador`, com a **fila durável ligada** (`FILA_DURAVEL=on`, desde 10/10/2026): a recepção só valida, grava e agenda; quem processa são os workers. Voltar: `sh scripts/fila_duravel.sh desligar` (ver `docs/CAPACIDADE.md`); a chave não muda nenhuma rota deste contrato. Tudo marcado ✅ abaixo foi conferido no serviço em produção. Histórico em `PROGRESS.md`.
+**Publicação atual (10/10/2026):** imagem `gateway:4cb04d9`, migrações 001–022, serviço em mock/dry. Processos: recepção (`gateway`), 2 `worker` e 1 `agendador`, com a **fila durável ligada** (`FILA_DURAVEL=on`, desde 10/10/2026): a recepção só valida, grava e agenda; quem processa são os workers. Voltar: `sh scripts/fila_duravel.sh desligar` (ver `docs/CAPACIDADE.md`); a chave não muda nenhuma rota deste contrato. Tudo marcado ✅ abaixo foi conferido no serviço em produção. Histórico em `PROGRESS.md`.
 
 Rotas relativas a `/admin/v1`, salvo indicação de rota absoluta. Escritas confirmadas gravam auditoria na mesma transação, sem corpos nem segredos. Suspender/pausar usa PATCH.
 
@@ -174,6 +174,28 @@ Estado persistente por agente: três falhas consecutivas em cinco minutos abrem 
 - `GET /admin/v1/tenants/{t}/catalogo/itens` — filtros `unidade`, `tipo`, `ativo`, `q` (sem acento, tolerante); `limite` 1–200, `cursor` (id). `GET /admin/v1/tenants/{t}/catalogo/resumo` — contagens por unidade e tipo.
 - **Unidades** (`/admin/v1/tenants/{t}/unidades`) ganharam: `codigo` (liga a unidade aos itens do catálogo; único na empresa), `endereco`, `telefone`, `whatsapp_pedidos` (8–16 dígitos; único na empresa), `formas_pagamento`, `taxa_entrega`, `pedido_minimo`, `area_entrega`, `aceita_retirada`, `regras`. **Nulo = não informado**: o agente não afirma nada sobre o campo e diz que a unidade confirma no retorno do pré-pedido. Todos, menos `whatsapp_pedidos`, vão no bloco `unidades` do pacote ao agente, junto de `horarios`, `aberta_agora` e `proxima_abertura`.
 - **Busca para o agente:** `GET /api/v1/catalogo/busca?conversation_id=...&q=...&unidade=...` (cabeçalho `X-API-Key`, escopo `ferramentas:catalogo`). Só itens ativos; sem acento, sem diferença de maiúsculas e tolerante a erro de digitação; até 20 resultados. Devolve `item_id`, `codigo`, `unidade`, `categoria`, `nome`, `descricao`, `preco` (número ou `null`), `alcoolico`, `delivery`, `tipo`, `observacao`.
+
+**Carrinho e pré-pedido (Fase 4, bloco 2)** — rotas das Skills do agente: cabeçalho `X-API-Key` com escopo `ferramentas:pedidos`. A empresa vem da chave (nunca de cabeçalho ou corpo). Exigem conversa existente, do agente da chave, com o módulo `pedidos` ligado na empresa e no modelo; senão 404.
+
+| Método e rota | Função |
+|---|---|
+| `GET /api/v1/carrinho/{conversation_id}` | Carrinho: itens, subtotal, taxa, total e o que falta. |
+| `POST /api/v1/carrinho/{conversation_id}/itens` | `{item_id, quantidade (1–99, padrão 1), observacao}`. Mesmo item com a mesma observação soma. |
+| `PATCH /api/v1/carrinho/{conversation_id}/itens/{id}` | `{quantidade, observacao}`; quantidade 0 remove. `id` é o da linha do carrinho. |
+| `DELETE /api/v1/carrinho/{conversation_id}/itens/{id}` | Remove a linha. |
+| `DELETE /api/v1/carrinho/{conversation_id}` | Esvazia (solta a unidade e a confirmação de maioridade). |
+| `PUT /api/v1/carrinho/{conversation_id}/entrega` | `{unidade, modalidade: delivery|retirada, endereco, horario, observacao, maioridade_confirmada}`; só muda o que vier. |
+| `POST /api/v1/pedidos` | `{conversation_id}` → fecha o carrinho em pré-pedido `aguardando_loja` (201). |
+| `GET /api/v1/pedidos/{numero}?conversation_id=...` | Situação do pedido (só da conversa dona). |
+| `POST /api/v1/pedidos/{numero}/cancelar` | `{conversation_id, motivo}` → cancela enquanto estiver `aguardando_loja`. |
+
+- **Resposta de escrita:** `{"ok": true, "carrinho": {...}}` com o carrinho completo: `unidade`, `modalidade`, `endereco`, `horario`, `observacao`, `maioridade_confirmada`, `itens` (`id`, `item_id`, `codigo`, `nome`, `quantidade`, `preco_unitario`, `subtotal`, `observacao`, `alcoolico`), `numero_itens`, `subtotal`, `taxa_entrega` (nula quando a unidade não tem taxa cadastrada ou não é entrega), `total`, `pedido_minimo`, `tem_alcoolico`, `faltando` (`itens`, `modalidade`, `endereco`, `maioridade_confirmada`) e `pode_fechar`.
+- **Recusa:** envelope de erro com `detalhes.motivo` e, quando há carrinho, o campo `carrinho` atualizado. Motivos: `item_inexistente` (404), `item_inativo`, `sem_preco`, `sem_delivery`, `unidade_diferente`, `unidade_inexistente` (404), `carrinho_cheio`, `linha_inexistente` (404), `carrinho_vazio`, `falta_modalidade`, `falta_endereco`, `falta_maioridade`, `retirada_indisponivel`, `abaixo_do_minimo` (todos 422 salvo indicação), `preco_alterado` (409: o preço mudou no catálogo, o carrinho foi atualizado e precisa ser reconfirmado), `pedido_inexistente` (404), `pedido_nao_cancelavel` (409).
+- **Regras (validadas no gateway, independentemente do agente):** item só entra se ativo, com preço e `delivery` diferente de `nao`; carrinho de uma unidade só; preço sempre do catálogo (copiado ao entrar e revalidado ao fechar; o agente não informa preço); bebida alcoólica só fecha com `maioridade_confirmada`; delivery exige endereço; `pedido_minimo` e `aceita_retirada` da unidade são respeitados; pedido fechado não muda (itens novos abrem outro carrinho); cancelamento só pelo dono e só antes de a unidade decidir (SEG06).
+- **Pedido:** `numero` (5 dígitos ou mais, único na empresa), `status` (`aguardando_loja | confirmado | recusado | cancelado`), `itens` (cópia: `codigo`, `nome`, `quantidade`, `preco_unitario`, `subtotal`, `observacao`, `alcoolico`), `subtotal`, `taxa_entrega`, `total`, `unidade`, `modalidade`, `endereco`, `horario`, `observacao`, `motivo`, `cliente_nome`.
+- **Painel:** `GET /admin/v1/tenants/{t}/pedidos` (filtros `status`, `unidade`; `limite` 1–100; `cursor` = id; mais novos primeiro) e `GET /admin/v1/tenants/{t}/pedidos/{numero}`; incluem `cliente_telefone` e `decidido_por`. Confirmar e recusar pelo painel entram no bloco 3.
+- **Webhooks de saída:** `pedido.criado` e `pedido.cancelado`, com `numero`, `status`, `conversation_id`, `unidade`, `modalidade`, `itens`, `subtotal`, `taxa_entrega`, `total`, `tem_alcoolico` (sem telefone nem endereço). Auditoria: `pedido.criado`, `pedido.cancelado`.
+- **Pacote ao agente:** `contexto_modulos.pedidos` = `{"carrinho": {...}, "ultimo_pedido": {numero, status, total, criado_em} | null}`.
 
 **Limites compartilhados (fila durável, ativos quando `FILA_DURAVEL=on`):** `max_lotes_simultaneos` por empresa e `max_concorrencia` por agente valem somados entre todos os workers (vagas no Redis). Padrão 5 e 5; os dois valem ao mesmo tempo (uma conversa precisa de vaga na empresa **e** no agente). Por empresa: `PUT /admin/v1/tenants/{t}/config`; por agente: `PATCH /admin/v1/tenants/{t}/agentes/{a}` (1–100; nulo herda). Como dimensionar: `docs/CAPACIDADE.md`. Empresa no limite não atrasa as outras (INV07).
 
