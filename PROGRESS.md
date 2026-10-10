@@ -858,3 +858,28 @@ PY
 - Efeito do job de conversa vazia na primeira rodada: 3 conversas do bykoji encerradas como `vazia` — são conversas de outros contatos da instância de teste (fora do piloto) que só tinham anexo. Nada foi enviado a elas.
 - Para o [PAINEL]: lista de conversas com `encerrada_em`, `desfecho`, `limitado_ate`; configuração `max_msgs_por_minuto_contato`; eventos novos de auditoria `conversa.reaberta`, `conversa.encerrada` (vazia), `contato.limite_excedido`, `resposta.descartada`; `conversa.devolvida` pode ter ator `atendente`.
 - Pendências da Fase 3: roteiro pelo celular (Marco); **alerta de transbordo** para `alerta_telefone` (não estava na lista do bloco 3; não implementado); reativar o canal API de bench quando o agente voltar a envio de teste.
+
+## Fase 4 — Bloco 1: catálogo, importação CSV, busca e unidades — 2026-10-10
+
+- Status: **implantado e parado para validação.** Imagem `gateway:8646078` (volta: `gateway:7b7c6f3`, conferida nos 4 containers), **migração 021** aplicada com a imagem antiga rodando (health OK), schema 21. Envio real inalterado: só `bykoji/bykoji_atendimento`, piloto `["5511942717046"]`. Nenhum cliente real.
+- Feito (`8646078`):
+  - **Migração 021:** em `catalogo_itens`, `codigo` (único por empresa), `tipo`, `alcoolico`, `delivery`, `observacao`; `preco` passa a aceitar nulo e proíbe zero. Em `tenant_unidades`, `codigo`, `endereco`, `telefone`, `whatsapp_pedidos`, `formas_pagamento`, `taxa_entrega`, `pedido_minimo`, `area_entrega`, `aceita_retirada`, `regras`. Tabelas novas `carrinhos` (um aberto por conversa; `maioridade_confirmada`), `carrinho_itens` (preço unitário copiado do catálogo) e `pedidos` (número curto; `aguardando_loja | confirmado | recusado | cancelado`). A anonimização (LGPD) acompanha carrinho e pedido e apaga endereço e observações.
+  - **Importação:** `POST /admin/v1/tenants/{t}/catalogo/importar` (simulação por padrão) e `scripts/importar_catalogo.py` (`--aplicar` para gravar). Upsert pelo `codigo`; o que some do arquivo fica inativo; erro em qualquer linha não grava nada; preço vazio vira nulo e zero é recusado.
+  - **Busca do agente:** `GET /api/v1/catalogo/busca` com filtro de unidade, sem acento e tolerante a erro de digitação (ordenação por relevância no gateway; a extensão `pg_trgm` não está instalada e não foi necessária), só ativos.
+  - **Unidades:** os campos novos na API administrativa e no bloco `unidades` do pacote ao agente (nulo = não informado; `whatsapp_pedidos` não vai ao agente). Listagem e resumo do catálogo para o painel.
+- **O arquivo `.local/bykoji_catalogo.csv` não estava no servidor.** Foi gravado a partir do anexo da mensagem do Marco (UTF-8 com BOM, permissão 600, fora do git) e conferido: 888 linhas de item + cabeçalho, 11 colunas em todas, códigos em sequência completa por prefixo (MOR 1–250, EIN 1–193, VNC 1–222, GUE 1–223), prefixo coerente com a unidade. SHA-256 `b2f97e98…ea15e`. Como é uma transcrição, vale reimportar o arquivo original quando ele estiver no servidor (a reimportação só atualiza o que diferir).
+- **Unidades do bykoji criadas** (4): morumbi, einstein, vila_nova_conceicao, patio_guedala, com endereço, telefone (Pátio Guedala sem) e horários do salão informados pelo Marco; `regras` avisa que os horários são do salão e o delivery está a confirmar (Morumbi: segunda não informada; Einstein: domingo fechado e taxa de 13% nos quartos, só texto). `whatsapp_pedidos`, `formas_pagamento`, `taxa_entrega`, `pedido_minimo`, `area_entrega` e `aceita_retirada` vazios.
+- **Importação no bykoji:** simulação → 888 a inserir, 0 erros, nada gravado (conferido: 0 itens no banco). Real → 888 inseridos. Repetida → 0 inseridos, 0 atualizados, 888 inalterados.
+
+| Unidade | item | adicional | opcao_executivo | regra | Total | Ativos | Com preço | Vendáveis | Alcoólicos |
+|---|---|---|---|---|---|---|---|---|---|
+| morumbi | 222 | 2 | 26 | 0 | 250 | 224 | 0 | 0 | 63 |
+| einstein | 176 | 1 | 15 | 1 | 193 | 177 | 0 | 0 | 18 |
+| vila_nova_conceicao | 200 | 2 | 20 | 0 | 222 | 202 | 0 | 0 | 62 |
+| patio_guedala | 201 | 4 | 18 | 0 | 223 | 205 | 193 | 193 | 65 |
+| **Total** | 799 | 9 | 79 | 1 | 888 | 808 | 193 | 193 | 208 |
+
+  - Nenhum preço zero; 695 sem preço (nulo). No Pátio Guedala, 12 itens ativos sem preço (“preço sob consulta”).
+- Validações: `sh scripts/test_suite.sh` → **173 passed** (5 novos em `tests/test_fase4_catalogo.py`: reimportar não duplica, preço vazio nulo e nunca zero, item removido fica inativo, busca sem acento, unidades e pacote), só bancos `_test`. Backup `/home/twadmin/backups/gateway/pre-fase4-b1-20261010T160134Z/gateway.dump` (21 tabelas). Produção: 4 containers `healthy`, fila zerada; busca “tempura” no Pátio Guedala devolve 7 itens com preço e no Morumbi 7 com preço nulo; “yakisoba” (com erro) acha Yakissoba; “creme brulee” acha “Crème Brûlée de Matchá”.
+- Observações para o Marco: no CSV, **“Heineken Zero” está com `alcoolico = sim`** nas três unidades em que aparece; todos os itens estão com `delivery = a_confirmar`; nenhuma chave de API ativa no bykoji (as Skills do Skyone vão precisar de uma com os escopos `ferramentas:catalogo` e `ferramentas:pedidos`, a criar no bloco 3).
+- Efeito no atendimento do piloto: o agente passa a receber as 4 unidades (endereço, telefone, horários, regras) no pacote.
