@@ -8,7 +8,7 @@ from test_pipeline_multi import RedisFila,ativo
 
 pytestmark=pytest.mark.skipif(not DSN,reason='Postgres de teste obrigatório')
 SEMANA={d:[['00:00','23:59']] for d in ('seg','ter','qua','qui','sex','sab','dom')}
-CAMPOS={'codigo','nome','ativa','endereco','telefone','fuso','situacao','agenda','delivery','retirada','area_entrega','taxa','pedido_minimo','formas_pagamento','regras'}
+CAMPOS={'codigo','nome','ativa','endereco','telefone','situacao','agenda','aceita_retirada','delivery','taxa_entrega','pedido_minimo','formas_pagamento','area_entrega','regras'}
 
 
 async def chave(client,tenant,escopos=('ferramentas:catalogo',)):
@@ -41,13 +41,13 @@ def test_info_unidades_contrato_nulos_filtro_e_isolamento():
             async def info(headers=None,**params):
                 return await client.get('/api/v1/unidades',params={'conversation_id':conv,**params},headers={'X-API-Key':segredo,'Authorization':'',**(headers or {})})
             r=await info();assert r.status_code==200,r.text
-            # Só as ativas da empresa da chave, em ordem de nome; contrato exato.
-            us=r.json()['unidades'];assert [u['codigo'] for u in us]==['centro','zona_sul'] and set(r.json())=={'unidades'}
+            # Todas as da empresa da chave: ativas em ordem de nome e a desativada marcada, sem sumir; contrato exato.
+            us=r.json()['unidades'];assert [(u['codigo'],u['ativa']) for u in us]==[('centro',True),('zona_sul',True),('antiga',False)] and set(r.json())=={'unidades'}
             assert all(set(u)==CAMPOS for u in us)
-            c,z=us
-            assert (c['nome'],c['ativa'],c['endereco'],c['telefone'],c['retirada'],c['area_entrega'],c['pedido_minimo'],c['formas_pagamento'],c['regras'])==(
+            c,z,_=us
+            assert (c['nome'],c['ativa'],c['endereco'],c['telefone'],c['aceita_retirada'],c['area_entrega'],c['pedido_minimo'],c['formas_pagamento'],c['regras'])==(
                 'Centro',True,'Rua A, 1','(11) 3000-0000',True,'Centro e Bela Vista',80.0,'Pix e cartão','Sem troco para 200')
-            assert c['taxa']=={'modo':'fixa','valor':12.5} and c['delivery'] is None and c['fuso']=='America/Sao_Paulo'
+            assert c['taxa_entrega']==12.5 and c['delivery'] is None
             # Situação: a mesma que o painel recebe (mesma função do G1).
             painel=(await client.get(f'{base}/{cheia["id"]}')).json()['situacao']
             assert {k:c['situacao'][k] for k in painel}==painel and c['situacao']['aberta_agora'] is True and c['situacao']['fecha_as']
@@ -56,10 +56,10 @@ def test_info_unidades_contrato_nulos_filtro_e_isolamento():
             assert c['agenda']==(await client.get(f'{base}/{cheia["id"]}/agenda')).json()['dias'] and len(c['agenda'])==7
             assert set(c['agenda'][0])=={'data','dia','origem','fechado','faixas','motivo'}
             # Não informado vem nulo, sem inventar; sem horário = aberta_agora nulo.
-            assert [z[k] for k in ('endereco','telefone','retirada','area_entrega','taxa','pedido_minimo','formas_pagamento','regras','delivery')]==[None]*9
+            assert [z[k] for k in ('endereco','telefone','aceita_retirada','area_entrega','taxa_entrega','pedido_minimo','formas_pagamento','regras','delivery')]==[None]*9
             assert (z['situacao']['aberta_agora'],z['situacao']['motivo'])==(None,'sem_horario') and all(d['fechado'] for d in z['agenda'])
             # O WhatsApp de pedidos nunca sai; nada da outra empresa aparece.
-            assert '5511900000010' not in r.text and 'whatsapp' not in r.text and 'Do Bravo' not in r.text and 'uni_' not in r.text
+            assert '5511900000010' not in r.text and 'whatsapp' not in r.text and 'Do Bravo' not in r.text and 'uni_' not in r.text and 'criado_em' not in r.text and 'actor' not in r.text
             # Pausa e exceção aparecem na hora.
             amanha=(datetime.now(timezone.utc)+timedelta(days=1)).date().isoformat()
             await client.post(f'{base}/{cheia["id"]}/pausar',json={'indefinida':True,'motivo':'falta de luz'})
@@ -67,7 +67,19 @@ def test_info_unidades_contrato_nulos_filtro_e_isolamento():
             c=(await info(unidade='centro')).json()['unidades'];assert len(c)==1
             assert (c[0]['situacao']['aberta_agora'],c[0]['situacao']['motivo'],c[0]['situacao']['pausa_motivo'])==(False,'pausa','falta de luz')
             dia=[d for d in c[0]['agenda'] if d['data']==amanha];assert dia and (dia[0]['origem'],dia[0]['fechado'],dia[0]['motivo'])==('excecao',True,'feriado')
-            # Filtro: unidade desativada vem marcada; inexistente → 404.
+            # Reaberta e com exceção HOJE (fechado): fechada por exceção, com a próxima abertura.
+            await client.post(f'{base}/{cheia["id"]}/reabrir')
+            from zoneinfo import ZoneInfo
+            hoje=datetime.now(ZoneInfo('America/Sao_Paulo')).date().isoformat()
+            assert (await info(unidade='centro')).json()['unidades'][0]['situacao']['aberta_agora'] is True
+            await client.post(f'{base}/{cheia["id"]}/excecoes',json={'data':hoje,'fechado':True,'motivo':'manutenção'})
+            c=(await info(unidade='centro')).json()['unidades'][0]
+            assert c['agenda'][0]['data']==hoje and (c['agenda'][0]['origem'],c['agenda'][0]['fechado'],c['agenda'][0]['motivo'])==('excecao',True,'manutenção')
+            # (pode estar aberta só se um turno da véspera cruzasse a meia-noite; aqui a grade acaba 23:59)
+            assert (c['situacao']['aberta_agora'],c['situacao']['motivo'])==(False,'excecao') and c['situacao']['proxima_abertura']
+            # Filtro: unidade desativada vem marcada; inexistente → 404 com o envelope de erro das outras Skills.
+            r404=await info(unidade='nao_existe');rconv=await info(conversation_id='alpha:x:nada')
+            assert r404.status_code==404 and r404.json()==rconv.json() and (await info(unidade='uni_x',headers={'X-Tenant-ID':'bravo'})).status_code==404
             d=(await info(unidade='antiga')).json()['unidades'];assert len(d)==1 and d[0]['ativa'] is False and d[0]['situacao']['motivo']=='inativa'
             assert (await info(unidade='nao_existe')).status_code==404 and fora['id'] and vazia['id']
             # Segurança: sem chave 401; conversa de outra empresa ou inexistente 404; sem o escopo 403; sem conversa 400.
@@ -76,7 +88,7 @@ def test_info_unidades_contrato_nulos_filtro_e_isolamento():
             assert (await info(headers={'X-API-Key':await chave(client,'alpha',('notificar',))})).status_code==403
             assert (await client.get('/api/v1/unidades',headers={'X-API-Key':segredo,'Authorization':''})).status_code==400
             # A empresa vem sempre da chave: cabeçalho ou parâmetro com outra empresa não muda nada.
-            r=await info(headers={'X-Tenant-ID':'bravo'},tenant_id='bravo');assert [u['codigo'] for u in r.json()['unidades']]==['centro','zona_sul']
+            r=await info(headers={'X-Tenant-ID':'bravo'},tenant_id='bravo');assert [u['codigo'] for u in r.json()['unidades']]==['centro','zona_sul','antiga']
             # A chave do bravo só enxerga o bravo.
             rb=await client.get('/api/v1/unidades',params={'conversation_id':conv_b},headers={'X-API-Key':await chave(client,'bravo'),'Authorization':''})
             assert [u['nome'] for u in rb.json()['unidades']]==['Do Bravo'] and (await client.get('/api/v1/unidades',params={'conversation_id':conv},headers={'X-API-Key':await chave(client,'bravo'),'Authorization':''})).status_code==404
@@ -177,4 +189,28 @@ def test_migracao_025_nao_altera_dado_fora_da_regra_falha_e_nada_muda(tmp_path):
         # Corrigido por quem decide (aqui, o teste), a migração passa.
         await conn.execute("UPDATE tenant_unidades SET whatsapp_pedidos='5511900000010' WHERE id='uni_1'")
         assert await migrar.aplicar(conn)==['025_telefone_e164.sql']
+    banco(cenario)
+
+
+def test_info_unidades_turno_que_cruza_a_meia_noite_usa_a_funcao_do_G1(monkeypatch):
+    """Sexta 19:00–02:00: sábado 00:30 ainda está aberta (fecha às 02:00) e às 02:30 já fechou."""
+    from zoneinfo import ZoneInfo
+    from modulos import unidades as M
+    Z=ZoneInfo('America/Sao_Paulo')
+    async def cenario(conn):
+        await migrar.aplicar(conn)
+        app,client=preparar(conn)
+        async with client:
+            await criar(client)
+            r=await client.post('/admin/v1/tenants/alpha/unidades',json={'nome':'Bar','codigo':'bar','horarios':{'sex':[['19:00','02:00']],'sab':[['12:00','16:00']]}})
+            assert r.status_code==201,r.text
+            row=await conn.fetchrow("SELECT * FROM tenant_unidades WHERE tenant_id='alpha' AND codigo='bar'")
+            # 2026-10-10 é sábado.
+            u=await M.unidade_para_o_agente(conn,'alpha',row,'America/Sao_Paulo',datetime(2026,10,10,0,30,tzinfo=Z))
+            assert (u['situacao']['aberta_agora'],u['situacao']['motivo'],u['situacao']['fecha_as'])==(True,None,'2026-10-10T02:00-03:00')
+            assert u['agenda'][0]['data']=='2026-10-10' and u['agenda'][0]['faixas']==[['12:00','16:00']] and len(u['agenda'])==7
+            assert [d['faixas'] for d in u['agenda'] if d['dia']=='sex']==[[['19:00','02:00']]]
+            u=await M.unidade_para_o_agente(conn,'alpha',row,'America/Sao_Paulo',datetime(2026,10,10,2,30,tzinfo=Z))
+            assert (u['situacao']['aberta_agora'],u['situacao']['motivo'],u['situacao']['proxima_abertura'])==(False,'horario','2026-10-10T12:00-03:00')
+            assert 'id' not in u and 'whatsapp_pedidos' not in u
     banco(cenario)
