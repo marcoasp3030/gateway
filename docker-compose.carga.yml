@@ -1,0 +1,84 @@
+# Pilha ISOLADA para o teste de carga e de falhas da fila durável (Fase 0.6, bloco 5).
+# Não entra no COMPOSE_FILE do .env e não toca na produção: banco e Redis próprios,
+# segredos gerados na hora, nenhuma porta publicada, agentes só mock/dry.
+# Uso: scripts/carga_fila.sh (ver docs/CAPACIDADE.md).
+name: gwcarga
+
+x-app: &app
+  image: ${CARGA_IMAGEM:-gateway-gateway}
+  pull_policy: never
+  env_file: ${CARGA_ENV:?Use scripts/carga_fila.sh}
+  read_only: true
+  tmpfs:
+    - /tmp
+  security_opt:
+    - no-new-privileges:true
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: carga
+      POSTGRES_USER: carga
+      POSTGRES_PASSWORD: ${CARGA_PG_SENHA:?Use scripts/carga_fila.sh}
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U carga -d carga"]
+      interval: 2s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    environment:
+      REDIS_PASSWORD: ${CARGA_REDIS_SENHA:?Use scripts/carga_fila.sh}
+    # Mesma persistência da produção (INV14): o teste de queda do Redis depende dela.
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--requirepass", "${CARGA_REDIS_SENHA}"]
+    volumes:
+      - ${CARGA_DADOS:?Use scripts/carga_fila.sh}/redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping"]
+      interval: 2s
+      retries: 30
+
+  # Mesmos limites de memória e CPU da produção.
+  gateway:
+    <<: *app
+    stop_grace_period: 90s
+    mem_limit: 192m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=3)"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  worker:
+    <<: *app
+    command: ["python", "processos.py", "worker"]
+    stop_grace_period: 90s
+    deploy:
+      replicas: ${WORKERS:-2}
+    mem_limit: 256m
+    cpus: 0.5
+
+  agendador:
+    <<: *app
+    command: ["python", "processos.py", "agendador"]
+    stop_grace_period: 20s
+    mem_limit: 128m
+    cpus: 0.25
+
+  # Ferramenta do teste: só sobe com `run`.
+  carga:
+    <<: *app
+    profiles: ["ferramenta"]
+    volumes:
+      - ./scripts:/workspace/scripts:ro
+    working_dir: /app
+    entrypoint: ["python", "/workspace/scripts/carga_fila.py"]
