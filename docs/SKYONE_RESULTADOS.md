@@ -233,3 +233,48 @@ Executado pelo Marco no fluxo **`k3iynwDoOU`** (Basic Auth), com espera artifici
 - `timeout_s` padrão do agente passa a **60 s** (migração 013; agentes no valor antigo de 90 s ajustados para 60 s). O máximo aceito pela API continua 600 s.
 - **Atendimento usa 60 s.** Tarefas que precisem de mais tempo só no **modo assíncrono** (callback, Fase 0.6). Com 60 s, o gateway desiste antes do teto em que o Skyone fica mudo e entrega o fallback.
 - O callback será implementado e testado na 0.6 com o provedor simulado; a validação com um **callback real do Skyone** fica para a Fase 6.5.
+
+## Comparação de modelos no agente "Atendimento By Koji" (Fase 2)
+
+Fluxo `atendente_delivery` (mesma URL), agente sem base de conhecimento e sem Skills, mesmo prompt; só o modelo muda entre as rodadas. Medido pelo gateway em produção, com IA real e **envio de teste** (nada sai ao WhatsApp).
+
+- **Bench:** 5 clientes simulados ao mesmo tempo, cada um enviando "oi" e "vocês entregam no Morumbi?" (um turno por cliente; debounce de 4 s incluído no total). `agente` = tempo da chamada ao Skyone; `total` = da última mensagem do cliente até o fim do envio.
+- **Simular:** conversas novas a cada rodada (sem histórico): "oi, vocês entregam no Morumbi?" → "obrigado" na mesma conversa; e, em outra conversa, "quero falar com uma pessoa".
+- **Fora do formato JSON:** o gateway não enxerga se o "Interpretar Resposta" precisou tratar a saída do modelo como texto puro, porque o Retorno chega igual nos dois casos. A coluna conta só **indícios visíveis** no texto entregue (chaves, aspas de JSON ou cercas de código). Para contar com exatidão é preciso um marcador no Retorno.
+
+### Bench (5 clientes)
+
+| Rodada (UTC) | Modelo | Turnos | Erros | agente_p50 | agente_p95 | total_p50 | total_p95 | Aviso de demora |
+|---|---|---|---|---|---|---|---|---|
+| 10/10 04:25 | não informado (configuração anterior ao teste A/B) | 5 | 0 | 16,2 s | 24,2 s | 21,1 s | 29,0 s | 3 de 5 |
+| 10/10 14:18 | **não informado na mensagem — a preencher** | 5 | 0 | 8,8 s | 10,6 s | 14,4 s | 15,8 s | 0 de 5 |
+
+Tempos do agente por turno: 04:25 → 16,2 · 22,9 · 24,6 · 10,1 · 10,1 s; 14:18 → 9,4 · 6,8 · 10,9 · 8,8 · 7,8 s.
+
+### Conversas do Simular
+
+| Rodada (UTC) | Modelo | Mensagem | Agente | Total | Texto exato (um balão por linha) | Idioma | `acao` / motivo |
+|---|---|---|---|---|---|---|---|
+| 10/10 04:30 | não informado (anterior) | oi, vocês entregam no Morumbi? | 28,9 s | 33,0 s | "Boa noite, Jussara!"<br>"Sim, entregamos no Morumbi. Você pode me dizer o que gostaria de pedir, a quantidade e o endereço completo?" | português | `nenhuma` / — |
+| 10/10 04:30 | não informado (anterior) | obrigado | 15,2 s | 15,4 s | (nada; saiu só o aviso de demora) | — | `silencio` / `agradecimento_final` |
+| 10/10 05:00 | não informado (anterior, "Interpretar Resposta" v2) | quero falar com uma pessoa | 20,4 s | 24,8 s | "Boa noite! A equipe vai continuar o atendimento em instantes." | português | `transferir_humano` / `pediu_humano` |
+| 10/10 14:20 | **a preencher** | oi, vocês entregam no Morumbi? | 9,0 s | 13,1 s | "Bom dia! Entregamos sim, inclusive temos uma unidade no Morumbi."<br>"Como posso te ajudar com o seu pedido hoje? 🍣" | português | `nenhuma` / — |
+| 10/10 14:20 | **a preencher** | obrigado | 9,9 s | 14,0 s | (nada enviado) | — | `silencio` / `agradecimento_final` |
+| 10/10 14:21 | **a preencher** | quero falar com uma pessoa | 7,6 s | 11,8 s | "Bom dia! Vou te transferir para um de nossos atendentes agora mesmo."<br>"Um momento, por favor, a equipe já vai continuar o atendimento com você em instantes." | português | `transferir_humano` / `pediu_humano` (conversa pausada e aguardando atendente) |
+
+Respostas do bench das 14:18 (todas em português, dois balões cada):
+
+1. "Bom dia! Entregamos no Morumbi sim, inclusive temos uma unidade lá. 🍣" / "Para começar, você gostaria de fazer um pedido para entrega ou retirada?"
+2. "Bom dia! Tudo bem?" / "Entregamos no Morumbi sim, inclusive temos uma unidade lá. Como posso te ajudar com seu pedido hoje? 🍣"
+3. "Bom dia! Sim, entregamos no Morumbi e temos uma unidade por lá." / "Você gostaria de fazer um pedido para entrega ou para retirada? 🍣"
+4. "Bom dia! Entregamos sim, temos inclusive uma unidade no Morumbi. 🍣" / "Poderia me passar o seu endereço completo para eu confirmar a disponibilidade para a sua localização?"
+5. "Bom dia! Entregamos sim, temos inclusive uma unidade no Morumbi para te atender 🍣" / "Você gostaria de fazer um pedido para entrega ou retirada?"
+
+### Fora do formato JSON (indícios visíveis)
+
+| Rodada (UTC) | Modelo | Respostas avaliadas | Com indício de texto fora do formato |
+|---|---|---|---|
+| 10/10 04:25–05:00 | não informado (anterior) | 8 | 0 |
+| 10/10 14:18–14:21 | **a preencher** | 8 | 0 |
+
+Observações da rodada das 14:18: nenhuma resposta passou de 15 s no agente (sem aviso de demora); `total_p95` ficou em 15,8 s, ainda 0,8 s acima da meta de 15 s (o debounce de 4 s está dentro desse total); o modelo desta rodada afirma que há "uma unidade no Morumbi" e usa emoji, o que a rodada anterior não fazia.

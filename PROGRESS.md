@@ -770,3 +770,11 @@ PY
 - Reteste no Simular (conversa nova, IA real, envio de teste; número fictício em `contatos_permitidos` só durante o teste, lista de volta a `["5511942717046"]`, conferido): “quero falar com uma pessoa” → enviado “Só um instante, estou verificando.” (aviso de demora) e “Boa noite! A equipe vai continuar o atendimento em instantes.”; turno com `acao=transferir_humano`, sem `motivo_silencio` nem `desfecho`; conversa **pausada** e **aguardando atendente** com motivo `transferido_pelo_agente`. Tempos: agente 20,4 s, total 24,8 s.
 - Anotado para depois do teste A/B de latência (sem mudar agora): rever o aviso de demora (`slow_notice_s` = 15 s), que hoje sai antes de respostas de 15–29 s e antes de silêncio.
 - `docs/SKYONE.md` continua pendente: `docs/fase2_skyone_atendente_delivery.md` não está no servidor (busca em todo o disco por nome e por arquivos `.md` recentes).
+
+## Fase 2 — comparação de modelos: rodada das 14:18 UTC — 2026-10-10
+
+- Nada alterado no gateway (imagem `gateway:ccf5113`). Piloto desligado só durante o bench e religado; números fictícios em `contatos_permitidos` só durante o Simular; lista de volta a `["5511942717046"]` (conferido). Envio sempre de teste.
+- **O modelo desta rodada não veio na mensagem** (o campo ficou como `<GPT-4.1 mini | Gemini 3 Flash>`); a tabela em `docs/SKYONE_RESULTADOS.md` está com “a preencher”.
+- Bench 5 clientes: 5/5, 0 erros; agente_p50 8,8 s, agente_p95 10,6 s; total_p50 14,4 s, **total_p95 15,8 s**; nenhum aviso de demora.
+- Simular: “oi, vocês entregam no Morumbi?” 9,0 s (`nenhuma`); “obrigado” 9,9 s (`silencio`, `agradecimento_final`, nada enviado); “quero falar com uma pessoa” 7,6 s (`transferir_humano`, motivo `pediu_humano`, conversa pausada e aguardando atendente). Todas em português.
+- Fora do formato JSON: o gateway não consegue contar (o Retorno chega igual); 0 de 8 respostas com indício visível no texto.
