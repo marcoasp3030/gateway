@@ -729,3 +729,19 @@ PY
 - Observação de teste: `tests/test_fila_troca.py` (queda do Redis) e `tests/test_fila_justica.py` falharam uma vez cada em rodadas completas sob carga e passaram sozinhos e nas rodadas seguintes; são sensíveis a tempo. Ficam para revisar.
 - Para o [PAINEL]: `aguardando_motivo` pode vir `transferido_pelo_agente` ou `silencio_sem_motivo`; turnos têm `acao`, `motivo_silencio`, `desfecho`.
 - Pendências (dependem do Marco): fluxo validado e conteúdo dos nós para o `docs/SKYONE.md`; URL e credencial pelo painel; depois, bench com 1, 5 e 10 clientes em envio de teste (parar se `total_p95` > 15 s). **O bench recusa agente com piloto ligado** e os clientes do bench não estão na lista de contatos: será preciso desligar o piloto do “Atendimento By Koji” durante o bench (envio continua em teste) ou medir em outro agente com a mesma URL.
+
+## Fase 2 — bench com IA real: PARADO (total_p95 > 15 s) — 2026-10-10
+
+- Status: **parado pela regra do plano.** Fluxo `atendente_delivery` cadastrado pelo Marco no “Atendimento By Koji” (IA real, envio de teste). Sem build nem migração; imagem `gateway:fba9283`.
+- `scripts/bench.py`: opção `--ia-real` (aceita agente em IA real; envio sempre de teste; piloto desligado) e `--texto` (mensagens do cliente simulado). Teste novo em `tests/test_bench.py`.
+- Execução (04:24–04:26 UTC): piloto desligado só durante o bench e religado em seguida com `contatos_permitidos = ["5511942717046"]` (conferido). Cliente simulado: “oi” + “vocês entregam no Morumbi?” (debounce 4 s).
+
+| Clientes | Turnos | Erros | agente_p50 | agente_p95 | total_p50 | total_p95 | Aviso de demora (15 s) |
+|---|---|---|---|---|---|---|---|
+| 1 | 1 | 0 | 25,2 s | 25,2 s | 29,4 s | 29,4 s | 1 de 1 |
+| 5 | 5 | 0 | 16,2 s | 24,2 s | 21,1 s | 29,0 s | 3 de 5 |
+| 10 | não executado (parada) | | | | | | |
+
+- Tempos do agente nos 6 turnos: 25,2 · 16,2 · 22,9 · 24,6 · 10,1 · 10,1 s. Espera na fila (inclui o debounce de 4 s): 4,2–4,9 s. Zero erros, zero silêncio; `acao = nenhuma` em todos; respostas em 1 ou 2 balões.
+- Comparação: o fluxo anterior (mesma URL) respondia em 5,7–8,6 s (Fase 0.3) e 4,4 s no bench de 09/10. O tempo novo é do lado do Skyone (fluxo/agente novo), não do gateway: a espera na fila ficou no debounce.
+- Não feito por causa da parada: bench com 10 clientes; as três conversas do Simular; `docs/SKYONE.md` (o conteúdo dos nós não foi enviado).

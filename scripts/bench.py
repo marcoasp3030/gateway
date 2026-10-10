@@ -1,4 +1,4 @@
-"""Benchmark da API administrativa, somente agentes mock/dry já configurados.
+"""Benchmark da API administrativa: agentes em simulação com envio de teste; IA real só com --ia-real.
 
 PANEL_SERVICE_KEY=... python scripts/bench.py --tenant bykoji --agente ag_...
 Repita pares --tenant/--agente para executar alvos simultaneamente.
@@ -18,13 +18,14 @@ async def requisitar(c,metodo,url,**kw):
         raise ValueError('API recusou requisição: HTTP '+str(r.status_code))
     return r.json()
 
-async def executar(c,alvos,clientes=5,timeout=90):
+async def executar(c,alvos,clientes=5,timeout=90,ia_real=False,textos=None):
     preparados=[]
     for tenant,agente,canal in alvos:
         base=caminho(tenant)
         cfg=(await requisitar(c,'GET',base+'/agentes/'+quote(agente,safe='')))['configuracao_efetiva']
-        if cfg['status']!='ativo' or cfg['agente_mode']!='mock' or cfg['send_mode']!='dry' or cfg['modo_piloto']:
-            raise ValueError('Benchmark exige agente ativo mock/dry e piloto desligado')
+        # IA real só com --ia-real (gasta chamadas do provedor). O envio é sempre de teste: nada sai ao cliente.
+        if cfg['status']!='ativo' or cfg['send_mode']!='dry' or cfg['modo_piloto'] or (cfg['agente_mode']!='mock' and not ia_real):
+            raise ValueError('Benchmark exige agente ativo, envio de teste (dry), piloto desligado e simulação (ou --ia-real)')
         canais=(await requisitar(c,'GET',base+'/canais',params={'limite':99}))['itens']
         candidatos=[r for r in canais if r['agente_id']==agente and r['tipo']=='api' and r['ativo'] and (not canal or r['id']==canal)]
         if len(candidatos)!=1:
@@ -34,9 +35,9 @@ async def executar(c,alvos,clientes=5,timeout=90):
 
     async def cliente(t,a,can):
         usuario='bench-'+uuid.uuid4().hex
-        textos=['diagnostico '+usuario+' parte 1','diagnostico '+usuario+' parte 2']
+        enviados=list(textos) if textos else ['diagnostico '+usuario+' parte 1','diagnostico '+usuario+' parte 2']
         conv=None
-        for i,texto in enumerate(textos):
+        for i,texto in enumerate(enviados):
             if i: await asyncio.sleep(.15)
             r=await requisitar(c,'POST',caminho(t)+'/agentes/'+quote(a,safe='')+'/simular',json={'canal_id':can,'identificador':usuario,'texto':texto,'message_id':usuario+'-'+str(i)})
             if r.get('ignorado'): raise ValueError('Simulação ignorada')
@@ -46,7 +47,7 @@ async def executar(c,alvos,clientes=5,timeout=90):
             await asyncio.sleep(.3)
             msgs=(await requisitar(c,'GET',caminho(t)+'/conversas/'+quote(conv,safe='')+'/mensagens'))['itens']
             if any(m['origem']=='bot' for m in msgs):
-                if [m['conteudo'] for m in msgs if m['origem']=='cliente']!=textos: raise ValueError('Histórico divergente')
+                if [m['conteudo'] for m in msgs if m['origem']=='cliente']!=enviados: raise ValueError('Histórico divergente')
                 return {'tenant':t,'agente':a,'canal':can,'conversation_id':conv,'tempo_s':round(time.monotonic()-inicio,3)}
         raise ValueError('Timeout aguardando resposta')
 
@@ -74,6 +75,8 @@ async def main():
     p.add_argument('--canal',action='append')
     p.add_argument('--clientes',type=int,default=5)
     p.add_argument('--timeout',type=float,default=90)
+    p.add_argument('--ia-real',action='store_true',help='aceita agente em IA real (envio continua de teste); gasta chamadas do provedor')
+    p.add_argument('--texto',action='append',help='mensagem do cliente simulado (repita para várias); padrão: duas mensagens de diagnóstico')
     a=p.parse_args()
     if not a.panel_key: p.error('Forneça PANEL_SERVICE_KEY ou --panel-key')
     if len(a.tenant)!=len(a.agente) or (a.canal and len(a.canal)!=len(a.agente)): p.error('Repita os pares tenant/agente e, se usado, canal')
@@ -81,7 +84,7 @@ async def main():
     alvos=list(zip(a.tenant,a.agente,a.canal or [None]*len(a.agente)))
     if len({(t,ag) for t,ag,can in alvos})!=len(alvos): p.error('Alvos duplicados')
     async with httpx.AsyncClient(base_url=a.url.rstrip('/'),headers={'Authorization':'Bearer '+a.panel_key,'X-Actor':'benchmark'},timeout=30,follow_redirects=False) as c:
-        try: result=await executar(c,alvos,a.clientes,a.timeout)
+        try: result=await executar(c,alvos,a.clientes,a.timeout,a.ia_real,a.texto)
         except (ValueError,httpx.HTTPError,KeyError): raise SystemExit('Benchmark recusado/falhou; confira configuração e disponibilidade (segredos omitidos)') from None
     print(json.dumps(result,ensure_ascii=False,indent=2))
     return 0 if result['erros']==0 and result['respondidos']==result['esperados'] else 1

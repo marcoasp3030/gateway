@@ -32,3 +32,26 @@ def test_bench_multitenant_novas_rotas_e_erro_de_metrica():
     r=await bench.executar(c2,[('alpha','alphaag',None)],1,2)
     assert r['respondidos']==0 and r['erros']>0
  asyncio.run(caso())
+
+
+def test_bench_ia_real_so_com_opcao_e_sempre_com_envio_de_teste():
+ async def caso():
+  cfg={'status':'ativo','agente_mode':'live','send_mode':'dry','modo_piloto':False};vistos=[]
+  def responder(req):
+   path=req.url.path
+   if path.endswith('/agentes/ag'): return httpx.Response(200,json={'configuracao_efetiva':cfg})
+   if path.endswith('/canais'): return httpx.Response(200,json={'itens':[{'id':'can','agente_id':'ag','tipo':'api','ativo':True}]})
+   if path.endswith('/metricas'): return httpx.Response(200,json={'turnos':len(vistos),'erros':0})
+   if path.endswith('/simular'): vistos.append(json.loads(req.content)['texto']);return httpx.Response(200,json={'conversation_id':'alpha:can:u'})
+   if path.endswith('/mensagens'): return httpx.Response(200,json={'itens':[{'origem':'cliente','conteudo':t} for t in vistos]+[{'origem':'bot','conteudo':'ok'}]})
+   raise AssertionError(path)
+  async with httpx.AsyncClient(base_url='http://teste',transport=httpx.MockTransport(responder)) as c:
+   import pytest
+   with pytest.raises(ValueError): await bench.executar(c,[('alpha','ag',None)],1,2)
+   r=await bench.executar(c,[('alpha','ag',None)],1,2,ia_real=True,textos=['oi, vocês entregam?'])
+   assert r['respondidos']==1 and r['erros']==0 and vistos==['oi, vocês entregam?']
+   for campo,valor in (('send_mode','live'),('modo_piloto',True)):
+    cfg[campo]=valor
+    with pytest.raises(ValueError): await bench.executar(c,[('alpha','ag',None)],1,2,ia_real=True)
+    cfg.update(send_mode='dry',modo_piloto=False)
+ asyncio.run(caso())
