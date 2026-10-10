@@ -985,3 +985,12 @@ PY
 ## Piloto: segundo contato — 2026-10-10 23:20 UTC
 
 - Por ordem explícita do Marco, `contatos_permitidos` do agente `bykoji/bykoji_atendimento` passou de `["5511942717046"]` para `["5511942717046", "5511947281513"]` (API admin, `X-Actor: marco`, auditado como `agentes.alterado`). Envio real continua em 1 de 5 agentes, piloto ligado, mesmo canal.
+
+## UX1 B2 — botões de resposta do agente — 2026-10-10 23:29 UTC
+
+- Status: **implantado e LIGADO só no agente `bykoji/bykoji_atendimento`** (ordem do Marco, `X-Actor: marco`). Código `90bbfdc`, imagem `gateway:90bbfdc`, schema **26**. Volta: `gateway:14c2843` (roda sobre o schema 26; não sobe do zero nele).
+- Entrega: `nucleo/botoes.py`, `uazapi.enviar_menu()` (`/send/menu`, `type: button`, só resposta), plano B em texto numerado, `mensagens.meta.botoes`, `botoes_interativos` (migração 026 em `tenant_config` e `agentes`, padrão `off`), bloco `botoes` em `GET /metricas`. Detalhes fixados na seção 9 de `docs/ESPEC_BOTOES.md` (erro incerto não reenvia; 4xx vira texto).
+- Testes: primeira rodada 204 passed + 1 failed (teste do G2 que assumia a 025 como última migração; corrigido o teste); rodada final **205 passed**, só bancos `_test`. Backup `/home/twadmin/backups/gateway/pre-ux1-b2-20261010T232751Z/gateway.dump` (27 tabelas, 600). Migração 026 aplicada com a imagem antiga no ar (health 200).
+- Conferência: 4 containers `healthy`, fila zerada, admin por fora 404, `/api/v1` sem chave 401, envio real em 1 de 5 agentes, zero erros nos logs.
+- `botoes_interativos` antes: `off` (origem plataforma) nos 5 agentes. Depois: `on` (origem agente) só em `bykoji/bykoji_atendimento`; os outros 4 seguem `off`.
+- Freio: `PATCH /admin/v1/tenants/bykoji/agentes/bykoji_atendimento {"botoes_interativos":"off"}` (ou `null` para voltar a herdar).
