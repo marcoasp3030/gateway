@@ -4,7 +4,7 @@ Banco `gateway`, Postgres próprio do gateway. O backend do painel autentica seu
 
 **Legenda:** ✅ implantado e em produção · ⏳ planejado, **não disponível** (a fase está indicada). Não construir telas sobre rotas ⏳.
 
-**Publicação atual (10/10/2026):** imagem `gateway:7423fac`, migrações 001–015, serviço em mock/dry. Processos: recepção (`gateway`), 2 `worker` e 1 `agendador`, com a **fila durável ligada** (`FILA_DURAVEL=on`, desde 10/10/2026): a recepção só valida, grava e agenda; quem processa são os workers. Voltar: `sh scripts/fila_duravel.sh desligar` (ver `docs/CAPACIDADE.md`); a chave não muda nenhuma rota deste contrato. Tudo marcado ✅ abaixo foi conferido no serviço em produção. Histórico em `PROGRESS.md`.
+**Publicação atual (10/10/2026):** imagem `gateway:03657d0`, migrações 001–016, serviço em mock/dry. Processos: recepção (`gateway`), 2 `worker` e 1 `agendador`, com a **fila durável ligada** (`FILA_DURAVEL=on`, desde 10/10/2026): a recepção só valida, grava e agenda; quem processa são os workers. Voltar: `sh scripts/fila_duravel.sh desligar` (ver `docs/CAPACIDADE.md`); a chave não muda nenhuma rota deste contrato. Tudo marcado ✅ abaixo foi conferido no serviço em produção. Histórico em `PROGRESS.md`.
 
 Rotas relativas a `/admin/v1`, salvo indicação de rota absoluta. Escritas confirmadas gravam auditoria na mesma transação, sem corpos nem segredos. Suspender/pausar usa PATCH.
 
@@ -153,6 +153,8 @@ Exige canal API do mesmo tenant ligado ao agente. **Aceita `agente_mode=mock` ou
 Estado persistente por agente: três falhas consecutivas em cinco minutos abrem por 60 s; depois, uma chamada de prova. Sucesso fecha; falha da prova reabre. Chamadas bloqueadas não chegam ao Skyone e usam fallback (`SKYONE_CIRCUIT_OPEN`). `GET .../circuito` → `estado`, `falhas`, `aberto_ate`, `ultimo_alerta`, isolado por tenant. Após corrigir a credencial, aguardar o período aberto antes de testar de novo. **Fechamento manual ✅:** `POST .../circuito/fechar` (sem corpo; exige `X-Actor`) zera as falhas, libera as chamadas e devolve o estado (`fechado`); auditado como `agente.circuito_fechado`. Agente de outro tenant → 404.
 
 **Nova tentativa ✅:** uma única, 2 s depois, só para **falha de conexão ou HTTP 502/503/504 antes de qualquer resposta** e apenas se couber no `timeout_s`. Nunca em tempo esgotado nem em outros erros. Cada tentativa passa pela cota por URL; para o circuito conta uma chamada só.
+
+**Canal uazapi (Fase 1, formato real):** `ultimo_evento_em` do canal é atualizado a cada evento autenticado do webhook (sinal de vida para o painel); `status_conexao` ainda não é preenchido. Cada mensagem tem `tipo` (`texto`, `audio`, `imagem`, `video`, `documento`, `figurinha`, `contato`, `localizacao`, `reacao`, `desconhecido`) e `meta` (coordenadas, dados do anexo, `resposta_a`, `reacao_a`); nos canais API o tipo é sempre `texto`. Reação é gravada e não abre turno. Anexo que o gateway não lê vira `[não foi possível ler <tipo>: <motivo>]` no texto entregue ao agente.
 
 **Limites compartilhados (fila durável, ativos quando `FILA_DURAVEL=on`):** `max_lotes_simultaneos` por empresa e `max_concorrencia` por agente valem somados entre todos os workers (vagas no Redis). Padrão 5 e 5; os dois valem ao mesmo tempo (uma conversa precisa de vaga na empresa **e** no agente). Por empresa: `PUT /admin/v1/tenants/{t}/config`; por agente: `PATCH /admin/v1/tenants/{t}/agentes/{a}` (1–100; nulo herda). Como dimensionar: `docs/CAPACIDADE.md`. Empresa no limite não atrasa as outras (INV07).
 
