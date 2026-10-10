@@ -388,7 +388,7 @@ Cada bloco: um commit de código, testes, tag de volta, backup, migração com a
 | Bloco | Entrega | Migração | Testes principais |
 |---|---|---|---|
 | **G1 — Horários da unidade** | Função única, exceções, pausa, fuso; rotas de unidade (pausar, reabrir, horários, exceções, agenda); pacote com a situação nova; base do histórico `gestao_alteracoes` | 024, 029 (parte de alterações) | Vários turnos; turno cruzando meia-noite (aberto às 00:30 do dia seguinte); exceção fechado e horário especial; pausa até HH:MM e indefinida; pausa vencida ignorada; próxima abertura atravessando dias fechados; fuso diferente do da empresa; virada de horário de verão em fuso que tem; grade vazia = não informado; isolamento entre empresas; alteração gera antes/depois |
-| **G2 — Skill `info_unidades`** | `GET /api/v1/unidades`; `docs/SKILLS.md` | — | Contrato exato; nulo para o que não foi informado; WhatsApp de pedidos ausente; escopo e conversa de outra empresa → 403/404 |
+| **G2 — Skill `info_unidades`** (+ G1.1, seção 10.1 e 10.2) | `GET /api/v1/unidades`; `docs/SKILLS.md`; histórico com `desde`/`ate`/`unidade_id`; telefone E.164 | só se preciso (10.1, 10.2) | Contrato exato; nulo para o que não foi informado; WhatsApp de pedidos ausente; escopo e conversa de outra empresa → 403/404 |
 | **G3 — Fora do horário** | Configuração de atendimento, três modos, mensagem com variáveis, uma vez a cada N horas | 027 | Modo `mensagem`: agente não é chamado, mensagem sai uma vez, segunda mensagem dentro do intervalo não responde, depois do intervalo responde de novo, mensagem fica no histórico, envio de teste não envia; conversa pausada ou fora do piloto não recebe; canal interno não é afetado; modos `sem_pedido` e `agendado` chamam o agente com `atendimento` no pacote; `sempre` não muda nada (regressão) |
 | **G4 — Entrega e pagamento** | Taxas (fixa, bairro, CEP), área, frete grátis, mínimo, tempos, formas de pagamento, troco; regras no carrinho e no fechamento; motivos novos | 025, 026 | Taxa por bairro com acento e maiúsculas diferentes; CEP no limite da faixa; fora da área; frete grátis exatamente no valor; mínimo; pagamento inválido lista os aceitos; troco menor que o total; unidade sem nada configurado continua como hoje (regressão); `unidade_fechada` em adicionar e fechar com `proxima_abertura`; pedido agendado grava `agendado_para`; total = subtotal + taxa |
 | **G5 — Cardápio** | CRUD de itens, categorias com ordem, em falta com retorno automático, lote, copiar para outra unidade | 028 | Preço zero recusado e vazio aceito; `codigo` duplicado → 409; em falta até um horário volta sozinho; `item_em_falta` em adicionar e fechar; item em falta aparece na busca marcado; lote tudo ou nada; renomear categoria atualiza itens; desativar item não quebra pedido antigo; regras atuais preservadas (`sem_preco`, `sem_delivery`, álcool, `unidade_diferente`) |
@@ -412,3 +412,47 @@ Para o [PAINEL], cada bloco entrega o contrato das rotas em `docs/API_ADMIN.md` 
 8. **Texto padrão de fora do horário:** "Oi! 😊 No momento a {nome_empresa} está fechada. Voltamos {proxima_abertura}. Quando abrirmos, é só mandar uma mensagem por aqui que a gente te atende!"
 9. **Bairro:** comparação sem acento, com apelidos por bairro. Bairro não reconhecido **não recusa**: devolve `bairro_nao_reconhecido` para o agente pedir o CEP. `fora_area` só com certeza (CEP fora das faixas ou bairro marcado como não atendido).
 10. **Categorias por empresa** (não por unidade), com ordem de exibição; o item continua por unidade.
+
+---
+
+## 10. Pendências vindas do painel (10/10/2026)
+
+Origem: `docs/ESPEC_TELAS_GESTAO.md` do painel, seção 15. Registradas aqui para serem fechadas no bloco indicado; o contrato final de cada uma sai em `docs/API_ADMIN.md` antes de a tela ser feita. Nada desta seção está implementado ainda.
+
+### 10.1 G1.1 — histórico de alterações (entra junto com o G2)
+
+`GET gestao/alteracoes` passa a aceitar, além de `entidade`, `entidade_id`, `limite` e `cursor`:
+
+- `desde` e `ate`: data e hora ISO 8601 **com fuso** (ex.: `2026-10-10T00:00:00-03:00`). Sem fuso → 400. `desde` inclusivo, `ate` exclusivo; `desde` maior que `ate` → 400.
+- `unidade_id`: traz as alterações da unidade **e de todas as exceções dela**, na mesma lista e na mesma ordem (mais recente primeiro), inclusive exceções já excluídas. Unidade de outra empresa ou inexistente → 404. Não combina com `entidade`/`entidade_id` (os dois juntos → 400).
+- `criado_em` sempre com offset na resposta.
+- `limite`: de 1 a **200**, padrão 50 (já é o comportamento de hoje; falta documentar). Fora disso → 400.
+
+Sem migração se a ligação exceção → unidade puder ser lida do que já está gravado; se não puder, coluna aditiva `unidade_id` em `gestao_alteracoes`, preenchida para o passado.
+
+### 10.2 Telefone `whatsapp_pedidos` (entra junto com o G2)
+
+Alinhar com E.164: só dígitos, **10 a 15**, com DDI, sem `+`. Hoje a rota e o banco aceitam de 8 a 16. Muda a validação da rota e a restrição da coluna (migração aditiva: troca do CHECK, depois de conferir que nenhum valor gravado fica fora da regra nova). O mesmo formato vale para `whatsapp_alerta_transbordo`. Documentar em `docs/API_ADMIN.md`.
+
+### 10.3 G3 — fora do horário
+
+- Campo próprio para o **modo de pedido com a unidade fechada**: `recusar` | `agendar`, separado do modo de fora do horário do bot (seção 4.2). Padrão `recusar` (decisão 2 da seção 9). Nome do campo e onde fica (empresa) a fechar no bloco.
+- Contrato da **prévia da mensagem**: corpo de entrada (texto e, se preciso, a unidade usada no exemplo), limite de tamanho do texto, e variável desconhecida → 400 com o nome da variável. A prévia não grava e não envia nada.
+
+### 10.4 G4 — entrega e pagamento
+
+- Fechar os envelopes de leitura e escrita de taxas e de formas de pagamento.
+- Faixas de CEP **sobrepostas** na mesma unidade → 400, indicando as faixas em conflito.
+- **Apelidos de bairro duplicados** na mesma unidade (comparação sem acento e sem maiúsculas, igual à da decisão 9) → 400.
+- Campos novos no `GET pedidos` e `GET pedidos/{numero}` (taxa, forma de pagamento, troco, `agendado_para`, tempo estimado): nomes e nulos a fechar no bloco.
+
+### 10.5 G5 — cardápio
+
+- Nomes e semântica dos filtros da lista: `sem_preco`, `delivery`, `alcoolico`, `em_falta`, `categoria` (o que significa verdadeiro, falso e ausente em cada um; como combinam).
+- Corpos das operações em lote, da cópia para outra unidade e da ordem das categorias.
+- Campo `volta_em` do item em falta (data e hora com fuso; nulo = até alguém reativar).
+
+### 10.6 G6 — CSV
+
+- **Desfazer só a importação mais recente.** As 20 últimas continuam guardadas, mas apenas para consulta (ajusta a decisão 7 da seção 9; a seção 5.4 já dizia "só a mais recente"). Desfazer outra → 409.
+- **Confirmação de `substituir`:** a aplicação envia a contagem de desativações que a simulação informou; se a contagem atual for diferente (o catálogo mudou entre a simulação e a aplicação), **409** e nada é gravado. Contagem ausente → 400.
