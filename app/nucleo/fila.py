@@ -39,6 +39,8 @@ return 0
 # Vagas compartilhadas entre todos os workers (INV07/INV15): a empresa tem no máximo
 # max_lotes_simultaneos e o agente max_concorrencia conversas em andamento.
 # Retorna 0 (vaga obtida), 1 (empresa no limite) ou 2 (agente no limite).
+# Só é chamado por quem tem a trava da conversa: se a conversa já consta, é sobra de uma
+# execução que caiu, e quem tem a trava assume a mesma vaga (por isso devolve 0).
 ADQUIRIR = '''
 local agora=tonumber(ARGV[1])
 redis.call('ZREMRANGEBYSCORE',KEYS[1],'-inf',agora)
@@ -61,6 +63,31 @@ return 0
 
 def ligada_no_ambiente():
     return os.getenv('FILA_DURAVEL', 'off').strip().lower() in ('on', '1', 'true', 'sim')
+
+
+class Vaga:
+    """Vaga de uma conversa nos limites da empresa (max_lotes_simultaneos) e do agente (max_concorrencia).
+
+    Usada pelo processamento da conversa: reservar() depois de obter a trava da conversa e
+    devolver() antes de soltá-la. Assim um item repetido da mesma conversa (mensagem nova durante
+    o processamento, item retomado por outro worker) nunca devolve a vaga de quem ainda processa."""
+    def __init__(self, fila, tenant, chave):
+        self.fila, self.tenant, self.chave = fila, tenant, chave
+        self.lotes = self.ativo = None
+        self.motivo = 0
+
+    async def reservar(self, cfg):
+        """0 = reservada; 1 = empresa no limite; 2 = agente no limite."""
+        f = self.fila
+        self.lotes, self.ativo = f.k_lotes(self.tenant), f.k_ativos(self.tenant, cfg['id'])
+        agora = time.time() * 1000; validade = (cfg['timeout_s'] + 90) * 1000
+        self.motivo = int(await f.redis.eval(ADQUIRIR, 2, self.lotes, self.ativo, agora, agora + validade,
+                                             cfg['max_lotes_simultaneos'], cfg['max_concorrencia'], self.chave, int(validade)))
+        return self.motivo
+
+    async def devolver(self):
+        await self.fila.redis.zrem(self.lotes, self.chave)
+        await self.fila.redis.zrem(self.ativo, self.chave)
 
 
 class FilaDuravel:
@@ -270,37 +297,22 @@ class FilaDuravel:
 
     async def tratar(self, stream, item_id, chave):
         tenant, conversa = json.loads(chave)
-        conv = await self.p.repo.obter(tenant, 'conversas', conversa)
-        lotes = ativo = None
+        vaga = Vaga(self, tenant, chave)
         try:
-            if conv:
-                cfg = await self.p.cfg.efetiva(tenant, conv['agente_id'])
-                lotes, ativo = self.k_lotes(tenant), self.k_ativos(tenant, conv['agente_id'])
-                agora = time.time() * 1000; validade = (cfg['timeout_s'] + 90) * 1000
-                vaga = await self.redis.eval(ADQUIRIR, 2, lotes, ativo, agora, agora + validade,
-                                             cfg['max_lotes_simultaneos'], cfg['max_concorrencia'], chave, int(validade))
-                if vaga:
-                    # Sem vaga: o item volta para o agendamento e o worker segue para as outras empresas.
-                    lotes = ativo = None
-                    if vaga == 1: self.cheias[tenant] = time.monotonic() + 0.3
-                    await self.redis.zadd(self.k_due, {chave: time.time() + 0.3})
-                    await self.confirmar(stream, item_id, chave)
-                    return 'sem_vaga'
-            resultado = await self.p.processar_duravel(tenant, conversa)
+            # A vaga é reservada dentro do processamento, por quem tem a trava da conversa (INV07).
+            resultado = await self.p.processar_duravel(tenant, conversa, vaga)
+            if resultado == 'sem_vaga':
+                # O item volta para o agendamento e o worker segue para as outras empresas.
+                if vaga.motivo == 1: self.cheias[tenant] = time.monotonic() + 0.3
+                await self.redis.zadd(self.k_due, {chave: time.time() + 0.3})
+                await self.confirmar(stream, item_id, chave)
+                return 'sem_vaga'
             # 'ocupado': quem tem a trava reagenda o que sobrar ao terminar; este item sai.
             await insistir(lambda: self.confirmar(stream, item_id, chave), self.p.insistir_s)
             return resultado
         except Exception as erro:
             # Fica pendente: outro worker retoma depois de ocioso_ms. Só o tipo do erro: a mensagem pode ter conteúdo.
             log.warning('Falha ao processar item da fila (%s); será retomado', type(erro).__name__)
-        finally:
-            if lotes:
-                # Devolve a vaga mesmo se o Redis caiu no meio do lote (insiste até ele voltar).
-                try:
-                    await insistir(lambda: self.redis.zrem(lotes, chave), self.p.insistir_s)
-                    await insistir(lambda: self.redis.zrem(ativo, chave), self.p.insistir_s)
-                except Exception:
-                    log.warning('Vaga não devolvida; expira sozinha pela validade')
 
     async def confirmar(self, stream, item_id, chave):
         await self.redis.xack(stream, GRUPO, item_id)

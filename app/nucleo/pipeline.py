@@ -394,17 +394,26 @@ return 1
         corte=next((i for i,m in enumerate(itens) if m['origem']=='sistema'),len(itens))
         return itens[:corte]
 
-    async def processar_duravel(self,tenant,conversa):
+    async def processar_duravel(self,tenant,conversa,vaga=None):
         """Etapas gravadas antes de cada efeito: turno aberto → resposta → partes → conclusão.
 
-        Retorna 'concluido', 'vazio' ou 'ocupado' (outra execução tem a trava da conversa
-        e reagenda o que sobrar ao terminar)."""
+        Retorna 'concluido', 'vazio', 'ocupado' (outra execução tem a trava da conversa
+        e reagenda o que sobrar ao terminar) ou 'sem_vaga' (empresa ou agente no limite).
+
+        `vaga` (da fila) reserva e devolve a vaga da empresa/agente. A reserva acontece DEPOIS de
+        obter a trava da conversa e a devolução ANTES de soltá-la: só quem processa a conversa
+        mexe na vaga dela (INV07). Um segundo item da mesma conversa sai como 'ocupado' sem tocar na vaga."""
         conv=await self.repo.obter(tenant,'conversas',conversa)
         if not conv: return 'vazio'
         cfg=await self.cfg.efetiva(tenant,conv['agente_id'])
         lock=self._trava(tenant,conversa);token=uuid.uuid4().hex
         if not await self.redis.set(lock,token,nx=True,ex=cfg['timeout_s']+90): return 'ocupado'
+        reservada=False;sem_vaga=False
         try:
+            if vaga is not None:
+                if await vaga.reservar(cfg):
+                    sem_vaga=True;return 'sem_vaga'
+                reservada=True
             turno=await self.db.fetchrow("SELECT * FROM turnos WHERE tenant_id=$1 AND conversation_id=$2 AND etapa IN ('processando','respondido') ORDER BY id DESC LIMIT 1",tenant,conversa)
             if turno and turno['etapa']=='processando':
                 # Execução anterior caiu antes da resposta: nada chegou ao cliente; refaz.
@@ -419,8 +428,13 @@ return 1
             await self._concluir(tenant,conversa,cfg,turno,await self._enviar_partes(tenant,conversa,cfg,turno))
             return 'concluido'
         finally:
+            if reservada:
+                # Devolve a vaga mesmo se o Redis caiu no meio do lote (insiste até ele voltar).
+                try: await insistir(vaga.devolver,self.insistir_s)
+                except Exception: log.warning('Vaga não devolvida; expira sozinha pela validade')
             await insistir(lambda: self.redis.eval("if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end",1,lock,token),self.insistir_s)
-            if await self.db.fetchval("SELECT EXISTS(SELECT 1 FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND processada_em IS NULL AND direcao='entrada' AND origem IN ('cliente','sistema'))",tenant,conversa):
+            # Sem vaga: quem chamou reagenda para logo (não passa pelo debounce de novo).
+            if not sem_vaga and await self.db.fetchval("SELECT EXISTS(SELECT 1 FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND processada_em IS NULL AND direcao='entrada' AND origem IN ('cliente','sistema'))",tenant,conversa):
                 await insistir(lambda: self.enfileirar(tenant,conversa,cfg),self.insistir_s)
 
     async def _responder(self,tenant,conversa,conv,cfg):
