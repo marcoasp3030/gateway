@@ -778,3 +778,16 @@ PY
 - Bench 5 clientes: 5/5, 0 erros; agente_p50 8,8 s, agente_p95 10,6 s; total_p50 14,4 s, **total_p95 15,8 s**; nenhum aviso de demora.
 - Simular: “oi, vocês entregam no Morumbi?” 9,0 s (`nenhuma`); “obrigado” 9,9 s (`silencio`, `agradecimento_final`, nada enviado); “quero falar com uma pessoa” 7,6 s (`transferir_humano`, motivo `pediu_humano`, conversa pausada e aguardando atendente). Todas em português.
 - Fora do formato JSON: o gateway não consegue contar (o Retorno chega igual); 0 de 8 respostas com indício visível no texto.
+
+## Fase 2 — comparação de modelos: Gemini 3 Flash × GPT-4.1 mini — 2026-10-10
+
+- Nada alterado no gateway (`gateway:ccf5113`). Mesma rodada nas duas vezes: bench de 5 clientes e três conversas do Simular em conversas novas; piloto desligado só durante o bench; números fictícios só durante o Simular; lista de volta a `["5511942717046"]` (conferido); envio sempre de teste.
+- Rodada das 14:18 UTC identificada pelo Marco como **Gemini 3 Flash**; rodada das 14:25 UTC com **GPT-4.1 mini** (chave própria da OpenAI).
+
+| Modelo | Erros | agente_p50 | agente_p95 | total_p50 | total_p95 |
+|---|---|---|---|---|---|
+| Gemini 3 Flash | 0 | 8,8 s | 10,6 s | 14,4 s | 15,8 s |
+| GPT-4.1 mini | 0 | 10,7 s | 11,3 s | 15,2 s | 15,7 s |
+
+- Simular (GPT-4.1 mini): 10,0 s (`nenhuma`), 11,5 s (`silencio`, `agradecimento_final`), 9,5 s (`transferir_humano`, `pediu_humano`, pausada e aguardando atendente). Tudo em português; 0 de 8 respostas com indício de texto fora do formato.
+- Dúvida registrada: os textos das duas rodadas são quase iguais em estilo e os tempos parecidos; conferir no Skyone se a troca de modelo estava ativa. Detalhes e textos exatos em `docs/SKYONE_RESULTADOS.md`.
