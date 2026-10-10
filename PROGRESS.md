@@ -836,3 +836,25 @@ PY
 - Conferido depois: `sh scripts/envio_real.sh estado` → 1 de 5 agentes com envio real (o do By Koji, piloto ligado, um contato, um canal ativo); fila zerada; varredura sem erros.
 - A conferir no teste do Marco: id devolvido pela uazapi gravado em cada envio (pendência da Fase 1); regra do atendente pela varredura com envios reais (`ambiguas` = 0); “digitando”; silêncio sem aviso; transferência; áudio.
 - Efeitos colaterais conhecidos: com envio real, o Simular e o bench desse agente recusam (exigem envio de teste).
+
+## Fase 3 — Bloco 2 conferido com envio real e Bloco 3 implantado — 2026-10-10
+
+- Status: **implantado e parado para validação.** Imagem `gateway:7b7c6f3` (volta: `gateway:962c0d7`, conferida nos 4 containers), **migração 020** aplicada com a imagem antiga rodando (health OK), schema 20. Envio real continua ligado **só** em `bykoji/bykoji_atendimento`, piloto com `["5511942717046"]`, um canal ativo (conferido com `sh scripts/envio_real.sh estado`: 1 de 5).
+- **Primeiro envio real (bloco 2), “Oi” às 15:21:01 UTC:**
+  - Resposta em dois balões enviados às 15:21:11 e 15:21:13: “Boa tarde, Jussara! Tudo bem?” e “Como posso ajudar você hoje? Se quiser fazer um pedido, é só me falar os itens e a unidade de preferência. 🍣”.
+  - **Id da uazapi gravado nos dois envios** (pendência da Fase 1 resolvida: `/send/text` devolve o id).
+  - Varredura: nas rodadas seguintes (até 15:29:59 UTC, dentro da janela de 10 min) `do_atendente = 0`, `ambiguas = 0`; nenhuma mensagem `humano` criada; conversa não pausada.
+  - Turno: `acao = nenhuma`, agente 9,3 s, total 12,4 s, sem aviso de demora. A espera foi de 0,5 s em vez do debounce: sobra da marca antiga do defeito corrigido em `ccf5113` (durava 24 h). Removidas as 639 marcas antigas do Redis; daqui em diante o debounce vale desde a primeira mensagem.
+  - O Marco não informou se a resposta chegou ao celular (campo da mensagem sem preencher); pelo gateway, as duas partes estão como `enviada`.
+- **Bloco 3 (`7b7c6f3`):**
+  - **INV03 antes do envio:** a checagem já existia (pausa conferida sob a trava antes de cada parte); agora a resposta descartada fica na auditoria (`resposta.descartada`).
+  - **`#bot`:** mensagem do atendente pelo celular da instância com exatamente `#bot` tira a pausa e o “aguardando atendente”, não vai para o agente, fica gravada como `tipo = comando`; se havia mensagem do cliente esperando, o bot responde na hora. Vale também quando recuperada pela varredura.
+  - **Encerramento:** `encerrar` grava `conversas.encerrada_em` e `desfecho`; mensagem nova do cliente reabre (`conversa.reaberta`). A lista de conversas devolve os dois campos.
+  - **Conversa vazia:** job no agendador a cada 5 min encerra com `desfecho = vazia` a conversa em que o cliente só mandou o que o gateway não lê e ninguém falou por `encerrar_vazia_min`.
+  - **SEG07 por contato:** `max_msgs_por_minuto_contato` (padrão 20, configurável); acima disso, 5 min sem chamar o agente (`conversas.limitado_ate`), mensagens gravadas, auditoria `contato.limite_excedido` e aviso no log.
+  - **LGPD04:** telefones mascarados (`5511****7046`) em todo log, inclusive URLs das rotas; teste confirma que nenhum log do gateway traz conteúdo de mensagem.
+- Validações: `sh scripts/test_suite.sh` → **165 passed** antes da implantação; depois, 3 testes de invariantes que faltavam com o nome do código (INV05, INV09, mensagem durante o processamento) → `tests/test_fase3_bloco3.py` com 10 passando (**168 no total**; só testes, sem mudança no código implantado). Backup `/home/twadmin/backups/gateway/pre-fase3-b3-20261010T153115Z/gateway.dump` (21 tabelas).
+- Produção: 4 containers `healthy`; fila zerada; `/health` público `{"ok":true}`; admin por fora 404; log de acesso com o telefone mascarado; zero ocorrência do telefone de teste em claro e do segredo do webhook nos logs.
+- Efeito do job de conversa vazia na primeira rodada: 3 conversas do bykoji encerradas como `vazia` — são conversas de outros contatos da instância de teste (fora do piloto) que só tinham anexo. Nada foi enviado a elas.
+- Para o [PAINEL]: lista de conversas com `encerrada_em`, `desfecho`, `limitado_ate`; configuração `max_msgs_por_minuto_contato`; eventos novos de auditoria `conversa.reaberta`, `conversa.encerrada` (vazia), `contato.limite_excedido`, `resposta.descartada`; `conversa.devolvida` pode ter ator `atendente`.
+- Pendências da Fase 3: roteiro pelo celular (Marco); **alerta de transbordo** para `alerta_telefone` (não estava na lista do bloco 3; não implementado); reativar o canal API de bench quando o agente voltar a envio de teste.

@@ -4,7 +4,7 @@ Banco `gateway`, Postgres próprio do gateway. O backend do painel autentica seu
 
 **Legenda:** ✅ implantado e em produção · ⏳ planejado, **não disponível** (a fase está indicada). Não construir telas sobre rotas ⏳.
 
-**Publicação atual (10/10/2026):** imagem `gateway:962c0d7`, migrações 001–019, serviço em mock/dry. Processos: recepção (`gateway`), 2 `worker` e 1 `agendador`, com a **fila durável ligada** (`FILA_DURAVEL=on`, desde 10/10/2026): a recepção só valida, grava e agenda; quem processa são os workers. Voltar: `sh scripts/fila_duravel.sh desligar` (ver `docs/CAPACIDADE.md`); a chave não muda nenhuma rota deste contrato. Tudo marcado ✅ abaixo foi conferido no serviço em produção. Histórico em `PROGRESS.md`.
+**Publicação atual (10/10/2026):** imagem `gateway:7b7c6f3`, migrações 001–020, serviço em mock/dry. Processos: recepção (`gateway`), 2 `worker` e 1 `agendador`, com a **fila durável ligada** (`FILA_DURAVEL=on`, desde 10/10/2026): a recepção só valida, grava e agenda; quem processa são os workers. Voltar: `sh scripts/fila_duravel.sh desligar` (ver `docs/CAPACIDADE.md`); a chave não muda nenhuma rota deste contrato. Tudo marcado ✅ abaixo foi conferido no serviço em produção. Histórico em `PROGRESS.md`.
 
 Rotas relativas a `/admin/v1`, salvo indicação de rota absoluta. Escritas confirmadas gravam auditoria na mesma transação, sem corpos nem segredos. Suspender/pausar usa PATCH.
 

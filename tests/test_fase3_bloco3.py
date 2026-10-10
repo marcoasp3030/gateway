@@ -215,3 +215,83 @@ def test_LGPD04_telefone_mascarado_e_sem_conteudo_nos_logs(caplog):
             for proibido in ('CONTEUDO-SECRETO-DO-CLIENTE','RESPOSTA-SECRETA-DO-BOT','5511900000001','Cliente Teste'):
                 assert proibido not in texto,proibido
     banco(cenario)
+
+
+def test_INV05_timeout_e_erro_do_agente_enviam_fallback():
+    from agentes.erros import TempoEsgotado,FalhaAgente,FalhaTransitoria
+    async def cenario(conn):
+        await migrar.aplicar(conn)
+        app,client=preparar(conn);fila=RedisFila();app.state.redis=fila;app.state.pipeline.redis=fila;p=app.state.pipeline
+        falhas=[]
+        async def agente(http,repo,cofre,tenant,cfg,payload): raise falhas.pop(0)
+        p.chamar=agente
+        async with client:
+            a,can=await criar(client);await ativo(client,'alpha',a,can,debounce_s=1,max_wait_s=1,fallback='Tive uma instabilidade, pode repetir?')
+            for i,(falha,codigo,motivo) in enumerate(((TempoEsgotado(),'AGENT_TIMEOUT','tempo_esgotado'),(FalhaAgente('HTTP do agente recusado'),'AGENT_ERROR','erro_agente'),
+                                                    (FalhaTransitoria(),'AGENT_ERROR','erro_agente'))):
+                falhas[:]=[falha]
+                conv=(await client.post(f'/admin/v1/tenants/alpha/agentes/{a}/simular',json={'canal_id':can,'identificador':f'u{i}','texto':'oi','message_id':f'm{i}'})).json()['conversation_id']
+                assert await p.processar_duravel('alpha',conv)=='concluido'
+                t=await conn.fetchrow('SELECT status,erro FROM turnos WHERE conversation_id=$1',conv)
+                assert (t['status'],t['erro'])==('erro',codigo)
+                assert [r[0] for r in await conn.fetch("SELECT conteudo FROM mensagens WHERE conversation_id=$1 AND origem='bot'",conv)]==['Tive uma instabilidade, pode repetir?']
+                assert await conn.fetchval('SELECT aguardando_motivo FROM conversas WHERE conversation_id=$1',conv)==motivo
+    banco(cenario)
+
+
+def test_INV09_piloto_registra_contato_fora_da_lista_sem_responder():
+    async def cenario(conn):
+        await migrar.aplicar(conn)
+        app,client=preparar(conn);fila=RedisFila();app.state.redis=fila;app.state.pipeline.redis=fila;p=app.state.pipeline
+        chamou=[]
+        async def agente(http,repo,cofre,tenant,cfg,payload): chamou.append(payload['conversation_id']);return {'resposta':['oi'],'acao':'nenhuma'}
+        p.chamar=agente
+        async with client:
+            a,canal,webhook,conv=await cenario_uazapi(conn,client,app)
+            assert (await client.patch(f'/admin/v1/tenants/alpha/agentes/{a}',json={'modo_piloto':True,'contatos_permitidos':['5511900000001']})).status_code==200
+            # Fora da lista: gravado, tratado, sem agendar nem responder.
+            r=await webhook('texto',chatid='5511900000077@s.whatsapp.net',sender_pn='5511900000077@s.whatsapp.net')
+            fora=r['conversation_id'];assert r['ignorado'] and fila.agendados==[]
+            m=await conn.fetchrow("SELECT origem,processada_em FROM mensagens WHERE conversation_id=$1",fora)
+            assert m['origem']=='cliente' and m['processada_em'] is not None
+            await p.processar_duravel('alpha',fora);assert chamou==[] and await conn.fetchval("SELECT count(*) FROM mensagens WHERE conversation_id=$1 AND origem='bot'",fora)==0
+            # Na lista: responde normalmente.
+            assert not (await webhook('texto')).get('ignorado') and len(fila.agendados)==1
+            await p.processar_duravel('alpha',conv);assert chamou==[conv]
+            # Saiu da lista depois de o agente responder: a resposta não é enviada.
+            async def tira_da_lista(http,repo,cofre,tenant,cfg,payload):
+                await conn.execute("UPDATE agentes SET contatos_permitidos=ARRAY['5511900000099'] WHERE id=$1",a);app.state.configuracoes.invalidar('alpha')
+                return {'resposta':['não deve sair'],'acao':'nenhuma'}
+            await webhook('texto');p.chamar=tira_da_lista;await p.processar_duravel('alpha',conv)
+            assert await conn.fetchval("SELECT count(*) FROM mensagens WHERE conversation_id=$1 AND origem='bot' AND conteudo='não deve sair'",conv)==0
+    banco(cenario)
+
+
+def test_mensagem_durante_o_processamento_entra_no_lote_seguinte_nunca_em_paralelo():
+    async def cenario(conn):
+        await migrar.aplicar(conn)
+        app,client=preparar(conn);fila=RedisFila();app.state.redis=fila;app.state.pipeline.redis=fila;p=app.state.pipeline
+        pacotes=[];em_andamento=[0];maximo=[0]
+        async with client:
+            a,can=await criar(client);await ativo(client,'alpha',a,can,debounce_s=1,max_wait_s=1)
+            async def manda(texto,mid):
+                return (await client.post(f'/admin/v1/tenants/alpha/agentes/{a}/simular',json={'canal_id':can,'identificador':'u','texto':texto,'message_id':mid})).json()['conversation_id']
+            async def agente(http,repo,cofre,tenant,cfg,payload):
+                em_andamento[0]+=1;maximo[0]=max(maximo[0],em_andamento[0]);pacotes.append(payload['message'])
+                if len(pacotes)==1:
+                    await manda('e uma coca','m2')
+                    # Outra execução para a mesma conversa enquanto esta roda: fica de fora.
+                    assert await p.processar_duravel('alpha',payload['conversation_id'])=='ocupado'
+                em_andamento[0]-=1;return {'resposta':['ok '+str(len(pacotes))],'acao':'nenhuma'}
+            p.chamar=agente
+            conv=await manda('quero um temaki','m1');agendados=len(fila.agendados)
+            assert await p.processar_duravel('alpha',conv)=='concluido'
+            # A mensagem que chegou no meio não entrou no primeiro lote, continua pendente e foi reagendada.
+            assert pacotes==['quero um temaki'] and maximo[0]==1
+            assert await conn.fetchval("SELECT count(*) FROM mensagens WHERE conversation_id=$1 AND direcao='entrada' AND processada_em IS NULL",conv)==1
+            assert len(fila.agendados)>agendados+1
+            assert await p.processar_duravel('alpha',conv)=='concluido'
+            assert pacotes==['quero um temaki','e uma coca'] and maximo[0]==1
+            assert [r[0] for r in await conn.fetch("SELECT conteudo FROM mensagens WHERE conversation_id=$1 AND origem='bot' ORDER BY id",conv)]==['ok 1','ok 2']
+            assert await conn.fetchval("SELECT count(*) FROM turnos WHERE conversation_id=$1 AND etapa='concluido'",conv)==2
+    banco(cenario)

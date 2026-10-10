@@ -16,7 +16,7 @@
 | Fase 1 | ✅ **Concluída em 10/10/2026.** Em produção: `gateway:675b350`, migrações 016 e 017. Canal uazapi de teste do bykoji recebendo mensagens reais (agente em simulação, envio de teste, piloto com um contato): normalização no formato real, fixtures anonimizadas, `webhook_raw` sanitizado, atendente × bot, reação sem turno, localização em texto, anexo ilegível (aviso até a Fase 5), `ultimo_evento_em`, `status_conexao` com alerta ao desconectar, envio e “digitando” conferidos com a documentação, id do provedor guardado em cada envio e **varredura de reconciliação** a cada 90 s. **Teste ao vivo:** com a recepção parada, 6 mensagens (3 do cliente, 3 do atendente) foram todas recuperadas pela varredura, sem duplicar, com a hora original e a conversa pausada pelo atendente. Fica para o primeiro envio real: confirmar que a uazapi devolve o id do envio | `PROGRESS.md` |
 | Fase 2 | ✅ **Concluída em 10/10/2026.** Fluxo `atendente_delivery` validado no Skyone e cadastrado no “Atendimento By Koji” (IA real, envio de teste). Pacote e Retorno do Apêndice A, INV04 e INV10 em produção (migração 018). **Modelo padrão de atendimento do By Koji: GPT-4.1 mini**; Gemini 3 Flash testado como alternativa equivalente; GPT OSS 20b proibido para atendimento. Bench com 5 clientes (GPT-4.1 mini): 0 erros, agente_p50 10,7 s, agente_p95 11,3 s, **total_p95 15,7 s — aceito pelo Marco com a ressalva de que o debounce adaptativo da Fase 3 deve trazê-lo abaixo de 15 s**. Silêncio com motivo e transferência conferidos no Simular | `PROGRESS.md`, `docs/SKYONE_RESULTADOS.md` |
 | Fase 2.5 | ⏳ Não iniciada | — |
-| Fase 3 | 🟡 **Em andamento (10/10/2026), em blocos.** Bloco 1: debounce adaptativo, aviso de demora em 20 s e “digitando” (migração 019). Bloco 2: envio real só no canal de teste. Bloco 3: itens restantes | `PROGRESS.md` |
+| Fase 3 | 🟡 **Em andamento (10/10/2026): os três blocos de código implantados; falta o teste do Marco pelo celular.** Em produção: `gateway:7b7c6f3`, migrações 019 e 020. Bloco 1: debounce adaptativo, aviso de demora em 20 s (não sai para fechamento), “digitando”. Bloco 2: **envio real ligado só no “Atendimento By Koji”, canal uazapi de teste, piloto com um contato**; primeiro envio real conferido (id do provedor gravado; varredura não confundiu com atendente). Bloco 3: INV03 antes do envio com registro, `#bot`, encerramento com desfecho e reabertura, conversa vazia, SEG07 por contato, LGPD04. `total_p95` 15,6 s aceito; meta de 15 s sob observação. **Falta:** roteiro de 30 a 50 conversas pelo celular; alerta de transbordo para `alerta_telefone` | `PROGRESS.md` |
 | Fases 3.5 em diante | ⏳ Não iniciadas | — |
 
 **Fechamento da Fase 0.5 (09/10/2026):** últimos ajustes do contrato implantados com um commit por item: erros padronizados (códigos fixos, mensagem em português, `detalhes.campo`, mesmo envelope nos middlewares e no 404), histórico paginado, lista de agentes com `circuito_estado`/`canais`, null em campo obrigatório e integridade com campo, **`/testar` com `{"usar_provedor_real": true}`** (chama o Skyone sem alterar o agente) e `/simular` com IA real quando o envio é dry. Imagem de volta `gateway:39e1a53`; backup `gateway-pre-contrato-20261009T173104Z.dump`. Detalhes em `PROGRESS.md`.
@@ -460,33 +460,33 @@ curl -s "$GW/admin/v1/tenants/$T/metricas" "${AUTH[@]}"
 **Objetivo:** atendimento real pelo celular, robusto a falhas.
 
 ### Tarefas
-- [ ] **Infra de testes:** `docker-compose.test.yml` ou banco `bykoji_test` separado; `tests/conftest.py` que aborta se o banco não terminar em `_test`; `pytest` + `pytest-asyncio`.
-- [ ] Testes do pipeline com agente mock:
-  - [ ] 3 mensagens em menos de `DEBOUNCE_S` geram 1 chamada ao agente.
-  - [ ] Teto `MAX_WAIT_S` respeitado mesmo com mensagens contínuas.
-  - [ ] Mensagem que chega durante o processamento entra no lote seguinte, nunca em paralelo.
-  - [ ] Conversa pausada não chama o agente.
-  - [ ] Falha ou timeout do agente envia `FALLBACK` e grava `status='erro'`.
-  - [ ] Agente lento (> `SLOW_NOTICE_S`) envia `AVISO_DEMORA` uma única vez.
-- [ ] Testes dos invariantes desta fase (nome do teste começa com o código):
-  - [ ] **INV01:** reinício com lote no buffer; duas mensagens no mesmo milissegundo; mensagem durante processamento — todas terminam em turno.
-  - [ ] **INV03:** atendente responde antes do primeiro turno do bot; eco do atendente chega depois da mensagem seguinte do cliente; mensagem do bot via API não pausa.
-  - [ ] **INV04:** agente devolve `silencio` com motivo → nada é enviado e `turnos.motivo_silencio` é gravado; agente devolve resposta vazia sem motivo → uma nova consulta ao agente e, persistindo, transferência para humano.
-  - [ ] **INV05:** timeout e erro HTTP do agente → fallback enviado.
-  - [ ] **INV07:** tenant A com 50 conversas simultâneas e tenant B com 1 → a de B é despachada sem esperar a fila de A.
-  - [ ] **INV09:** modo piloto ativo → contato fora da lista é registrado e não recebe resposta automática.
-- [ ] **SEG07 por contato:** mais de `max_msgs_por_minuto_contato` (padrão 20) do mesmo contato → para de chamar o agente por alguns minutos, registra e alerta.
-- [ ] **LGPD04:** logs em INFO sem conteúdo de mensagem; telefones mascarados (`5511****7777`).
-- [ ] **Silêncio declarado (INV04):** migração adiciona `turnos.motivo_silencio` e `turnos.acao`. "Obrigado", "ok", "👍" após um encerramento não geram resposta; ficam no histórico.
-- [ ] **Justiça entre tenants (INV07):** o agendador despacha no máximo `max_lotes_simultaneos` lotes por tenant; lotes acima do limite esperam a vez sem bloquear outros tenants.
-- [ ] **Modo piloto (INV09):** `modo_piloto` + `contatos_permitidos` por agente (com padrão no tenant), editáveis pela API administrativa.
-- [ ] **Encerramento:** quando o agente devolve `encerrar`, gravar `conversas.status='encerrada'`, `desfecho` (ex.: `pedido_feito`, `duvida_resolvida`, `reclamacao`, `sem_interesse`) e o horário. Uma nova mensagem do cliente reabre a conversa.
-- [ ] **Conversa vazia:** job a cada 5 min encerra, com `desfecho='vazia'`, conversas cuja única entrada não tem texto nem anexo legível após `encerrar_vazia_min`.
-- [ ] **INV03 antes do envio** (pendência do `PROGRESS.md`): checar de novo se a conversa foi pausada **depois** da resposta do agente e **antes** de enviar; se pausou, descartar a resposta e registrar.
-- [ ] **Retomada do bot:** quando a pausa expirar, o bot volta sozinho. Adicionar também um comando do atendente (ex.: mensagem `#bot` enviada pelo celular) que retoma imediatamente e não é encaminhado ao agente.
+- [x] **Infra de testes:** `docker-compose.test.yml` ou banco `bykoji_test` separado; `tests/conftest.py` que aborta se o banco não terminar em `_test`; `pytest` + `pytest-asyncio`. — *feito de outra forma: `scripts/test_suite.sh` roda só em bancos `_test`, em container temporário.*
+- [x] Testes do pipeline com agente mock:
+  - [x] 3 mensagens em menos de `DEBOUNCE_S` geram 1 chamada ao agente.
+  - [x] Teto `MAX_WAIT_S` respeitado mesmo com mensagens contínuas.
+  - [x] Mensagem que chega durante o processamento entra no lote seguinte, nunca em paralelo.
+  - [x] Conversa pausada não chama o agente.
+  - [x] Falha ou timeout do agente envia `FALLBACK` e grava `status='erro'`.
+  - [x] Agente lento (> `SLOW_NOTICE_S`) envia `AVISO_DEMORA` uma única vez.
+- [x] Testes dos invariantes desta fase (nome do teste começa com o código):
+  - [x] **INV01:** reinício com lote no buffer; duas mensagens no mesmo milissegundo; mensagem durante processamento — todas terminam em turno.
+  - [x] **INV03:** atendente responde antes do primeiro turno do bot; eco do atendente chega depois da mensagem seguinte do cliente; mensagem do bot via API não pausa.
+  - [x] **INV04:** agente devolve `silencio` com motivo → nada é enviado e `turnos.motivo_silencio` é gravado; agente devolve resposta vazia sem motivo → uma nova consulta ao agente e, persistindo, transferência para humano.
+  - [x] **INV05:** timeout e erro HTTP do agente → fallback enviado.
+  - [x] **INV07:** tenant A com 50 conversas simultâneas e tenant B com 1 → a de B é despachada sem esperar a fila de A.
+  - [x] **INV09:** modo piloto ativo → contato fora da lista é registrado e não recebe resposta automática.
+- [x] **SEG07 por contato:** mais de `max_msgs_por_minuto_contato` (padrão 20) do mesmo contato → para de chamar o agente por alguns minutos, registra e alerta.
+- [x] **LGPD04:** logs em INFO sem conteúdo de mensagem; telefones mascarados (`5511****7777`).
+- [x] **Silêncio declarado (INV04):** migração adiciona `turnos.motivo_silencio` e `turnos.acao`. "Obrigado", "ok", "👍" após um encerramento não geram resposta; ficam no histórico.
+- [x] **Justiça entre tenants (INV07):** o agendador despacha no máximo `max_lotes_simultaneos` lotes por tenant; lotes acima do limite esperam a vez sem bloquear outros tenants.
+- [x] **Modo piloto (INV09):** `modo_piloto` + `contatos_permitidos` por agente (com padrão no tenant), editáveis pela API administrativa.
+- [x] **Encerramento:** quando o agente devolve `encerrar`, gravar `conversas.status='encerrada'`, `desfecho` (ex.: `pedido_feito`, `duvida_resolvida`, `reclamacao`, `sem_interesse`) e o horário. Uma nova mensagem do cliente reabre a conversa. — *gravado em `conversas.encerrada_em` e `conversas.desfecho` (sem coluna `status`, que na API já significa ativa/pausada).*
+- [x] **Conversa vazia:** job a cada 5 min encerra, com `desfecho='vazia'`, conversas cuja única entrada não tem texto nem anexo legível após `encerrar_vazia_min`.
+- [x] **INV03 antes do envio** (pendência do `PROGRESS.md`): checar de novo se a conversa foi pausada **depois** da resposta do agente e **antes** de enviar; se pausou, descartar a resposta e registrar.
+- [x] **Retomada do bot:** quando a pausa expirar, o bot volta sozinho. Adicionar também um comando do atendente (ex.: mensagem `#bot` enviada pelo celular) que retoma imediatamente e não é encaminhado ao agente.
 - [ ] **Alerta de transbordo:** quando `acao = transferir_humano`, enviar aviso para um número interno (`alerta_telefone` da configuração do tenant) com nome, telefone e motivo.
-- [ ] **Recuperação após reinício:** na subida do app, reagendar conversas com `buf:*` pendente no Redis.
-- [ ] `SEND_MODE=live` somente para a instância de teste.
+- [x] **Recuperação após reinício:** na subida do app, reagendar conversas com `buf:*` pendente no Redis. — *coberto pela fila durável (reconciliação pelo Postgres, Fase 0.6).*
+- [x] `SEND_MODE=live` somente para a instância de teste. — *ligado em 10/10/2026 só no “Atendimento By Koji”, canal de teste, piloto com um contato.*
 - [ ] 🛑 **PARE:** o Marco testa pelo celular com o roteiro de 30 a 50 conversas e ajusta prompt e base de conhecimento no Skyone.
 
 ### Validação
