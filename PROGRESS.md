@@ -578,3 +578,46 @@ PY
 - O que já existe e fica sem uso até lá: tabela `agente_callbacks`, etapa `aguardando_callback` do turno e troca do `conversation_id` dos callbacks na anonimização LGPD (migração 014, bloco 1). A rota `POST /api/v1/agentes/callback/{request_id}` continua ⏳ no contrato e `modo_resposta` continua aceitando só `sync`.
 - Plano: a tarefa e o teste de callback da Fase 0.6 ficaram marcados como adiados (texto original preservado) e a Fase 6.5 ganhou o item de implementar o callback antes de validar com um callback real do Skyone.
 - A Fase 0.6 segue para o bloco 5 (troca) sem depender do callback.
+
+
+## Caso de teste “aguardando atendente” no postman_teste — 2026-10-10
+
+- Status: criado a pedido do Marco para validar o selo e o filtro no painel. **Fica no ar até o Marco confirmar; a limpeza só com pedido dele.**
+- Feito (pela API administrativa, caminho atual, ator `assistente-gateway (pedido do Marco)`; `bykoji` e os agentes existentes não foram tocados):
+  - Agente `ag_393bad0c761589e969d99555` — “[teste] Aguardando atendente (validação do painel)”, provedor skyone com URL `https://aguardando-atendente-teste.invalid/fluxo` (domínio que nunca resolve: nenhuma chamada chega ao Skyone), credencial fictícia, IA real + envio de teste (`live`/`dry`), ativo, sem piloto.
+  - Canal API `can_33e464559d7d941f750258ee` — “[teste] Canal do caso aguardando”.
+  - Conversa `postman_teste:can_33e464559d7d941f750258ee:cliente-teste-aguardando`: mensagem do cliente “Olá, preciso de ajuda com meu pedido.” → falha do agente → fallback padrão gravado como resposta → `aguardando_motivo=erro_agente`, `aguardando_atendente_desde=2026-10-10T00:24:40Z`.
+- Validações: eventos da conversa `mensagem.recebida`, `mensagem.enviada`, `conversa.aguardando_atendente`, `turno.erro`; `GET …/conversas?aguardando=true` devolve só essa conversa; circuito do agente de teste fechado (1 falha).
+- Pendências: há agora dois agentes com IA real no `postman_teste` (o do Marco e este de teste, que não chama ninguém). Ao limpar: apagar/pausar o agente e o canal de teste e a conversa.
+
+
+## Fase 0.6 — Bloco 5: troca preparada, teste de carga e INV14 — 2026-10-10
+
+- Status: concluído e implantado com **`FILA_DURAVEL=off` mantido** (quem liga é o Marco); nenhum modo de agente alterado; sem migração; nenhuma chamada ao Skyone real.
+- Feito (`7423fac` código, `209896c` ferramentas):
+  - **Parada graciosa:** recepção (caminho atual) e workers terminam os lotes em andamento antes de sair (`PARADA_GRACIOSA_S`, padrão 75 s; `stop_grace_period` 90 s no compose). A troca e os reinícios deixam de cortar lote no meio.
+  - **Liberações insistentes na queda do Redis:** trava da conversa, vaga da empresa/agente e confirmação do item insistem por até 60 s enquanto o Redis volta. Achado do teste de falha: com o limite padrão de 5 por empresa, uma queda de 10 s no meio do lote deixava a empresa parada 60–90 s (vagas presas até a retomada); agora retoma assim que o Redis volta.
+  - `MOCK_ATRASO_S` (atraso do agente simulado, padrão 0; não definido em produção) para o teste de carga.
+  - **Pilha isolada de carga** (`docker-compose.carga.yml`, `scripts/carga_fila.sh`, `scripts/carga_fila.py`): mesma imagem e limites da produção, banco e Redis próprios, sem portas, segredos gerados na hora, só agente mock/dry.
+  - **`scripts/fila_duravel.sh`** (`estado`, `ligar`, `desligar`). Só o `estado` foi executado em produção.
+- Teste de carga (200 conversas ao mesmo tempo, 2 empresas, agente simulado de 8 s; detalhes e leitura em `docs/CAPACIDADE.md`):
+  - **2 workers × 20:** espera na fila mediana **16,9 s**, máxima **32,8 s**; tudo respondido em 48,9 s; 0 perdidas, 0 duplicadas.
+  - **3 workers × 20:** mediana **10,2 s**, máxima **23,9 s**; 40,1 s; 0 perdidas, 0 duplicadas.
+  - Extra: 2 × 50 → 4,9 s / 11,6 s; 2 × 100 → 2,2 s / 3,3 s. Workers em ~47 MB e CPU perto de zero: o limite é o número de vagas, não a VPS; com Skyone real o teto passa a ser a cota de 240/min por URL.
+- **INV14 — feito na pilha isolada, não na produção:** com a chave desligada em produção não há fila durável lá para testar, e derrubar o Redis de produção só exercitaria o caminho atual. Resultados (200 conversas, 2 workers):
+  - Redis morto 10 s no meio do processamento → 200/200, 0 perdidas, 0 duplicadas, 0 partes incertas (54,0 s).
+  - Redis morto 10 s durante a recepção → recepção recusa enquanto está fora; com reenvio da mesma mensagem ficaram exatamente 200 entradas, 0 perdidas, 0 duplicadas (62,5 s).
+  - Limite padrão 5 (40 conversas): 101–121 s antes da correção → 46–52 s depois (36,8 s sem falha).
+  - Worker morto (SIGKILL) e mantido parado → o outro seguiu (180/200 em 74 s); as 20 que estavam com o morto foram refeitas e respondidas em ~170–180 s (validade da trava 150 s + reconciliação); 0 perdidas, 0 duplicadas, 0 partes incertas.
+- Validações (comando → resultado):
+  - `sh scripts/test_suite.sh` → **130 passed** (4 novos em `tests/test_fila_troca.py`; mutações conferidas: sem insistir e sem parada graciosa os testes falham), somente bancos `_test`.
+  - Pré-implantação: `gateway:2efffd1` = imagem em uso (volta). Backup `/home/twadmin/backups/gateway/pre-bloco5-20261010T010600Z/gateway.dump` (`pg_restore --list` OK, 21 tabelas, SHA-256 `b9cf270c65368fd632dc6b8cc72ffc4ead2c571787c2534f704ab8cc7696cebb`).
+  - Build `gateway:7423fac`; recriados gateway, 2 workers e agendador (`healthy`); postgres e redis intocados.
+  - Produção: benchmark bykoji pelo caminho atual **5/5, zero erros, p50 4,408 s, máx. 4,415 s**; nenhuma fila por empresa no Redis (exclusividade); `/health` interno `ligada: false`, 2 workers vivos, agendador ativo; 0 entradas pendentes; schema 15.
+  - Segurança: `/health` público só `{"ok":true}`; admin com `X-Forwarded-For` → 404; sem chave → 401. Logs: **zero ocorrências** de 10 segredos.
+  - Modos: bykoji e bench em mock/dry; em live/dry só os dois agentes do `postman_teste` (o do Marco e o de teste do caso “aguardando”).
+- Volta desta implantação: recriar gateway, workers e agendador com `gateway:2efffd1` (mesmo schema 15).
+- Pendências:
+  - **Ligar a chave (Marco):** `sh scripts/fila_duravel.sh ligar`; voltar: `sh scripts/fila_duravel.sh desligar`. Depois de ligada, repetir em produção um lote do agente simulado e, se o Marco quiser, a queda do Redis e do worker lá; só então fechar a Fase 0.6.
+  - Worker morto à força: as conversas que estavam com ele levam ~3 min para serem refeitas. Não encurtado de propósito (risco de resposta dupla); decidir se vale revisar.
+  - Fallback `"/"` do `bykoji/bykoji_atendimento` continua fora da regra (listado no bloco 3).
