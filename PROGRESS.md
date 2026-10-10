@@ -569,3 +569,12 @@ PY
   - Logs gateway/worker/agendador/Postgres/Redis/Caddy: **zero ocorrências** de 10 segredos. Modos: só `postman_teste/ag_dba38…` em live/dry.
 - Volta: recriar gateway, workers e agendador com `gateway:a0128b4` (mesmo schema 15; sem migração neste bloco).
 - Próximo bloco (aguarda validação do Marco): 4 — callback assíncrono com provedor simulado (item D).
+
+
+## Fase 0.6 — Bloco 4 (callback assíncrono) adiado — 2026-10-10
+
+- Status: **adiado para antes da Fase 6.5**, por decisão do Marco. Nada implementado neste bloco.
+- Motivo: o atendimento do By Koji responde em 5–9 s pelo caminho síncrono (teste de carga de 09/10: 10/10 em 6,95–7,87 s); callback só é necessário para agentes internos com tarefas longas.
+- O que já existe e fica sem uso até lá: tabela `agente_callbacks`, etapa `aguardando_callback` do turno e troca do `conversation_id` dos callbacks na anonimização LGPD (migração 014, bloco 1). A rota `POST /api/v1/agentes/callback/{request_id}` continua ⏳ no contrato e `modo_resposta` continua aceitando só `sync`.
+- Plano: a tarefa e o teste de callback da Fase 0.6 ficaram marcados como adiados (texto original preservado) e a Fase 6.5 ganhou o item de implementar o callback antes de validar com um callback real do Skyone.
+- A Fase 0.6 segue para o bloco 5 (troca) sem depender do callback.

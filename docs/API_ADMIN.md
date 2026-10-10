@@ -128,7 +128,7 @@ POST exige `id`, `nome`; aceita `tenant_id` opcional (ausente/nulo = global), `t
 }
 ```
 
-`provedor=mock|skyone`; `llm_direto` reservado à Fase 2.5. `timeout_s` 1–600, **padrão 60** (migração 013). **Atendimento usa 60 s**: o Skyone síncrono foi comprovado até ~66 s e, entre ~66 s e ~127 s, segura a conexão sem responder (teste de 09/10/2026, `docs/SKYONE_RESULTADOS.md`). Valores acima de 60 s só fazem sentido **no modo assíncrono** (callback, Fase 0.6). Só `modo_resposta=sync` por enquanto. `skyone_auth_tipo=nenhuma|cabecalho|bearer|basic`; a leitura devolve `skyone_auth_configurado` e `skyone_auth_usuario_configurado`, nunca valores ou ciphertexts. Basic exige usuário e senha; ambos somente escrita, cifrados separadamente (Fernet) e vinculados ao tenant. Omitir um campo preserva o valor; apagar um deles com Basic selecionado → 400, inclusive em tenant de teste. Usuário não aceita `:` nem caracteres de controle. `skyone_token` e `callback_timeout_s` **não são aceitos**. Live sem credencial é recusado fora de tenant de teste (SEG13). O fluxo do Skyone é **criado do zero pelo Marco**, nunca clonado; o gateway não cria fluxos.
+`provedor=mock|skyone`; `llm_direto` reservado à Fase 2.5. `timeout_s` 1–600, **padrão 60** (migração 013). **Atendimento usa 60 s**: o Skyone síncrono foi comprovado até ~66 s e, entre ~66 s e ~127 s, segura a conexão sem responder (teste de 09/10/2026, `docs/SKYONE_RESULTADOS.md`). Valores acima de 60 s só fazem sentido **no modo assíncrono** (callback, adiado para antes da Fase 6.5). Só `modo_resposta=sync` por enquanto. `skyone_auth_tipo=nenhuma|cabecalho|bearer|basic`; a leitura devolve `skyone_auth_configurado` e `skyone_auth_usuario_configurado`, nunca valores ou ciphertexts. Basic exige usuário e senha; ambos somente escrita, cifrados separadamente (Fernet) e vinculados ao tenant. Omitir um campo preserva o valor; apagar um deles com Basic selecionado → 400, inclusive em tenant de teste. Usuário não aceita `:` nem caracteres de controle. `skyone_token` e `callback_timeout_s` **não são aceitos**. Live sem credencial é recusado fora de tenant de teste (SEG13). O fluxo do Skyone é **criado do zero pelo Marco**, nunca clonado; o gateway não cria fluxos.
 
 ### Testar
 
@@ -212,7 +212,7 @@ Canal inativo, agente pausado/rascunho ou tenant suspenso → 200 ignorado após
 | GET | `/api/v1/conversas/{conv}/mensagens` | ✅ Escopo `eventos:ler`; `antes`, `limite`, `tem_mais` |
 | POST | `/api/v1/conversas/{conv}/notificar` | ✅ Escopo `notificar`; resposta 202 |
 | GET | `/api/v1/catalogo/busca?conversation_id=&q=` | ✅ Escopo `ferramentas:catalogo`; módulo habilitado no tenant e no modelo; até 50 itens ativos; preço do Postgres |
-| POST | `/api/v1/agentes/callback/{request_id}` | ⏳ Fase 0.6; escopo `callback` |
+| POST | `/api/v1/agentes/callback/{request_id}` | ⏳ Adiado para antes da Fase 6.5; escopo `callback` |
 
 Histórico e dados são filtrados por tenant e pela restrição de agente da chave; acesso cruzado → 404. O pacote ao agente contém `contexto_modulos` só de capacidades habilitadas no tenant e no modelo. A migração 006 renomeou a tabela legada para `catalogo_itens` sem apagar dados.
 
@@ -338,4 +338,4 @@ Não implementar telas dependentes destas rotas como se já estivessem disponív
 | POST | `/tenants/{tenant}/pedidos/{numero}/confirmar` | ⏳ Fase 4 |
 | POST | `/tenants/{tenant}/pedidos/{numero}/recusar` | ⏳ Fase 4 |
 
-Já listados nas seções acima como ⏳: fechamento manual do circuito (0.6), callback do agente (0.6), testar envio/status/QR code de canal (Fase 1) e webhooks de outros tipos de canal (6/6.5/7). O contrato das ferramentas de pedidos/carrinho entra na Fase 4 em `docs/SKILLS.md`. Métricas comparativas, LGPD de retenção, circuit breaker completo e usuários internos não devem ser inferidos das tabelas futuras.
+Já listados nas seções acima como ⏳: callback do agente (adiado para antes da Fase 6.5), testar envio/status/QR code de canal (Fase 1) e webhooks de outros tipos de canal (6/6.5/7). O contrato das ferramentas de pedidos/carrinho entra na Fase 4 em `docs/SKILLS.md`. Métricas comparativas, LGPD de retenção, circuit breaker completo e usuários internos não devem ser inferidos das tabelas futuras.
