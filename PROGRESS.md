@@ -745,3 +745,21 @@ PY
 - Tempos do agente nos 6 turnos: 25,2 · 16,2 · 22,9 · 24,6 · 10,1 · 10,1 s. Espera na fila (inclui o debounce de 4 s): 4,2–4,9 s. Zero erros, zero silêncio; `acao = nenhuma` em todos; respostas em 1 ou 2 balões.
 - Comparação: o fluxo anterior (mesma URL) respondia em 5,7–8,6 s (Fase 0.3) e 4,4 s no bench de 09/10. O tempo novo é do lado do Skyone (fluxo/agente novo), não do gateway: a espera na fila ficou no debounce.
 - Não feito por causa da parada: bench com 10 clientes; as três conversas do Simular; `docs/SKYONE.md` (o conteúdo dos nós não foi enviado).
+
+## Fase 2 — conversas do Simular com IA real e correção do debounce — 2026-10-10
+
+- Status: validação funcional feita; **1 de 3 comportamentos não saiu como esperado (transferência)**. Latência segue acima da meta (o Marco investiga no Skyone). Imagem `gateway:ccf5113` (volta: `gateway:fba9283`, conferida nos 4 containers; sem migração; backup `pre-debounce-20261010T043909Z`).
+- Conversas no Simular (“Atendimento By Koji”, IA real, envio de teste, piloto ligado; para a segunda conversa um número fictício entrou em `contatos_permitidos` só durante o teste e a lista voltou a `["5511942717046"]`, conferido):
+
+| Mensagem | Agente | Total | Enviado | Gravado no turno |
+|---|---|---|---|---|
+| “oi, vocês entregam no Morumbi?” | 28,9 s | 33,0 s | aviso de demora + “Boa noite, Jussara!” + “Sim, entregamos no Morumbi. Você pode me dizer o que gostaria de pedir, a quantidade e o endereço completo?” | `acao=nenhuma` |
+| “obrigado” (mesma conversa) | 15,2 s | 15,4 s | só o aviso de demora (“Só um instante, estou verificando.”) | `acao=silencio`, `motivo_silencio=agradecimento_final` ✅ |
+| “quero falar com uma pessoa” (conversa nova) | 11,6 s | 15,8 s | “A equipe vai continuar o atendimento em instantes.” | `acao=nenhuma` ❌ (o fluxo devolveu `motivo=pediu_humano` com `acao=nenhuma`); conversa não ficou aguardando atendente nem pausada |
+
+- Achados:
+  - **Transferência:** o Retorno do fluxo veio com `acao: "nenhuma"`; o gateway só transfere com `acao: "transferir_humano"`. Ajuste no nó “Interpretar Resposta”/Retorno do Skyone.
+  - **Aviso de demora antes de silêncio:** como o agente levou 15,2 s, o cliente recebeu “Só um instante, estou verificando.” e depois nada. Some quando a latência voltar para baixo de 15 s; se não voltar, rever `slow_notice_s` ou a regra.
+  - **Defeito do gateway corrigido (`ccf5113`):** com a fila durável ligada, a marca da primeira mensagem do lote não era apagada (só o caminho antigo apagava) e ficava 24 h no Redis; a partir da segunda mensagem da conversa o debounce não valia (no teste, espera de 138 ms no “obrigado”). Mensagens picadas depois da primeira resposta virariam turnos separados. Corrigido e conferido em produção com o agente simulado: três turnos seguidos na mesma conversa com espera de 4,2 · 4,4 · 4,2 s (debounce 4 s). Existia desde que a fila foi ligada (10/10, ~01:19 UTC).
+- `docs/SKYONE.md` **não atualizado:** o arquivo `docs/fase2_skyone_atendente_delivery.md` não existe no repositório nem em `/home/twadmin` (busca por nome).
+- Validações: `sh scripts/test_suite.sh` → **151 passed**, só bancos `_test`. Produção: 4 containers `healthy`, fila zerada, `/health` público `{"ok":true}`, modos inalterados.
