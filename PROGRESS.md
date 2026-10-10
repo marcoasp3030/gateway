@@ -995,10 +995,10 @@ PY
 - `botoes_interativos` antes: `off` (origem plataforma) nos 5 agentes. Depois: `on` (origem agente) só em `bykoji/bykoji_atendimento`; os outros 4 seguem `off`.
 - Freio: `PATCH /admin/v1/tenants/bykoji/agentes/bykoji_atendimento {"botoes_interativos":"off"}` (ou `null` para voltar a herdar).
 
-## UX2 — diagnóstico das picotadas e especificação — 2026-10-10 23:45 UTC
+## UX2 — diagnóstico das picotadas e especificação — 2026-10-10 23:37 UTC
 
 - Status: **`docs/ESPEC_UX2.md` escrita; nada implementado; aguardando aprovação do Marco.**
-- Botões: o teste do Marco ("quero 1 edamame do Guedala", 23:24 UTC, contato final 1513) foi **antes** de o B2 entrar (containers novos às 23:28:03; `botoes_interativos=on` às 23:28:39). Nenhum turno depois disso até 23:45.
+- Botões: o teste do Marco ("quero 1 edamame do Guedala", 23:24 UTC, contato final 1513) foi **antes** de o B2 entrar (containers novos às 23:28:03; `botoes_interativos=on` às 23:28:39). Nenhum turno depois disso até 23:37.
 - Picotadas (25 turnos de hoje no WhatsApp do By Koji): 24 com 1 mensagem, 1 com 2; espera média 4,3 s; agente média 12,2 s (p95 14,9 s); 4 turnos atropelados por mensagem nova (4 com o agente pensando, 1 com a resposta saindo). Causa principal: o agente demora mais que o intervalo entre mensagens do cliente e a espera só vale antes de chamar o agente. Proposta: espera em três faixas (P1), refazer o turno uma vez quando chega mensagem antes de a resposta sair (P2), "digitando" do cliente se a uazapi entregar (P3, depende de teste).
 - Reação: teste real autorizado, UMA reação 👍 na última mensagem do piloto às 23:35:48 UTC (`POST /message/react {id,text}`) → 200, `ReactionMessage`; webhook próprio com `wasSentByApi: true`, ignorado; gravada em `mensagens` como reação do bot; conversa sem pausa.
 - Presença: evento `presence` existe na documentação, sem formato; a instância assina só `messages` e `connection`. Teste depende de autorização para assinar o evento.
