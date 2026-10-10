@@ -823,3 +823,16 @@ PY
 
 - **Parado pela regra combinada (total_p95 acima de 15 s): bloco 2 não iniciado.** O debounce tirou ~2 s da espera, mas o agente respondeu ~1,7 s mais devagar nesta rodada (4 de 5 chamadas entre 12,4 e 13,2 s), e o ganho foi consumido.
 - Da espera de 2,4 s, 1,5 s é o debounce curto e ~0,9 s é o caminho do gateway (agendador, fila, vaga, montagem do pacote).
+
+## Fase 3 — Bloco 2: envio real ligado no canal de teste — 2026-10-10
+
+- Decisão do Marco: `total_p95` de 15,6 s **aceito** (o gateway entregou a redução; o restante é do Skyone/OpenAI). Debounce curto mantido em 1,5 s. **A meta de 15 s fica sob observação com dados reais; a alavanca para reduzir o tempo do agente é a Fase 2.5 (LLM direto), a avaliar depois do piloto.**
+- Status: **envio real ligado e parado antes do teste pelo celular.** Sem build nem migração (`gateway:962c0d7`). Nenhuma mensagem foi enviada por mim.
+- Conferência antes de ligar: os 5 agentes estavam em envio de teste; nenhuma empresa nem modelo define envio real; o fallback do “Atendimento By Koji” é o padrão da plataforma (o antigo `"/"` não existe mais); conversa de teste sem pausa, sem “aguardando” e sem mensagens pendentes; canal uazapi `conectado` e com credencial; nenhuma chave de API ativa no bykoji.
+- Feito:
+  - `send_mode=live` **só** em `bykoji/bykoji_atendimento`, com `modo_piloto: true` e `contatos_permitidos = ["5511942717046"]`.
+  - O envio real é por agente, não por canal. Para valer “só no canal de teste”, o outro canal do agente (`can_6128998aa8cbfd1b9dc59812`, API de bench) foi **desativado**; fica ativo só o `can_49fce1f15a43f87f22739d60` (uazapi). Reativar o canal de bench quando o agente voltar a envio de teste.
+  - `scripts/envio_real.sh` (novo): `estado` (quem está com envio real, piloto, canais) e `desligar` (freio: todos os agentes com envio real, ou um só, voltam a envio de teste).
+- Conferido depois: `sh scripts/envio_real.sh estado` → 1 de 5 agentes com envio real (o do By Koji, piloto ligado, um contato, um canal ativo); fila zerada; varredura sem erros.
+- A conferir no teste do Marco: id devolvido pela uazapi gravado em cada envio (pendência da Fase 1); regra do atendente pela varredura com envios reais (`ambiguas` = 0); “digitando”; silêncio sem aviso; transferência; áudio.
+- Efeitos colaterais conhecidos: com envio real, o Simular e o bench desse agente recusam (exigem envio de teste).
