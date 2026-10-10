@@ -693,3 +693,13 @@ PY
 - **Prova em produção:** uma rodada única da varredura de produção com a janela recuada até 02:11:00 UTC recuperou exatamente 1 mensagem: o texto real das 02:11:37 que o webhook não entregou (URL errada na hora). Gravada como `cliente`, `origem_recebimento='varredura'`, hora do provedor preservada, auditoria `canal.varredura_recuperou`; rodada repetida → 0 (sem duplicar). Turno `ignorado` porque a conversa estava pausada pelo atendente.
 - Limites conhecidos: mensagem do atendente perdida numa queda não é recuperada (bot não pausa por ela); chat identificado só por `@lid` na busca não tem telefone e é contado em `sem_telefone`; acima de 2.000 mensagens em 10 min a varredura avisa que não alcançou a janela.
 - Pendências: teste ao vivo com a recepção fora por 1 min; formato real do evento `connection` (só aparece quando a instância mudar de estado).
+
+## Fase 1 — id dos envios e mensagem do atendente na varredura — 2026-10-10
+
+- Status: implantado (`gateway:675b350`; volta `gateway:a7db43a`, conferida nos 4 containers; sem migração; backup `pre-id-envio-20261010T031645Z`). Fase 1 ainda aguardando o teste ao vivo.
+- Primeiro teste ao vivo (recepção parada 03:06:38–03:07:31 UTC): **inconclusivo**. A instância só registrou uma mensagem no intervalo (03:06:58), enviada **pelo número da instância**, não pelo celular de teste; nada do celular de teste chegou à instância. Achado útil: a uazapi recebeu 502, registrou `attempts: 1` e **não reenviou** — confirma que só a varredura cobre a recepção fora do ar.
+- Feito (`675b350`), a pedido do Marco:
+  - Todo envio ao vivo (resposta do bot, partes do turno, resposta pelo painel) grava o `messageid` devolvido pela uazapi em `mensagens.message_id`; se a resposta não trouxer id, a mensagem fica marcada (`meta.envio_sem_id`).
+  - Varredura: mensagem da instância (`fromMe`) que não corresponde a nenhum envio do gateway = atendente pelo celular → gravada como `humano`, `origem_recebimento='varredura'`, conversa pausada (INV03). Se houver, na mesma conversa e a até 3 min, envio do gateway sem id (ou em andamento/incerto), a mensagem é contada como `ambiguas` e **não** é gravada. Registros de ligação são ignorados. Indicadores novos: `do_atendente`, `ambiguas`.
+- **Não confirmado na prática:** a documentação da uazapi diz que `/send/text` devolve `messageid`/`id`, mas nenhum envio real foi feito (tudo em envio de teste). Se a resposta real vier sem id, a proteção acima evita pausa indevida e o indicador `ambiguas` mostra; conferir no primeiro envio real.
+- Validações: `sh scripts/test_suite.sh` → **143 passed**, só bancos `_test`. Produção: 4 containers `healthy`, fila zerada, varredura sem erros, `/health` público `{"ok":true}`, modos inalterados.
