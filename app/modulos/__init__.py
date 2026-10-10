@@ -20,9 +20,14 @@ async def catalogo_contexto(repo, tenant, conversa):
     n=await repo.db.fetchval('SELECT count(*) FROM catalogo_itens WHERE tenant_id=$1 AND ativo',tenant)
     return {'itens_ativos':n}
 
+async def pedidos_contexto(repo, tenant, conversa):
+    escopo(tenant)
+    from modulos.pedidos.servico import contexto
+    return await contexto(repo,tenant,conversa)
+
 REGISTRO={
  'catalogo':Modulo('catalogo',('006_catalogo.sql','021_catalogo_pedidos.sql'),('/api/v1/catalogo/busca',),('ferramentas:catalogo',),catalogo_contexto),
- 'pedidos':Modulo('pedidos',('021_catalogo_pedidos.sql',),(),('ferramentas:pedidos',),vazio),
+ 'pedidos':Modulo('pedidos',('021_catalogo_pedidos.sql','022_pedidos_dados.sql'),('/api/v1/carrinho/{conversation_id}','/api/v1/pedidos'),('ferramentas:pedidos',),pedidos_contexto),
 }
 
 async def habilitado(repo, tenant, nome):

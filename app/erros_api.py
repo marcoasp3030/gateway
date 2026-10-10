@@ -34,7 +34,8 @@ def campos_conhecidos():
                    'cursor','desde','status','agente','canal','busca','tenant','tenant_id','conv','conversation_id',
                    'evento','dados','instrucao','confirmacao','usar_provedor_real','aguardando','url','eventos','horarios','telefone_whatsapp',
                    'escopos','ips_permitidos','expira_em','credenciais','modulos','comportamento_padrao',
-                   'desfechos','followups_padrao','skyone_fluxo_modelo','ativo','config','modelo_versao'))
+                   'desfechos','followups_padrao','skyone_fluxo_modelo','ativo','config','modelo_versao',
+                   'item_id','quantidade','observacao','unidade','modalidade','endereco','horario','maioridade_confirmada','motivo','numero'))
     return campos
 
 
