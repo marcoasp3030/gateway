@@ -966,3 +966,9 @@ PY
 - A pedido do Marco: campos `aceita_retirada` e `taxa_entrega` (número) no lugar de `retirada` e `taxa` (objeto); sem filtro a Skill devolve **todas** as unidades (desativada com `ativa: false`, depois das ativas); saiu o campo `fuso`. Mantidos além da lista dele: `telefone` (público, já vai no pacote) e `situacao.pausa_motivo`. A Skill ainda não existia no Skyone, então nada quebrou.
 - Testes: **198 passed** (5 em `tests/test_gestao_g2.py`: isolamento, conversa de outra empresa, unidade inexistente com o mesmo envelope, sem horário, pausada, exceção hoje, turno que cruza a meia-noite, escopo errado 403). Backup `/home/twadmin/backups/gateway/pre-gestao-g2b-20261010T223304Z/gateway.dump` (27 tabelas, 600).
 - Produção (só leituras): 4 unidades do By Koji, sem id interno nem WhatsApp no retorno; 401/404/400 conferidos; 4 containers `healthy`, fila zerada, admin por fora 404, envio real só no piloto, zero erros e zero ocorrência da chave nos logs.
+
+## UX1 — botões interativos: levantamento e especificação — 2026-10-10 22:41 UTC
+
+- Status: **`docs/ESPEC_BOTOES.md` escrita; nada implementado; aguardando aprovação do Marco e o clique no teste.**
+- Teste real autorizado: UMA mensagem `POST /send/menu` (`type: button`, 2 botões de resposta) ao piloto às 22:39:43 UTC → HTTP 200, `messageType: NativeFlowMessage`, id do provedor devolvido. Gravada em `mensagens` como envio do bot (para a varredura não tratar como atendente). O webhook da própria mensagem veio com `wasSentByApi: true` e foi ignorado. Conversa do piloto sem pausa.
+- Pendente: o payload do clique em `webhook_raw` (seção 1.3 da ESPEC). Até o B1, um clique chega ao agente como anexo não suportado e o agente responde de verdade ao piloto.
