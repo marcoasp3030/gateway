@@ -1,6 +1,6 @@
 # Especificação — gestão de unidades, horários, entrega, pagamento e cardápio
 
-> **Situação: proposta para aprovação (10/10/2026). Nada disto está implementado.**
+> **Situação: aprovada pelo Marco em 10/10/2026, com as decisões da seção 9. Implementação em blocos (seção 8); o andamento fica no `PROGRESS.md`.**
 > Vale o que já rege o projeto: `PLANO_CURSOR.md`, `GUIA_CURSOR.md`, invariantes INV/SEG, tudo isolado por
 > `tenant_id`, `/admin/v1` só na rede interna, `/api/v1` só com `X-API-Key` (a empresa vem da chave).
 > As decisões que dependem do Marco estão reunidas na seção 9.
@@ -78,7 +78,7 @@ Hoje o agente recebe no pacote, em `unidades`, `aberta_agora` e `proxima_abertur
 
 ## 3. Modelo de dados e migrações
 
-Numeração a partir da **024**. Cada migração é aditiva e roda com a imagem anterior no ar.
+Numeração a partir da **024**. Cada migração é aditiva e roda com a imagem anterior no ar. **Os números abaixo são a ordem de desenho; na implementação cada bloco recebe o próximo número livre** (o bloco G1 usa a 024 com as colunas de horário da unidade, as exceções e o histórico de alterações; as colunas de entrega da 3.1 entram no bloco G4).
 
 ### 3.1 Migração 024 — unidade: fuso, pausa, entrega e tempos
 
@@ -118,6 +118,8 @@ Tabela `unidade_taxas`:
 | `id`, `tenant_id`, `unidade_id` | |
 | `tipo` | `bairro` \| `cep` |
 | `bairro` | texto como digitado; `bairro_busca` = versão sem acento e minúscula (comparação) |
+| `apelidos` | lista de outros nomes do mesmo bairro ("Jd. Morumbi", "Jardim Morumbi"), comparados do mesmo jeito |
+| `atendido` | falso = bairro marcado como **não atendido** (recusa com certeza) |
 | `cep_inicio`, `cep_fim` | 8 dígitos; faixa inclusiva; `inicio ≤ fim` |
 | `taxa` | valor ≥ 0 |
 | `ativo` | |
@@ -157,7 +159,7 @@ No modo `unidades`, a empresa está aberta quando **alguma** unidade ativa está
 
 ### 3.5 Migração 028 — cardápio: categorias, ordem e "em falta"
 
-Tabela `catalogo_categorias`: `id`, `tenant_id`, `unidade` (código), `nome`, `ordem`, `ativo`; única por (`tenant_id`, `unidade`, `nome`). Criada a partir das categorias que já existem nos itens (ordem inicial = ordem em que aparecem).
+Tabela `catalogo_categorias`: `id`, `tenant_id`, `nome`, `ordem`, `ativo`; única por (`tenant_id`, `nome`) — **categorias são da empresa, não da unidade**; o item continua sendo de uma unidade. Criada a partir das categorias que já existem nos itens (ordem inicial = ordem em que aparecem; nomes iguais em unidades diferentes viram uma categoria só).
 
 `catalogo_itens`, colunas novas: `ordem` (dentro da categoria), `em_falta_ate` (data/hora), `em_falta_motivo`.
 
@@ -217,13 +219,13 @@ Quando o bot está no ar mas a **unidade** do carrinho está fechada (ex.: bot `
 |---|---|---|
 | nulo | como hoje: `taxa_entrega` se houver, senão nula ("a unidade confirma") | não se aplica |
 | `fixa` | `taxa_entrega` | não se aplica |
-| `bairro` | taxa do bairro informado (comparação sem acento e sem maiúsculas) | bairro sem linha ativa → `fora_area` |
+| `bairro` | taxa do bairro informado (comparação sem acento e sem maiúsculas, incluindo apelidos) | bairro marcado como não atendido → `fora_area`. Bairro **não reconhecido não recusa**: devolve `bairro_nao_reconhecido` para o agente pedir o CEP |
 | `cep` | taxa da faixa que contém o CEP | CEP fora de todas as faixas → `fora_area` |
 
 - Nos modos `bairro` e `cep`, o campo correspondente passa a ser obrigatório em delivery (`falta_bairro`, `falta_cep` em `faltando`).
 - `frete_gratis_acima`: subtotal igual ou maior → taxa 0 e `frete_gratis: true`.
 - `delivery_ativo = false` → delivery recusado (`delivery_indisponivel`); `aceita_retirada = false` → retirada recusada (já existe).
-- `pedido_minimo` → `abaixo_minimo` (hoje o motivo se chama `abaixo_do_minimo`; ver decisão 9.3).
+- `pedido_minimo` → `abaixo_minimo` (o motivo atual `abaixo_do_minimo` é renomeado no bloco G4).
 - `tempo_entrega_min` / `tempo_retirada_min` aparecem no carrinho e no pedido como `tempo_estimado_min`. Só então o aviso de confirmação ao cliente pode citar prazo ("previsão de cerca de 40 minutos").
 - A taxa de 13% do Einstein ("pedidos entregues nos quartos") continua só como texto em `regras`. Não entra no cálculo nesta fase (ver 9.6).
 
@@ -242,7 +244,8 @@ Item com `em_falta_ate` no futuro continua aparecendo na busca, com `em_falta: t
 | Motivo | HTTP | Onde | Acompanha |
 |---|---|---|---|
 | `unidade_fechada` | 422 | `adicionar_item`, `fechar_pedido` | `proxima_abertura`, `motivo_fechada` |
-| `fora_area` | 422 | `definir_entrega`, `fechar_pedido` | modo da taxa |
+| `fora_area` | 422 | `definir_entrega`, `fechar_pedido` | modo da taxa. Só quando há certeza: CEP fora de todas as faixas ou bairro marcado como não atendido |
+| `bairro_nao_reconhecido` | 422 | `definir_entrega`, `fechar_pedido` | O agente pede o CEP; com faixas de CEP cadastradas o CEP decide; sem faixas, a taxa fica "a confirmar" e o pedido segue |
 | `abaixo_minimo` | 422 | `fechar_pedido` | `pedido_minimo`, `falta` (quanto falta) |
 | `pagamento_invalido` | 422 | `definir_entrega`, `fechar_pedido` | `aceitos` (códigos e rótulos) |
 | `item_em_falta` | 422 | `adicionar_item`, `fechar_pedido` | `volta_em` |
@@ -293,7 +296,7 @@ Pelos campos de comportamento já existentes: `PUT /config` (empresa) e `PATCH /
 | `POST catalogo/itens/{id}/disponivel` | Tira o "em falta" |
 | `POST catalogo/itens/lote` | `{"ids": [...], "acao": "ativar | desativar | em_falta | disponivel | mudar_categoria", ...}`; até 500 itens; tudo ou nada |
 | `POST catalogo/itens/{id}/copiar` | Copia o item para outra unidade com `codigo` novo |
-| `GET/POST catalogo/categorias`, `PATCH/DELETE catalogo/categorias/{id}` | Categorias por unidade; renomear atualiza os itens; desativar esconde os itens da busca |
+| `GET/POST catalogo/categorias`, `PATCH/DELETE catalogo/categorias/{id}` | Categorias da empresa (valem para todas as unidades); renomear atualiza os itens de todas; desativar esconde os itens da busca. `GET` aceita `unidade=` para contar os itens de cada categoria naquela unidade |
 | `PUT catalogo/categorias/ordem` | Lista de ids na ordem de exibição |
 
 ### 5.4 CSV
@@ -308,7 +311,7 @@ Pelos campos de comportamento já existentes: `PUT /config` (empresa) e `PATCH /
 
 - **`substituir`** = comportamento atual: o arquivo é o catálogo inteiro (ou o da `unidade` informada); o que não está nele fica inativo.
 - **`mesclar`** = só cria e atualiza; o que não está no arquivo fica como está.
-- Padrão proposto: `mesclar` (o modo destrutivo passa a exigir pedido explícito). Ver decisão 9.4.
+- Padrão: `mesclar`. `substituir` só com confirmação explícita: além de `modo=substituir`, a aplicação exige `confirmar_desativacao=<quantidade>` igual ao número de itens que a simulação informou que serão desativados; sem isso (ou com número diferente) nada é gravado. A simulação sempre informa quantos e quais itens serão desativados.
 - Formato: exatamente as 11 colunas atuais (`codigo, unidade, categoria, nome, descricao, preco, tipo, alcoolico, delivery, ativo, observacao`), na mesma ordem. O arquivo do By Koji continua valendo sem mudança. `em_falta` e `ordem` ficam fora do CSV (são operação do dia a dia, não cadastro).
 - Tudo em uma transação; erro em qualquer linha não grava nada (já é assim).
 
@@ -324,7 +327,7 @@ Pelos campos de comportamento já existentes: `PUT /config` (empresa) e `PATCH /
 
 ### 6.1 Skill nova `info_unidades`
 
-`GET /api/v1/unidades?conversation_id=...&unidade=...` — escopo `ferramentas:catalogo` (a chave atual já serve; ver decisão 9.5).
+`GET /api/v1/unidades?conversation_id=...&unidade=...` — escopo `ferramentas:catalogo` (a chave atual já serve).
 
 ```json
 {"atendimento": {"aberto": true, "proxima_abertura": null},
@@ -397,17 +400,15 @@ Para o [PAINEL], cada bloco entrega o contrato das rotas em `docs/API_ADMIN.md` 
 
 ---
 
-## 9. Decisões que preciso do Marco
+## 9. Decisões do Marco (10/10/2026)
 
-1. **Horário do bot.** Proponho padrão `sempre` (nada muda até alguém configurar) e, para o By Koji, `unidades`. Confirma? No modo `unidades`, "aberto" = alguma unidade aberta; o cliente de uma unidade fechada é atendido, mas o pedido segue a regra da unidade.
-2. **Unidade fechada com o bot no ar.** Proponho seguir o modo de pedido da empresa (`agendado` agenda; os outros recusam com `unidade_fechada`). Alternativa: sempre recusar.
-3. **Nome do motivo do pedido mínimo.** Hoje é `abaixo_do_minimo`; você escreveu `abaixo_minimo`. Como as Skills ainda não foram criadas no Skyone, proponho renomear para `abaixo_minimo` no bloco G4.
-4. **Modo padrão da importação.** Hoje é sempre "substituir". Proponho `mesclar` como padrão e `substituir` só quando pedido, por ser o modo que desativa itens.
-5. **Escopo da Skill `info_unidades`.** Proponho `ferramentas:catalogo`, para a chave atual servir. Alternativa: escopo próprio `ferramentas:unidades` (exige recriar ou alterar a chave).
-6. **Taxa de serviço de 13% do Einstein.** Fica só como texto nesta fase. Se for para calcular, precisa de um jeito de o agente marcar "entrega no quarto" e de uma taxa percentual por unidade — entraria como bloco à parte.
-7. **Guardar o catálogo anterior em cada importação** (para "desfazer"). Ocupa espaço (cerca de 90 KB por importação do By Koji). Proponho guardar as 20 últimas por empresa.
-8. **Mensagem padrão de fora do horário.** Proposta: "Olá! No momento o {nome_empresa} está fora do horário de atendimento. Voltamos {proxima_abertura}. Sua mensagem ficou registrada. 🙏" — com `{proxima_abertura}` escrito como "hoje às 19h", "amanhã às 12h" ou "terça às 12h".
-9. **Bairro informado pelo cliente.** A comparação é por nome (sem acento); "Morumbi" e "Jd. Morumbi" são bairros diferentes. Se quiser tolerância (apelidos por bairro), acrescento uma coluna de nomes alternativos.
-10. **Categorias por unidade ou por empresa.** Proponho por unidade, porque os cardápios do By Koji têm categorias diferentes em cada casa ("Entradas quentes" só existe no Pátio Guedala).
-
-Depois da aprovação, começo pelo bloco G1.
+1. **Horário do bot:** padrão `sempre` para empresas novas; By Koji configurado como `unidades`.
+2. **Unidade fechada com o bot no ar:** segue o modo de pedido da empresa. By Koji = recusa (`unidade_fechada`); o agendamento fica implementado como opção, desligado.
+3. **Motivo do pedido mínimo:** `abaixo_do_minimo` passa a se chamar `abaixo_minimo` (bloco G4).
+4. **Importação CSV:** padrão `mesclar`. `substituir` só com confirmação explícita, e a simulação informa quantos itens serão desativados.
+5. **`info_unidades`:** escopo `ferramentas:catalogo`.
+6. **Taxa de 13% do Einstein:** continua só como texto; o cálculo fica fora desta fase.
+7. **Cópia do catálogo a cada importação:** guardar as 20 últimas por empresa, com "desfazer".
+8. **Texto padrão de fora do horário:** "Oi! 😊 No momento a {nome_empresa} está fechada. Voltamos {proxima_abertura}. Quando abrirmos, é só mandar uma mensagem por aqui que a gente te atende!"
+9. **Bairro:** comparação sem acento, com apelidos por bairro. Bairro não reconhecido **não recusa**: devolve `bairro_nao_reconhecido` para o agente pedir o CEP. `fora_area` só com certeza (CEP fora das faixas ou bairro marcado como não atendido).
+10. **Categorias por empresa** (não por unidade), com ordem de exibição; o item continua por unidade.
