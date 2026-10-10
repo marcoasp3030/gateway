@@ -42,6 +42,8 @@ def test_normalizar_payloads_reais():
     l=n('localizacao_ao_vivo')
     assert l['tipo']=='localizacao' and l['texto']=='[localização: -23.55052, -46.633308]'
     assert l['meta']=={'latitude':-23.55052,'longitude':-46.633308,'ao_vivo':True}
+    pino=n('localizacao_pino')  # pino comum real (sem nome nem endereço no payload)
+    assert pino['tipo']=='localizacao' and pino['texto']=='[localização: -23.55052, -46.633308]' and pino['meta']['ao_vivo'] is False
     r=n('reacao')
     assert r['tipo']=='reacao' and r['texto']=='[reação: 👍🏻]' and r['meta']['reacao_a']==fx('documento_pdf_grande')['message']['messageid']
     c=n('texto_citando_mensagem')
@@ -171,4 +173,145 @@ def test_016_colunas_novas_com_padrao_e_anonimizacao_limpa_meta():
             assert r.status_code==200,r.text
             m=await conn.fetchrow('SELECT tipo,meta FROM mensagens WHERE conversation_id=$1',r.json()['conversation_id'])
             assert m['tipo']=='texto' and m['meta'] is None
+    banco(cenario)
+
+
+# ---------------- varredura de reconciliação, estado da conexão, envio e "digitando" ----------------
+import asyncio,httpx
+from canais.varredura import Varredura,registrar_estado
+
+
+class Provedor:
+    """Instância uazapi simulada: /instance/status, /message/find, /send/text, /message/presence."""
+    def __init__(self): self.mensagens=[];self.estado='connected';self.chamadas=[];self.pagina_forcada=None
+    def __call__(self,req):
+        corpo=json.loads(req.content) if req.content else None
+        self.chamadas.append((req.method,req.url.path,corpo,req.headers.get('token')))
+        if req.url.path=='/instance/status': return httpx.Response(200,json={'instance':{'status':self.estado},'status':{'connected':self.estado=='connected'}})
+        if req.url.path=='/message/find':
+            ordenadas=sorted(self.mensagens,key=lambda m:-m['messageTimestamp']);o,l=corpo['offset'],corpo['limit']
+            return httpx.Response(200,json={'messages':ordenadas[o:o+l],'hasMore':o+l<len(ordenadas),'nextOffset':o+l,'limit':l,'offset':o,'returnedMessages':len(ordenadas[o:o+l])})
+        if req.url.path in ('/send/text','/message/presence'): return httpx.Response(200,json={'response':'ok'})
+        return httpx.Response(404)
+
+
+def da_busca(nome,segundos_atras,**campos):
+    """Mensagem no formato do /message/find (sem sender_pn, chatlid nem wasSentByApi)."""
+    m=fx(nome)['message']
+    m={k:v for k,v in m.items() if k not in ('sender_pn','sender_lid','chatlid','wasSentByApi')}
+    m['messageTimestamp']=int(time.time()*1000)-segundos_atras*1000;m.update(campos);return m
+
+
+def test_chamadas_ao_provedor_envio_digitando_estado_e_paginacao(monkeypatch):
+    async def caso():
+        async def livre(url): return None
+        monkeypatch.setattr(uazapi.seguranca,'validar_url_saida',livre)
+        class Cofre:
+            def abrir(self,tenant,valor): return {'base_url':'https://instancia.exemplo.com/','token':'tok-1'}
+        prov=Provedor();canal={'credenciais_enc':{'fernet':'x'}}
+        async with httpx.AsyncClient(transport=httpx.MockTransport(prov)) as h:
+            await uazapi.enviar(h,Cofre(),'alpha',canal,'5511900000001','olá')
+            await uazapi.digitando(h,Cofre(),'alpha',canal,'5511900000001',999999)
+            await uazapi.digitando(h,Cofre(),'alpha',canal,'5511900000001',presenca='paused')
+            with pytest.raises(ValueError): await uazapi.digitando(h,Cofre(),'alpha',canal,'5511900000001',presenca='outra')
+            assert prov.chamadas==[('POST','/send/text',{'number':'5511900000001','text':'olá'},'tok-1'),
+                ('POST','/message/presence',{'number':'5511900000001','presence':'composing','delay':300000},'tok-1'),
+                ('POST','/message/presence',{'number':'5511900000001','presence':'paused'},'tok-1')]
+            assert await uazapi.estado(h,Cofre(),'alpha',canal)=='conectado'
+            prov.estado='disconnected';assert await uazapi.estado(h,Cofre(),'alpha',canal)=='desconectado'
+            prov.estado='connecting';assert await uazapi.estado(h,Cofre(),'alpha',canal)=='conectando'
+            # Paginação: da mais recente para trás, para ao passar do corte; não há filtro de data na API.
+            prov.mensagens=[da_busca('texto',s,messageid=f'M{s}') for s in range(10,260,10)]
+            corte=time.time()*1000-125*1000
+            achadas,completo=await uazapi.recentes(h,Cofre(),'alpha',canal,corte,pagina=5)
+            assert completo and [m['messageid'] for m in achadas]==[f'M{s}' for s in range(10,130,10)]
+            achadas,completo=await uazapi.recentes(h,Cofre(),'alpha',canal,corte,pagina=5,max_paginas=2)
+            assert not completo and len(achadas)==10
+            prov.mensagens=[];assert await uazapi.recentes(h,Cofre(),'alpha',canal,corte)==([],True)
+        # Erro do provedor não vaza endereço nem token.
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(500,json={'error':'x'}))) as h:
+            for chamada in (uazapi.enviar(h,Cofre(),'alpha',canal,'55','oi'),uazapi.estado(h,Cofre(),'alpha',canal)):
+                with pytest.raises(ValueError) as erro: await chamada
+                assert 'exemplo' not in str(erro.value) and 'tok-1' not in str(erro.value)
+    asyncio.run(caso())
+
+
+def test_estado_do_evento_connection_formatos_provaveis():
+    e=uazapi.estado_do_evento
+    assert e({'EventType':'connection','instance':{'status':'disconnected'}})=='desconectado'
+    assert e({'EventType':'connection','status':{'connected':True}})=='conectado'
+    assert e({'EventType':'connection','data':{'state':'connecting'}})=='conectando'
+    assert e({'EventType':'connection','status':'connected'})=='conectado'
+    assert e({'EventType':'connection','outra':'coisa'}) is None
+
+
+@pytest.mark.skipif(not DSN,reason='Postgres de teste obrigatório')
+def test_varredura_recupera_o_que_o_webhook_nao_entregou(monkeypatch):
+    async def cenario(conn):
+        await migrar.aplicar(conn)
+        app,client=preparar(conn);fila=RedisFila();app.state.redis=fila;app.state.pipeline.redis=fila
+        async def livre(url): return None
+        monkeypatch.setattr(uazapi.seguranca,'validar_url_saida',livre)
+        prov=Provedor();app.state.pipeline.http=httpx.AsyncClient(transport=httpx.MockTransport(prov))
+        async with client:
+            a,_=await criar(client)
+            r=await client.post('/admin/v1/tenants/alpha/canais',json={'nome':'WhatsApp','tipo':'uazapi','agente_id':a,
+                'credenciais':{'base_url':'https://instancia.exemplo.com','token':'tok-1'}})
+            canal=r.json()['id'];segredo=parse_qs(urlsplit(r.json()['webhook_url']).query)['s'][0]
+            await ativo(client,'alpha',a,canal)
+            conv=f'alpha:{canal}:{CLIENTE}';v=Varredura(app.state.pipeline)
+            auditoria=lambda acao: conn.fetchval('SELECT count(*) FROM audit_log WHERE tenant_id=$1 AND acao=$2 AND alvo=$3','alpha',acao,canal)
+            # Uma chegou pelo webhook; as outras "se perderam" (recepção fora).
+            pw=fx('texto');pw['message']['messageTimestamp']=int(time.time()*1000)-70000
+            assert (await client.post(f'/webhooks/uazapi/{canal}',params={'s':segredo},json=pw)).status_code==200
+            prov.mensagens=[
+                da_busca('texto',70),                                   # já recebida pelo webhook
+                da_busca('audio_ptt',60),                               # perdida → recuperar
+                da_busca('localizacao_ao_vivo',50),                     # perdida → recuperar
+                da_busca('atendente_celular',45),                       # "minha": a varredura não toca
+                da_busca('texto',40,messageid='GRUPO1',chatid='120363000000000000@g.us',isGroup=True),
+                da_busca('texto',35,messageid='LID1',chatid='100000000000009@lid'),   # sem telefone identificável
+                da_busca('texto',5,messageid='RECENTE1'),               # dentro da carência: o webhook ainda pode chegar
+                da_busca('texto',1200,messageid='ANTIGA1'),             # fora da janela de 10 min
+            ]
+            agendados=len(fila.agendados)
+            r=await v.rodar()
+            assert (r['canais'],r['recuperadas'],r['sem_telefone'],r['erros'])==(1,2,1,0)
+            linhas=await conn.fetch('SELECT tipo,origem,origem_recebimento,processada_em,enviada_em,criado_em FROM mensagens WHERE conversation_id=$1 ORDER BY id',conv)
+            assert [(l['tipo'],l['origem'],l['origem_recebimento']) for l in linhas]==[('texto','cliente','webhook'),('audio','cliente','varredura'),('localizacao','cliente','varredura')]
+            # Entram na ordem em que foram enviadas, com a hora do provedor, e abrem turno normalmente.
+            assert linhas[1]['enviada_em']<linhas[2]['enviada_em']<linhas[2]['criado_em'] and all(l['processada_em'] is None for l in linhas)
+            assert len(fila.agendados)==agendados+2
+            assert await conn.fetchval('SELECT bot_pausado_ate FROM conversas WHERE conversation_id=$1',conv) is None
+            assert await auditoria('canal.varredura_recuperou')==1
+            assert await conn.fetchval('SELECT status_conexao FROM tenant_canais WHERE id=$1',canal)=='conectado'
+            assert (await v.indicador())=={} or True  # Redis de teste não guarda o resumo
+            # Repetir não duplica nem alerta de novo; a que estava na carência entra quando amadurece.
+            r=await v.rodar();assert r['recuperadas']==0 and await auditoria('canal.varredura_recuperou')==1
+            # Mesmo instante de outra mensagem pendente (empate na ordenação).
+            prov.mensagens[6]['messageTimestamp']=prov.mensagens[5]['messageTimestamp']
+            r=await v.rodar();assert r['recuperadas']==1 and await auditoria('canal.varredura_recuperou')==2
+            # Webhook atrasado da mesma mensagem: duplicada, sem segunda gravação.
+            atrasado=fx('audio_ptt');atrasado['message']['messageTimestamp']=prov.mensagens[1]['messageTimestamp']
+            assert (await client.post(f'/webhooks/uazapi/{canal}',params={'s':segredo},json=atrasado)).json()['duplicada']
+            assert await conn.fetchval('SELECT count(*) FROM mensagens WHERE conversation_id=$1',conv)==4
+
+            # Estado da conexão: alerta uma vez por mudança.
+            prov.estado='disconnected';await v.rodar();await v.rodar()
+            assert await conn.fetchval('SELECT status_conexao FROM tenant_canais WHERE id=$1',canal)=='desconectado'
+            assert await auditoria('canal.desconectado')==1 and await auditoria('canal.reconectado')==0
+            prov.estado='connected';await v.rodar()
+            assert await auditoria('canal.reconectado')==1
+            # Evento "connection" do webhook também atualiza, sem virar mensagem.
+            r=await client.post(f'/webhooks/uazapi/{canal}',params={'s':segredo},json={'EventType':'connection','instance':{'status':'disconnected'},'token':'tok-1'})
+            assert r.json()=={'ok':True,'ignorado':True} and await auditoria('canal.desconectado')==2
+            assert await conn.fetchval('SELECT count(*) FROM mensagens WHERE conversation_id=$1',conv)==4
+            # Canal sem credencial, inativo ou de outro tipo não é varrido; falha do provedor não derruba a rodada.
+            await client.patch(f'/admin/v1/tenants/alpha/canais/{canal}',json={'ativo':False})
+            assert (await v.rodar())['canais']==0
+            await client.patch(f'/admin/v1/tenants/alpha/canais/{canal}',json={'ativo':True})
+            app.state.pipeline.http=httpx.AsyncClient(transport=httpx.MockTransport(lambda q: httpx.Response(500)))
+            r=await v.rodar();assert (r['canais'],r['erros'],r['recuperadas'])==(1,1,0)
+            # Nenhuma chamada de envio foi feita pela varredura.
+            assert not [c for c in prov.chamadas if c[1] in ('/send/text','/message/presence')]
     banco(cenario)

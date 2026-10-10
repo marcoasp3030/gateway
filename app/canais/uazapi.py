@@ -136,13 +136,84 @@ def limpar_bruto(valor):
     return valor
 
 
-async def enviar(client,cofre,tenant_id,canal,telefone,texto):
-    cred=cofre.abrir(tenant_id,canal['credenciais_enc'].get('fernet'))
+def _credencial(cofre,tenant_id,canal):
+    cred=cofre.abrir(tenant_id,(canal['credenciais_enc'] or {}).get('fernet'))
     if not isinstance(cred,dict) or not cred.get('token') or not cred.get('base_url'):
         raise ValueError('Credenciais de canal indisponíveis')
-    url=cred['base_url'].rstrip('/')+'/send/text'
+    return cred['base_url'].rstrip('/'),cred['token']
+
+
+async def _chamar(client,cofre,tenant_id,canal,metodo,caminho,corpo=None,timeout=15):
+    """Uma chamada à instância: URL conferida (SSRF), sem redirecionamento, erro sem detalhes."""
+    base,token=_credencial(cofre,tenant_id,canal)
+    url=base+caminho
     await seguranca.validar_url_saida(url)
-    response=await client.post(url,headers={'token':cred['token']},
-        json={'number':telefone,'text':texto},timeout=15,follow_redirects=False)
+    response=await client.request(metodo,url,headers={'token':token},json=corpo,timeout=timeout,follow_redirects=False)
     if not 200<=response.status_code<300:
-        raise ValueError('Envio recusado')
+        raise ValueError('Provedor recusou a chamada (HTTP %s)'%response.status_code)
+    return response
+
+
+async def enviar(client,cofre,tenant_id,canal,telefone,texto):
+    """POST /send/text {number,text} (documentação uazapi). Erro HTTP sobe para o pipeline."""
+    try: await _chamar(client,cofre,tenant_id,canal,'POST','/send/text',{'number':telefone,'text':texto})
+    except ValueError as erro:
+        raise ValueError('Envio recusado' if 'HTTP' in str(erro) else str(erro)) from None
+
+
+async def digitando(client,cofre,tenant_id,canal,telefone,duracao_ms=10000,presenca='composing'):
+    """POST /message/presence {number,presence,delay}: "digitando" por duracao_ms (máx. 5 min).
+    A instância cancela sozinha ao enviar mensagem para o mesmo chat; 'paused' cancela antes."""
+    if presenca not in ('composing','recording','paused'): raise ValueError('Presença inválida')
+    corpo={'number':telefone,'presence':presenca}
+    if presenca!='paused': corpo['delay']=max(1000,min(int(duracao_ms),300000))
+    await _chamar(client,cofre,tenant_id,canal,'POST','/message/presence',corpo,timeout=10)
+
+
+ESTADOS={'connected':'conectado','connecting':'conectando','disconnected':'desconectado'}
+
+
+def _estado(valor):
+    if isinstance(valor,bool): return 'conectado' if valor else 'desconectado'
+    return ESTADOS.get(str(valor or '').strip().lower())
+
+
+async def estado(client,cofre,tenant_id,canal):
+    """GET /instance/status → 'conectado' | 'conectando' | 'desconectado'."""
+    d=(await _chamar(client,cofre,tenant_id,canal,'GET','/instance/status',timeout=10)).json()
+    instancia=d.get('instance') if isinstance(d.get('instance'),dict) else {}
+    situacao=d.get('status') if isinstance(d.get('status'),dict) else {}
+    return _estado(instancia.get('status')) or _estado(situacao.get('connected')) or 'desconectado'
+
+
+def estado_do_evento(payload):
+    """Evento "connection" do webhook. O formato não está documentado: lê os campos prováveis
+    e devolve None se não reconhecer (a varredura confere o estado pela API de qualquer forma)."""
+    for origem in (payload.get('instance'),payload.get('status'),payload.get('data'),payload):
+        if isinstance(origem,dict):
+            for campo in ('status','state','connection'):
+                achado=_estado(origem.get(campo)) if not isinstance(origem.get(campo),(dict,bool)) else None
+                if achado: return achado
+            if isinstance(origem.get('connected'),bool): return _estado(origem['connected'])
+        elif isinstance(origem,str) and _estado(origem): return _estado(origem)
+    return None
+
+
+async def recentes(client,cofre,tenant_id,canal,desde_ms,pagina=100,max_paginas=20):
+    """POST /message/find sem chatid: mensagens de todos os chats, da mais recente para trás,
+    até passar de desde_ms. A API não filtra por data. Devolve (mensagens, completo)."""
+    achadas=[];offset=0
+    for _ in range(max_paginas):
+        d=(await _chamar(client,cofre,tenant_id,canal,'POST','/message/find',{'limit':pagina,'offset':offset},timeout=30)).json()
+        lote=d.get('messages') if isinstance(d,dict) else None
+        if not isinstance(lote,list) or not lote: return achadas,True
+        for msg in lote:
+            if not isinstance(msg,dict): continue
+            try: quando=float(msg.get('messageTimestamp') or 0)
+            except (TypeError,ValueError): continue
+            if quando<1e11: quando*=1000
+            if quando<desde_ms: return achadas,True
+            achadas.append(msg)
+        if len(lote)<pagina or d.get('hasMore') is False: return achadas,True
+        offset=d.get('nextOffset') if isinstance(d.get('nextOffset'),int) and d['nextOffset']>offset else offset+len(lote)
+    return achadas,False

@@ -45,13 +45,18 @@ async def webhook(request:Request,tipo:str,canal_id:str,s:str=''):
     if tipo=='api':
         m=Entrada.model_validate(bruto).model_dump()
     else:
+        if (bruto.get('EventType') or bruto.get('event'))=='connection':
+            from canais.varredura import registrar_estado
+            estado=uazapi.estado_do_evento(bruto)
+            if estado: await registrar_estado(request.app.state.db,tenant,canal_id,estado)
+            return {'ok':True,'ignorado':True}
         try: norm=uazapi.normalizar(bruto)
         except (TypeError,AttributeError,ValueError): raise HTTPException(400,'Payload inválido') from None
         if norm is None: return {'ok':True,'ignorado':True}
         try: m=Entrada.model_validate({'identificador':norm['telefone'],'texto':norm['texto'],
             'message_id':norm['message_id'],'enviada_em':norm['enviada_em']}).model_dump()
         except ValueError: raise HTTPException(400,'Payload inválido') from None
-        m.update(humano=norm['from_me'],via_api=norm['via_api'],nome=norm['nome'],tipo=norm['tipo'],meta=norm['meta'])
+        m.update(humano=norm['from_me'],via_api=norm['via_api'],nome=norm['nome'],tipo=norm['tipo'],meta=norm['meta'],origem_recebimento='webhook')
     result=await request.app.state.pipeline.receber(tenant,canal_id,m)
     await request.app.state.db.execute('UPDATE webhook_raw SET contato_id=(SELECT contato_id FROM conversas WHERE tenant_id=$1 AND conversation_id=$3) WHERE tenant_id=$1 AND id=$2',tenant,raw_id,f'{tenant}:{canal_id}:{m["identificador"]}')
     return result

@@ -88,6 +88,11 @@ class FilaDuravel:
         self.lider = False
         # Empresas no limite: o worker deixa de ler a fila delas por um instante.
         self.cheias = {}
+        # Reconciliação com o provedor do canal (uazapi): a cada varredura_s e na subida.
+        from canais.varredura import Varredura
+        self.varredura = Varredura(pipeline)
+        self.varredura_s = float(os.getenv('VARREDURA_UAZAPI_S', '90') or 90)
+        self.varredura_task = None
 
     # ---------------- chaves ----------------
     def stream(self, tenant): return f'{self.prefixo}:fila:{tenant}'
@@ -166,6 +171,7 @@ class FilaDuravel:
         proxima_reconciliacao = 0
         proximos_indicadores = 0
         proxima_limpeza = 0
+        proxima_varredura = 0
         while not (parar and parar.is_set()):
             try:
                 if await self.manter_lideranca():
@@ -173,6 +179,10 @@ class FilaDuravel:
                     if agora >= proximos_indicadores:
                         await self.alertas(await self.indicadores())
                         proximos_indicadores = agora + 15
+                    if self.varredura_s > 0 and agora >= proxima_varredura and (
+                            self.varredura_task is None or self.varredura_task.done()):
+                        # Em tarefa própria: chamada lenta ao provedor não atrasa o agendamento.
+                        self.varredura_task = asyncio.create_task(self.varrer()); proxima_varredura = agora + self.varredura_s
                     if self.ligada:
                         await self.mover_vencidos()
                         if agora >= proxima_reconciliacao:
@@ -184,7 +194,14 @@ class FilaDuravel:
             except Exception:
                 log.warning('Agendador da fila temporariamente indisponível')
             await asyncio.sleep(intervalo)
+        if self.varredura_task and not self.varredura_task.done():
+            self.varredura_task.cancel(); await asyncio.gather(self.varredura_task, return_exceptions=True)
         await self.soltar_lideranca()
+
+    async def varrer(self):
+        try: await self.varredura.rodar()
+        except Exception as erro:
+            log.warning('Varredura do provedor indisponível (%s)', type(erro).__name__)
 
     async def despachar_saidas(self):
         from nucleo.webhooks import despachar
@@ -318,6 +335,7 @@ class FilaDuravel:
         return {'ligada': self.ligada, 'empresas': empresas, 'agentes_em_andamento': agentes,
                 'cota_skyone': sorted(cota, key=lambda c: c['url']), 'workers_vivos': workers,
                 'agendador_ativo': bool(await self.redis.exists(self.k_lider)),
+                'varredura': await self.varredura.indicador(),
                 'aguardando': sum(e['aguardando'] for e in empresas.values()),
                 'mais_antiga_s': max([e['mais_antiga_s'] for e in empresas.values()] or [0.0])}
 
