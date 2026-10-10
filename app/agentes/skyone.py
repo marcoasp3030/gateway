@@ -52,6 +52,26 @@ def baloes(resposta):
     return partes
 
 
+async def interacao(db,tenant_id,conversa_id,canal_id,mensagem):
+    """Clique em botão de uma mensagem do lote: {"tipo","id","titulo","atual"} ou None (texto puro).
+
+    Só vale se a mensagem dos botões foi enviada pelo gateway nesta conversa e, havendo opções
+    gravadas nela, o id é uma delas. `atual` = o bot não enviou mais nada depois daquela mensagem
+    (clique em mensagem antiga vem com atual=false; o gateway nunca executa nada pelo clique)."""
+    meta=mensagem.get('meta');meta=json.loads(meta) if isinstance(meta,str) else meta
+    clique=(meta or {}).get('interacao') if isinstance(meta,dict) else None
+    if not isinstance(clique,dict) or clique.get('tipo')!='botao' or not clique.get('id') or not clique.get('mensagem') or not canal_id: return None
+    origem=await db.fetchrow("""SELECT id,meta FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND message_id=$3
+        AND direcao='saida' AND origem='bot'""",tenant_id,conversa_id,f'{canal_id}:{clique["mensagem"]}')
+    if not origem: return None
+    gravado=origem['meta'];gravado=json.loads(gravado) if isinstance(gravado,str) else gravado
+    opcoes=((gravado or {}).get('botoes') or {}).get('opcoes') if isinstance(gravado,dict) else None
+    if isinstance(opcoes,list) and clique['id'] not in {o.get('id') for o in opcoes if isinstance(o,dict)}: return None
+    depois=await db.fetchval("""SELECT EXISTS(SELECT 1 FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND id>$3
+        AND direcao='saida')""",tenant_id,conversa_id,origem['id'])
+    return {'tipo':'botao','id':clique['id'],'titulo':mensagem['conteudo'],'atual':not depois}
+
+
 async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None,lote=None):
     """Pacote do Apêndice A. `lote` são as mensagens pendentes do turno (enviada_em, tipo, conteudo)."""
     conv = await repo.obter(tenant_id,'conversas',conversa_id)
@@ -64,8 +84,15 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
     historico = await repo.historico(tenant_id,conversa_id,antes_id,cfg['history_turns'])
     rid = request_id or str(uuid.uuid4())
     agora = datetime.now(timezone.utc)
-    do_lote = [{'enviada_em':iso(i.get('enviada_em') or i.get('criado_em') or agora),'tipo':i.get('tipo') or 'texto','texto':i['conteudo']}
-               for i in (dict(x) for x in (lote or []))] or [{'enviada_em':iso(agora),'tipo':'texto','texto':message}]
+    do_lote = []; ultima_interacao = None
+    for i in (dict(x) for x in (lote or [])):
+        item = {'enviada_em':iso(i.get('enviada_em') or i.get('criado_em') or agora),'tipo':i.get('tipo') or 'texto','texto':i['conteudo']}
+        clique = await interacao(repo.db,tenant_id,conversa_id,conv.get('canal_id'),i)
+        if clique:
+            item['interacao'] = {k:clique[k] for k in ('tipo','id','atual')}
+            ultima_interacao = clique
+        do_lote.append(item)
+    do_lote = do_lote or [{'enviada_em':iso(agora),'tipo':'texto','texto':message}]
     # Tempo explícito (INV10): da última mensagem da conversa antes deste lote até a primeira do lote.
     anterior = await repo.db.fetchval('SELECT max(enviada_em) FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND id<$3',
                                       tenant_id,conversa_id,antes_id)
@@ -91,6 +118,8 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
         'tempo_desde_ultima':ha_quanto_tempo(intervalo) if intervalo is not None else None,
         'retomada':bool(intervalo is not None and intervalo>RETOMADA_APOS),
         'mensagens_do_lote':do_lote,
+        # Último clique em botão do lote (nulo se não houve). O texto do clique é o título do botão.
+        'ultima_interacao':ultima_interacao,
         'cliente':{'nome':(contato or {}).get('nome') or conv.get('nome'),'unidade_preferida':conv.get('unidade_preferida'),
                    'resumo_anterior':(contato or {}).get('resumo')},
     }

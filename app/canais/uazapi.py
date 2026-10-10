@@ -1,5 +1,6 @@
 """Canal uazapi: leitura do webhook (formato real conferido na Fase 1) e envio."""
 from datetime import datetime,timezone,timedelta
+import re
 import httpx
 import seguranca
 
@@ -10,6 +11,9 @@ MIDIAS={'AudioMessage':('audio','áudio'),'ImageMessage':('imagem','imagem'),'Vi
     'DocumentMessage':('documento','documento'),'StickerMessage':('figurinha','figurinha'),
     'ContactMessage':('contato','contato'),'ContactsArrayMessage':('contato','contatos')}
 TEXTOS={'Conversation','ExtendedTextMessage'}
+# Clique em botão de resposta (payload real de 10/10/2026: tests/fixtures/uazapi/clique_botao.json).
+CLIQUES_DE_BOTAO={'TemplateButtonReplyMessage'}
+ID_DE_BOTAO=re.compile(r'[a-z0-9_]{1,40}')
 LOCALIZACOES={'LocationMessage','LiveLocationMessage'}
 
 
@@ -64,6 +68,13 @@ def _midia(tipo_provedor,conteudo,legenda):
     return tipo,(legenda+'\n'+aviso if legenda else aviso),meta
 
 
+def _titulo_do_botao(msg,conteudo):
+    """Título do botão clicado, como o cliente viu (uma linha, até 200 caracteres)."""
+    for valor in (conteudo.get('selectedDisplayText'),msg.get('vote'),msg.get('text')):
+        if isinstance(valor,str) and valor.strip(): return ' '.join(valor.split())[:200]
+    return None
+
+
 def normalizar(payload: dict, agora=None) -> dict | None:
     """Converte o webhook do uazapi num formato interno. None = ignorar."""
     evento = payload.get("EventType") or payload.get("event")
@@ -101,6 +112,13 @@ def normalizar(payload: dict, agora=None) -> dict | None:
             texto = texto + '\n' + marcador if texto else marcador
         else:
             texto = '[não foi possível ler localização: coordenadas ausentes]'
+    elif tipo_provedor in CLIQUES_DE_BOTAO and _titulo_do_botao(msg,conteudo):
+        # O clique é uma mensagem de texto do cliente: o texto é o título do botão.
+        tipo = 'texto'; texto = _titulo_do_botao(msg,conteudo)
+        ident = str(conteudo.get('selectedID') or msg.get('buttonOrListid') or '')
+        origem = str(msg.get('quoted') or (conteudo.get('contextInfo') or {}).get('stanzaID') or '')[:200]
+        # Sem id válido ou sem a mensagem de origem, fica só o texto.
+        if ID_DE_BOTAO.fullmatch(ident) and origem: meta = {'interacao': {'tipo': 'botao', 'id': ident, 'mensagem': origem}}
     elif tipo_provedor in TEXTOS or (not tipo_provedor and texto):
         tipo = 'texto'
         if not texto: return None

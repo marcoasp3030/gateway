@@ -280,7 +280,7 @@ return 1
         try:
             await self.redis.zrem(self.prefixo+':due',chave)
             await self.redis.delete(self.prefixo+':first:'+chave)
-            itens=await self.db.fetch("SELECT id,conteudo,criado_em,origem,evento,enviada_em,tipo FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND processada_em IS NULL AND direcao='entrada' AND origem IN ('cliente','sistema') ORDER BY id LIMIT 100",tenant,conversa)
+            itens=await self.db.fetch("SELECT id,conteudo,criado_em,origem,evento,enviada_em,tipo,meta FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND processada_em IS NULL AND direcao='entrada' AND origem IN ('cliente','sistema') ORDER BY id LIMIT 100",tenant,conversa)
             if not itens: return
             # Não misturar eventos de sistema com mensagens do cliente nem entre si.
             origem=itens[0]['origem']
@@ -387,7 +387,7 @@ return 1
             return False
 
     async def _pendentes(self,conn,tenant,conversa):
-        itens=await conn.fetch("SELECT id,conteudo,criado_em,origem,evento,enviada_em,tipo FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND processada_em IS NULL AND direcao='entrada' AND origem IN ('cliente','sistema') ORDER BY id LIMIT 100",tenant,conversa)
+        itens=await conn.fetch("SELECT id,conteudo,criado_em,origem,evento,enviada_em,tipo,meta FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND processada_em IS NULL AND direcao='entrada' AND origem IN ('cliente','sistema') ORDER BY id LIMIT 100",tenant,conversa)
         if not itens: return []
         # Não misturar eventos de sistema com mensagens do cliente nem entre si.
         if itens[0]['origem']=='sistema': return itens[:1]

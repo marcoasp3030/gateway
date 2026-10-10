@@ -1,7 +1,7 @@
 # Especificação — botões interativos no WhatsApp (bloco UX1)
 
-Situação em 10/10/2026: **levantamento e proposta. Nada implementado.** Aguarda aprovação do Marco.
-Pendente para fechar a seção 1.3: o payload real do clique (mensagem de teste enviada ao piloto às 19:39 de 10/10/2026).
+Situação em 10/10/2026: **aprovada pelo Marco** (decisões na seção 8). Bloco **B1 (ler o clique) implementado**; os demais aguardam liberação.
+Ordem aprovada: B1 → B2 → B4 agora; depois o G4; B3 e B5 junto do G3.
 
 ---
 
@@ -31,9 +31,53 @@ Corpo: `number`, `type`, `text`, `choices` (obrigatórios); `footerText`, `listB
 
 ### 1.3 Formato real do webhook de clique
 
-🔲 **Pendente.** Preencher com o payload gravado em `webhook_raw` (mascarado) depois do clique do Marco. Nada aqui será inferido.
+Clique do piloto em "Sim, funcionou", 10/10/2026 às 19:44 (registro 104 de `webhook_raw`; telefones, nomes e token mascarados; bloco `chat` omitido). Cópia anonimizada usada nos testes: `tests/fixtures/uazapi/clique_botao.json`.
 
-O que já se sabe do código atual: um `messageType` que o normalizador não conhece vira anexo não suportado (`[não foi possível ler ...]`), entra como mensagem do cliente e vai ao agente. Ou seja, **hoje o clique não se perde, mas chega ilegível**.
+```json
+{"EventType": "messages", "chatSource": "updated",
+ "message": {
+  "messageType": "TemplateButtonReplyMessage",
+  "type": "text",
+  "text": "",
+  "vote": "Sim, funcionou",
+  "buttonOrListid": "teste_sim",
+  "quoted": "3EB02BEE543170F3B092D5",
+  "messageid": "A5C9BB44D679061FAF9C90DCE206ADF6",
+  "id": "5511*****99:A5C9BB44D679061FAF9C90DCE206ADF6",
+  "chatid": "5511*******46@s.whatsapp.net",
+  "sender_pn": "5511*******46@s.whatsapp.net",
+  "sender": "8220********33@lid", "sender_lid": "8220********33@lid", "chatlid": "8220********33@lid",
+  "senderName": "<nome>", "fromMe": false, "wasSentByApi": false, "isGroup": false, "source": "android",
+  "messageTimestamp": 1791672290000,
+  "content": {
+   "selectedID": "teste_sim",
+   "selectedDisplayText": "Sim, funcionou",
+   "selectedIndex": 0,
+   "contextInfo": {
+    "stanzaID": "3EB02BEE543170F3B092D5",
+    "participant": "1409*********31@lid",
+    "quotedType": 0,
+    "quotedMessage": {"interactiveMessage": {
+      "body": {"text": "Teste de botões do gateway (UX1). Toque em uma das opções:"},
+      "InteractiveMessage": {"NativeFlowMessage": {"buttons": [
+        {"name": "<nome>", "buttonParamsJSON": "{\"id\":\"teste_sim\",\"display_text\":\"Sim, funcionou\",\"disabled\":false}"},
+        {"name": "<nome>", "buttonParamsJSON": "{\"id\":\"teste_nao\",\"display_text\":\"Não apareceu\",\"disabled\":false}"}]}}}}}}}}
+```
+
+O que o payload mostra:
+
+| Dado | Onde vem |
+|---|---|
+| Tipo do evento | `messageType: "TemplateButtonReplyMessage"` (com `type: "text"` e **`text` vazio**) |
+| Título do botão | `content.selectedDisplayText` e `vote` |
+| Id do botão | `content.selectedID` e `buttonOrListid` |
+| Mensagem a que o clique pertence | `quoted` e `content.contextInfo.stanzaID` = o `messageid` devolvido pelo `/send/menu` (o mesmo que o gateway grava em `mensagens.message_id`) |
+| Telefone do cliente | `chatid` / `sender_pn`, como em qualquer mensagem |
+| Id próprio do clique | `messageid` (serve à idempotência, como em qualquer mensagem) |
+
+- A mensagem original inteira volta em `quotedMessage`, mas o gateway **não confia nela**: as opções válidas são as que ele mesmo gravou ao enviar.
+- Antes do B1, este clique entrou como `[não foi possível ler TemplateButtonReplyMessage: tipo de mensagem não suportado]` e o agente respondeu pedindo texto (ocorrido no teste).
+- O formato do clique em **lista** não foi observado; fica para o teste real do B3.
 
 ### 1.4 Onde o contrato com o Skyone é validado
 
@@ -170,10 +214,13 @@ Sempre em mensagem separada, depois do texto. Nunca a pedido do agente.
 | Situação | Resposta |
 |---|---|
 | Aceito agora | "Pedido 48213 confirmado. O cliente foi avisado." |
-| Recusa pelo botão | Não recusa na hora: "Para recusar o pedido 48213, responda: NÃO 48213 e o motivo." (o motivo é obrigatório para avisar o cliente) |
+| Toque em **Recusar** (`pedido_nao_48213`) | Não recusa ainda: o gateway responde com 3 botões de motivo — **Item em falta** (`pedido_nao_48213_falta`), **Loja lotada** (`pedido_nao_48213_lotada`) e **Outro motivo** (`pedido_nao_48213_outro`) |
+| **Item em falta** ou **Loja lotada** | Recusa na hora, com o motivo correspondente em texto amigável ao cliente; responde "Pedido 48213 recusado. O cliente foi avisado." |
+| **Outro motivo** | Não recusa: "Para recusar o pedido 48213, responda: NÃO 48213 e o motivo." |
 | Já decidido | "O pedido 48213 já foi confirmado às 19:42 pelo painel." (ou recusado, com quem e quando) |
 | Pedido de outra unidade ou inexistente | "Não encontrei o pedido 48213 para esta unidade." |
 
+- **Sem estado guardado:** tudo o que é preciso vem no `id` do botão (ação, número do pedido e motivo). Cada clique é validado de novo pelo telefone do remetente (`numero_interno()`) e passa por `decidir()`.
 - `OK <numero>` e `NÃO <numero> <motivo>` digitados **continuam valendo**.
 - Plano B: se o botão não puder ser enviado, sai o texto de hoje, sem mudança.
 - Este é o único lugar em que um clique tem efeito direto, e é em conversa interna (unidade), não com cliente. Clique em aviso antigo cai em "já decidido".
@@ -217,10 +264,26 @@ Ordem sugerida: B1 → B2 → B4 → B3 → B5. O B1 vem primeiro porque sem ler
 
 ---
 
-## 8. Pontos para o Marco decidir
+## 8. Decisões do Marco (10/10/2026)
 
-1. **Recusar pelo botão pede o motivo em texto** (seção 5.2), em vez de recusar na hora sem motivo. Concorda?
-2. **Histórico grava as opções numeradas** junto do balão (seção 3.1), mesmo quando saíram como botão. Concorda?
-3. **`botoes_interativos` nasce desligado** e você liga só no agente do By Koji. Concorda?
-4. **Lista (B3)** exige mais um teste real com o piloto (uma mensagem). Autoriza quando chegar a vez?
-5. **`url_cardapio` e `dominios_de_link`** são campos novos de cadastro (B5): por empresa, por unidade, ou os dois?
+1. **Recusar pelo botão:** o toque em "Recusar" abre 3 botões de motivo — "Item em falta" (`pedido_nao_<numero>_falta`), "Loja lotada" (`pedido_nao_<numero>_lotada`) e "Outro motivo" (`pedido_nao_<numero>_outro`). Os dois primeiros recusam na hora com o motivo correspondente (texto amigável ao cliente); "Outro motivo" pede `NÃO <numero> e o motivo`. Sem estado guardado: tudo vem no `id`, sempre validado pelo telefone do remetente (`numero_interno`) e por `decidir()` (idempotente). `OK`/`NÃO` digitados continuam valendo.
+2. **Histórico** grava as opções numeradas junto do balão: aprovado.
+3. **`botoes_interativos`** nasce `off`; ligar apenas no agente do By Koji depois do B2 validado.
+4. **Lista (B3):** teste real com o piloto autorizado quando chegar a vez (uma mensagem).
+5. **`url_cardapio`:** na empresa, com substituição opcional por unidade. **`dominios_de_link`:** só na empresa.
+
+**Ordem:** B1 → B2 → B4 agora; depois o G4; B3 e B5 junto do G3.
+
+## 9. Andamento
+
+| Bloco | Situação |
+|---|---|
+| B1 — Ler o clique | Implementado em 10/10/2026: `uazapi.normalizar()` reconhece `TemplateButtonReplyMessage`; `mensagens.meta.interacao`; `ultima_interacao` no pacote (`skyone.interacao()`); testes em `tests/test_botoes.py` |
+| B2, B4 | Aguardam liberação |
+| B3, B5 | Junto do G3 |
+
+Detalhes do B1 que a implementação fixou:
+- O item de `mensagens_do_lote` só ganha a chave `interacao` quando é um clique; as mensagens comuns continuam com as três chaves de sempre.
+- Mensagem "de origem" válida = enviada **pelo bot** (não pelo atendente), **nesta conversa**, com o id do provedor gravado. Fora disso, o clique vai como texto puro.
+- `atual` = nenhuma mensagem saiu (do bot ou do atendente) depois da mensagem dos botões.
+- Clique sem título nenhum (não observado) continua como tipo não suportado, e o agente pede texto.

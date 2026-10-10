@@ -11,7 +11,7 @@ from test_skyone_adaptador import preparar_agente
 
 CAMPOS_DO_PACOTE={'request_id','session_id','conversation_id','tenant_id','agente_id','modelo_id','instrucoes_agente',
     'canal','modo_resposta','tarefa','agora','tempo_desde_ultima','retomada','message','mensagens_do_lote','historico',
-    'cliente','unidades','contexto_modulos'}
+    'cliente','unidades','contexto_modulos','ultima_interacao'}
 
 
 def test_tempo_em_texto_e_baloes():
