@@ -519,3 +519,105 @@ Todas em `/admin/v1`, com a chave do painel; as de escrita exigem `X-Actor`. Val
 - **WhatsApp da unidade** ("OK"/"NÃO") e a Skill `cancelar_pedido` seguem as mesmas regras de antes e agora gravam na linha do tempo.
 - **Anonimização do contato** apaga também os motivos da linha do tempo dos pedidos dele.
 - Fica para o **PED1-b**: textos e liga/desliga por empresa, prévia, reenvio e `X-Role`. Para o **PED1-c**: conversas e contatos.
+
+---
+
+## 13. PED1-b — implementado (11/10/2026): contrato das rotas novas para o painel
+
+Migração 031 (aditiva): tabela `pedido_avisos_config` (empresa, status, modalidade, ativo, texto). Testes em `tests/test_ped1b.py`.
+
+### 13.1 `X-Role`
+
+O painel envia `X-Role: plataforma | admin | membro` em toda chamada, preenchido no servidor a partir da sessão. **Ausente, vazio ou desconhecido = `membro`.**
+
+| Ação | `membro` | `admin` | `plataforma` |
+|---|---|---|---|
+| Ler textos, ver prévia | sim | sim | sim |
+| Mudar status do pedido, reenviar aviso | sim | sim | sim |
+| **Alterar texto ou liga/desliga** | **403 `FORBIDDEN`** | sim | sim |
+
+### 13.2 Ler a configuração
+
+`GET /tenants/{t}/pedidos/avisos`
+
+```json
+{"variaveis": ["numero", "unidade", "previsao", "motivo", "nome_cliente"], "max_texto": 1000,
+ "itens": [
+  {"status": "confirmado", "status_descricao": "Confirmado pela unidade", "modalidade": "delivery",
+   "ativo": true, "texto": "Oba! Seu pedido nº {numero} foi confirmado pela unidade {unidade} ✅[[ Previsão: {previsao}.]]",
+   "ativo_padrao": true, "texto_padrao": "Oba! Seu pedido nº {numero} …", "padrao": true},
+  {"status": "concluido", "status_descricao": "Concluído", "modalidade": "retirada",
+   "ativo": false, "texto": "Pedido nº {numero} retirado. Bom apetite[[, {nome_cliente}]]! 😊",
+   "ativo_padrao": false, "texto_padrao": "Pedido nº {numero} retirado. …", "padrao": true}]}
+```
+
+- Sempre **12 linhas**, nesta ordem de status: `confirmado`, `em_preparo`, `pronto_retirada`, `saiu_entrega`, `concluido`, `recusado`, `cancelado`; cada um nas modalidades em que existe (`pronto_retirada` só `retirada`, `saiu_entrega` só `delivery`, os demais nas duas).
+- `ativo` e `texto` são o que vale hoje; `ativo_padrao` e `texto_padrao`, o padrão da plataforma; `padrao: true` quando a empresa não mexeu em nada daquela linha.
+
+### 13.3 Alterar (admin ou plataforma)
+
+`PUT /tenants/{t}/pedidos/avisos/{status}` — exige `X-Actor` e `X-Role`.
+
+```json
+{"texto": "Recebemos! Pedido {numero} confirmado na {unidade}.[[ Fica pronto em {previsao}.]]"}
+{"modalidade": "retirada", "ativo": true}
+{"texto": null}
+```
+
+| Campo | Regra |
+|---|---|
+| `modalidade` | Opcional. Sem ela, a alteração vale para todas as modalidades do status |
+| `ativo` | `true`/`false`; `null` volta ao padrão |
+| `texto` | 1–1000 caracteres; `null` volta ao padrão. Espaços das pontas são cortados |
+
+Resposta 200: a configuração completa (igual à do `GET`). Erros:
+
+| Código | Quando |
+|---|---|
+| 400 | Corpo sem `ativo` nem `texto`; modalidade que não existe no status; sem `X-Actor`; texto inválido — neste caso `detalhes: {"campo": "texto", "motivo": "tamanho" \| "variavel_desconhecida" \| "formato", "variaveis": [...]}` |
+| 403 | `X-Role` diferente de `admin`/`plataforma` (ou ausente) |
+| 404 | Empresa inexistente ou status sem aviso (`aguardando_loja`) |
+
+`formato` = `[[` sem `]]`, trecho opcional dentro de outro, ou chave solta. Auditoria: `pedido.aviso_configurado`, com quem alterou. A mudança vale para os avisos gerados **a partir dali**; aviso já enfileirado mantém o texto de quando foi gerado.
+
+### 13.4 Prévia
+
+`POST /tenants/{t}/pedidos/avisos/{status}/previa` — corpo opcional `{"texto"?, "modalidade"?}`. Sem `texto`, usa o que vale hoje para a empresa. Nada é gravado nem enviado; qualquer papel pode chamar.
+
+```json
+{"status": "confirmado", "modalidade": "delivery",
+ "texto": "Oi, Ana! Pedido 12345 na Pátio Guedala. Previsão: cerca de 40 minutos.",
+ "texto_sem_opcionais": "Oi! Pedido 12345 na Pátio Guedala."}
+```
+
+`texto` usa valores de exemplo (pedido 12345, a primeira unidade da empresa, 40 minutos, "Faltou um ingrediente", "Ana"); `texto_sem_opcionais` mostra o mesmo aviso sem previsão, motivo e nome, para ver o efeito dos trechos `[[ ]]`. Texto inválido → 400 como na seção 13.3.
+
+### 13.5 Reenviar aviso que falhou
+
+`POST /tenants/{t}/pedidos/{numero}/avisos/{status}/reenviar` — exige `X-Actor`; corpo opcional `{"mesmo_incerto": true}`.
+
+| Resposta | Quando |
+|---|---|
+| 202 `{"ok": true, "aviso": {"status": "pendente"}}` | Voltou para a fila; sai em poucos segundos |
+| 404 | Pedido inexistente, ou não há aviso desse status (ex.: status desligado) |
+| 409 `motivo: aviso_nao_falhou` | O aviso não está em falha (já enviado, pendente…): **aviso entregue nunca é reenviado** |
+| 409 `motivo: pedido_mudou_de_status` | O pedido já saiu daquele status |
+| 409 `motivo: entrega_incerta` | A falha foi incerta (pode ter chegado ao cliente); só reenvia com `{"mesmo_incerto": true}` |
+
+O 409 traz `detalhes: {"campo": "aviso", "status": "<status do aviso>", "motivo": "…"}`. Auditoria: `pedido.aviso_reenviado`. O texto reenviado é o que foi gerado na mudança de status.
+
+Na **linha do tempo** (seção 12.1), o bloco `aviso` de cada passo ganhou dois campos:
+
+```json
+"aviso": {"status": "falhou", "em": null, "erro": "recusado_pelo_provedor", "incerto": false, "pode_reenviar": true}
+```
+
+- `pode_reenviar`: o painel mostra o botão "Reenviar aviso" só quando for `true`.
+- `incerto`: quando `true`, o painel pede confirmação ("o cliente pode já ter recebido") e envia `{"mesmo_incerto": true}`.
+- `erro`: `recusado_pelo_provedor` (com certeza não saiu) ou o tipo da falha (tempo esgotado, erro do provedor, envio interrompido), todos incertos.
+
+### 13.6 O que a implementação fixou
+
+- O liga/desliga e o texto são **por status e modalidade**. Concluído em retirada nasce desligado e tem texto próprio ("retirado"), proposto por mim; os demais textos são os da seção 11.
+- Sem configuração da empresa, tudo funciona com os padrões (as outras empresas não mudam).
+- Falta o **PED1-c** (conversas e contatos).

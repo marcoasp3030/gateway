@@ -57,3 +57,18 @@ def contexto_da_chave(escopo):
             'UPDATE tenant_api_keys SET ultimo_uso_em=now() WHERE tenant_id=$1 AND id=$2',chave['tenant_id'],chave['id'])
         return {'tenant_id':chave['tenant_id'],'agente_id':chave['agente_id'],'actor':'api-key:'+chave['id']}
     return contexto
+
+
+PAPEIS=('plataforma','admin','membro')
+
+
+def papel(request: Request):
+    """Papel de quem está no painel (X-Role, preenchido pelo servidor do painel a partir da sessão).
+    Ausente ou desconhecido = membro: falha fechada."""
+    valor=request.headers.get('x-role','').strip().lower()
+    return valor if valor in PAPEIS else 'membro'
+
+
+def exigir_admin(request: Request):
+    if papel(request) not in ('plataforma','admin'):
+        raise HTTPException(403,'FORBIDDEN')

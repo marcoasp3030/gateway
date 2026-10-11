@@ -5,7 +5,7 @@ from typing import Literal
 from fastapi import APIRouter,Depends,Request,HTTPException
 from pydantic import BaseModel,ConfigDict,Field
 from starlette.responses import JSONResponse
-from nucleo.autenticacao import contexto_da_chave,painel
+from nucleo.autenticacao import contexto_da_chave,painel,exigir_admin
 from nucleo.banco import Repositorio
 from nucleo.webhooks import emitir
 from admin.servico import auditar
@@ -288,6 +288,106 @@ async def contagem(request:Request,tenant_id:str):
                                'por_unidade':[dict(r) for r in novos]},
             'em_andamento':{s:andamento.get(s,0) for s in ('confirmado','em_preparo','pronto_retirada','saiu_entrega')},
             'avisos_com_falha':falhas}
+
+
+class AvisoConfig(Estrito):
+    modalidade:Literal['delivery','retirada']|None=None
+    ativo:bool|None=None
+    texto:str|None=None
+
+
+class Previa(Estrito):
+    modalidade:Literal['delivery','retirada']|None=None
+    texto:str|None=None
+
+
+class Reenvio(Estrito):
+    mesmo_incerto:bool=False
+
+
+STATUS_COM_AVISO=tuple(avisos.TEXTOS)
+
+
+async def _avisos_da_empresa(db,tenant_id):
+    config=await avisos.configuracao(db,tenant_id);itens=[]
+    for status in STATUS_COM_AVISO:
+        for modalidade in avisos.modalidades(status):
+            ativo,texto=avisos.efetivo(config,status,modalidade);proprio=config.get((status,modalidade),(None,None))
+            itens.append({'status':status,'status_descricao':servico.DESCRICAO[status],'modalidade':modalidade,'ativo':ativo,'texto':texto,
+                          'ativo_padrao':avisos.ligado(status,modalidade),'texto_padrao':avisos.texto_padrao(status,modalidade),
+                          'padrao':proprio[0] is None and proprio[1] is None})
+    return {'variaveis':list(avisos.VARIAVEIS),'max_texto':avisos.MAX_TEXTO,'itens':itens}
+
+
+def _status_com_aviso(status,modalidade=None):
+    if status not in STATUS_COM_AVISO: raise HTTPException(404,'NOT_FOUND')
+    if modalidade and modalidade not in avisos.modalidades(status): raise HTTPException(400,'VALIDATION_ERROR')
+    return [modalidade] if modalidade else list(avisos.modalidades(status))
+
+
+def texto_invalido(motivo):
+    return JSONResponse({'erro':{'codigo':'VALIDATION_ERROR','mensagem':'Texto do aviso inválido.','detalhes':{'campo':'texto','motivo':motivo,'variaveis':list(avisos.VARIAVEIS)}}},
+                        status_code=400,headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
+
+
+@admin.get('/tenants/{tenant_id}/pedidos/avisos')
+async def avisos_config(request:Request,tenant_id:str):
+    """Texto e liga/desliga do aviso ao cliente em cada status e modalidade, com o padrão ao lado."""
+    if not await Repositorio(request.app.state.db).tenant(tenant_id): raise HTTPException(404,'NOT_FOUND')
+    return await _avisos_da_empresa(request.app.state.db,tenant_id)
+
+
+@admin.put('/tenants/{tenant_id}/pedidos/avisos/{status}',dependencies=[Depends(exigir_admin)])
+async def salvar_aviso(request:Request,tenant_id:str,status:str,dados:AvisoConfig,actor=Depends(painel)):
+    """Só admin ou plataforma (X-Role). Sem `modalidade`, vale para as duas. `texto: null` volta ao padrão; `ativo: null` também."""
+    db=request.app.state.db
+    if not await Repositorio(db).tenant(tenant_id): raise HTTPException(404,'NOT_FOUND')
+    alvo=_status_com_aviso(status,dados.modalidade);enviados=dados.model_fields_set-{'modalidade'}
+    if not enviados: raise HTTPException(400,'VALIDATION_ERROR')
+    if dados.texto is not None:
+        motivo=avisos.validar_texto(dados.texto)
+        if motivo: return texto_invalido(motivo)
+    async with db.acquire() as conn,conn.transaction():
+        for modalidade in alvo:
+            await conn.execute("""INSERT INTO pedido_avisos_config(tenant_id,status,modalidade,ativo,texto,atualizado_por) VALUES ($1,$2,$3,$4,$5,$8)
+                ON CONFLICT (tenant_id,status,modalidade) DO UPDATE SET ativo=CASE WHEN $6 THEN EXCLUDED.ativo ELSE pedido_avisos_config.ativo END,
+                texto=CASE WHEN $7 THEN EXCLUDED.texto ELSE pedido_avisos_config.texto END,atualizado_em=now(),atualizado_por=$8""",
+                tenant_id,status,modalidade,dados.ativo,dados.texto.strip() if dados.texto else None,'ativo' in enviados,'texto' in enviados,actor[:100])
+        await auditar(conn,tenant_id,actor,'pedido.aviso_configurado',status)
+    return await _avisos_da_empresa(db,tenant_id)
+
+
+@admin.post('/tenants/{tenant_id}/pedidos/avisos/{status}/previa')
+async def previa_do_aviso(request:Request,tenant_id:str,status:str,dados:Previa|None=None):
+    """Como o aviso ficaria, com valores de exemplo. Nada é enviado nem gravado. Sem `texto`, usa o que vale hoje para a empresa."""
+    db=request.app.state.db
+    if not await Repositorio(db).tenant(tenant_id): raise HTTPException(404,'NOT_FOUND')
+    modalidade=_status_com_aviso(status,dados.modalidade if dados else None)[0]
+    modelo=dados.texto if dados and dados.texto is not None else avisos.efetivo(await avisos.configuracao(db,tenant_id),status,modalidade)[1]
+    motivo=avisos.validar_texto(modelo)
+    if motivo: return texto_invalido(motivo)
+    exemplo={**avisos.EXEMPLO,'unidade':await db.fetchval('SELECT nome FROM tenant_unidades WHERE tenant_id=$1 AND ativo ORDER BY nome LIMIT 1',tenant_id) or avisos.EXEMPLO['unidade']}
+    return {'status':status,'modalidade':modalidade,'texto':avisos.renderizar(modelo,exemplo),
+            # O mesmo aviso quando não há previsão, motivo nem nome: mostra o efeito dos trechos [[ ]].
+            'texto_sem_opcionais':avisos.renderizar(modelo,{**exemplo,'previsao':'','motivo':'','nome_cliente':''})}
+
+
+@admin.post('/tenants/{tenant_id}/pedidos/{numero}/avisos/{status}/reenviar',status_code=202)
+async def reenviar_aviso(request:Request,tenant_id:str,numero:str,status:str,dados:Reenvio|None=None,actor=Depends(painel)):
+    """Reenvio manual de aviso que falhou. Nunca reenvia aviso entregue, nem de status que o pedido já deixou."""
+    def recusa(motivo,atual):
+        return JSONResponse({'erro':{'codigo':'CONFLICT','mensagem':'Este aviso não pode ser reenviado.','detalhes':{'campo':'aviso','status':atual,'motivo':motivo}}},
+                            status_code=409,headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
+    async with request.app.state.db.acquire() as conn,conn.transaction():
+        p=await conn.fetchrow('SELECT id,status FROM pedidos WHERE tenant_id=$1 AND numero=$2 FOR UPDATE',tenant_id,numero)
+        a=p and await conn.fetchrow("SELECT id,status,erro FROM avisos_internos WHERE tenant_id=$1 AND tipo='pedido_cliente' AND referencia=$2 FOR UPDATE",tenant_id,f'{numero}:{status}')
+        if not p or not a: raise HTTPException(404,'NOT_FOUND')
+        if a['status']!='falhou': return recusa('aviso_nao_falhou',a['status'])
+        if p['status']!=status: return recusa('pedido_mudou_de_status',a['status'])
+        if avisos.incerto(a['erro']) and not (dados and dados.mesmo_incerto): return recusa('entrega_incerta',a['status'])
+        await conn.execute("UPDATE avisos_internos SET status='pendente',erro=NULL WHERE id=$1",a['id'])
+        await auditar(conn,tenant_id,actor,'pedido.aviso_reenviado',numero)
+    return {'ok':True,'aviso':{'status':'pendente'}}
 
 
 @admin.get('/tenants/{tenant_id}/pedidos/{numero}')

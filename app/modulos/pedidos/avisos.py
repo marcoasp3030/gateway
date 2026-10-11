@@ -50,7 +50,39 @@ TEXTOS={
     'recusado':'Poxa, a unidade {unidade} não conseguiu aceitar o pedido nº {numero}.[[ Motivo: {motivo}.]] Seus itens continuam no carrinho, se quiser ajustar e pedir de novo é só me chamar.',
     'cancelado':'Seu pedido nº {numero} foi cancelado pela unidade {unidade}.[[ Motivo: {motivo}.]] Se precisar, estou por aqui para ajudar.',
 }
+# Concluído em retirada nasce desligado; se a empresa ligar, o texto padrão não fala em entrega.
+TEXTOS_RETIRADA={'concluido':'Pedido nº {numero} retirado. Bom apetite[[, {nome_cliente}]]! 😊'}
 VARIAVEIS=('numero','unidade','previsao','motivo','nome_cliente')
+MODALIDADES={'pronto_retirada':('retirada',),'saiu_entrega':('delivery',)}
+EXEMPLO={'numero':'12345','unidade':'Pátio Guedala','previsao':'cerca de 40 minutos','motivo':'Faltou um ingrediente','nome_cliente':'Ana'}
+MAX_TEXTO=1000
+
+
+def modalidades(status): return MODALIDADES.get(status,('delivery','retirada'))
+
+
+def texto_padrao(status,modalidade): return TEXTOS_RETIRADA.get(status,TEXTOS[status]) if modalidade=='retirada' else TEXTOS[status]
+
+
+def validar_texto(texto):
+    """Motivo pelo qual o texto não serve, ou None. Variável só das conhecidas; [[ ]] fechado e sem aninhar."""
+    if not isinstance(texto,str) or not 1<=len(texto.strip())<=MAX_TEXTO: return 'tamanho'
+    desconhecidas=sorted({v for v in re.findall(r'\{(\w*)\}',texto) if v not in VARIAVEIS})
+    if desconhecidas: return 'variavel_desconhecida'
+    sem_opcionais=re.sub(r'\[\[(?:(?!\[\[|\]\]).)*\]\]','',texto,flags=re.S)
+    if '[[' in sem_opcionais or ']]' in sem_opcionais or '{' in re.sub(r'\{\w+\}','',texto) or '}' in re.sub(r'\{\w+\}','',texto): return 'formato'
+    return None
+
+
+async def configuracao(conn,tenant):
+    """{(status, modalidade): (ativo, texto)} com o que a empresa definiu; ausente ou nulo = padrão."""
+    return {(r['status'],r['modalidade']):(r['ativo'],r['texto']) for r in await conn.fetch('SELECT status,modalidade,ativo,texto FROM pedido_avisos_config WHERE tenant_id=$1',tenant)}
+
+
+def efetivo(config,status,modalidade):
+    """(ligado, texto) que vale para a empresa neste status e modalidade."""
+    ativo,texto=config.get((status,modalidade),(None,None))
+    return (ligado(status,modalidade) if ativo is None else ativo),(texto or texto_padrao(status,modalidade))
 
 
 def ligado(status,modalidade):
@@ -85,9 +117,9 @@ def renderizar(modelo,valores):
     return re.sub(r'\{(\w+)\}',lambda m: str(valores.get(m.group(1)) or '') if m.group(1) in VARIAVEIS else m.group(0),texto).strip()
 
 
-def texto_cliente(p,nome_unidade):
+def texto_cliente(p,nome_unidade,modelo=None):
     motivo=(p['motivo'] or '').strip().rstrip('.')
-    return renderizar(TEXTOS[p['status']],{'numero':p['numero'],'unidade':nome_unidade,'previsao':previsao(p['previsao_min']) if p['status'] in ('confirmado','em_preparo') else '',
+    return renderizar(modelo or texto_padrao(p['status'],p['modalidade']),{'numero':p['numero'],'unidade':nome_unidade,'previsao':previsao(p['previsao_min']) if p['status'] in ('confirmado','em_preparo') else '',
                                            'motivo':motivo,'nome_cliente':primeiro_nome(p['cliente_nome'])})
 
 
@@ -118,10 +150,18 @@ async def avisar_unidade_do_pedido(conn,tenant,p,itens):
 
 async def avisar_cliente_do_pedido(conn,tenant,p):
     """Aviso do status atual ao cliente, uma vez por pedido e status. Devolve 'enfileirado' ou 'desligado'."""
-    if not ligado(p['status'],p['modalidade']): return 'desligado'
+    ativo,modelo=efetivo(await configuracao(conn,tenant),p['status'],p['modalidade'])
+    if not ativo: return 'desligado'
     await enfileirar(conn,tenant,'pedido_cliente',f'{p["numero"]}:{p["status"]}',
-                     texto_cliente(p,await nome_da_unidade(conn,tenant,p['unidade'])),None,p['conversation_id'])
+                     texto_cliente(p,await nome_da_unidade(conn,tenant,p['unidade']),modelo),None,p['conversation_id'])
     return 'enfileirado'
+
+
+# Falha em que o provedor recusou a chamada: a mensagem com certeza não saiu. Qualquer outra pode ter saído.
+RECUSA_CERTA='recusado_pelo_provedor'
+
+
+def incerto(erro): return erro!=RECUSA_CERTA
 
 
 async def avisar_transbordo(conn,tenant,conversa,motivo,detalhe=None,painel_url=None):
@@ -179,6 +219,7 @@ async def despachar(pipeline,limite=20):
             # Falha antes de sair (ou recusa do provedor): tenta de novo até o limite. Sem detalhes do erro no log.
             # Aviso ao cliente nunca é reenviado (poderia chegar duas vezes); os internos tentam de novo.
             de_novo=a['tipo']!='pedido_cliente' and a['tentativas']<MAX_TENTATIVAS
-            await db.execute("UPDATE avisos_internos SET status=$2,erro=$3 WHERE id=$1",a['id'],'pendente' if de_novo else 'falhou',type(erro).__name__)
+            await db.execute("UPDATE avisos_internos SET status=$2,erro=$3 WHERE id=$1",a['id'],'pendente' if de_novo else 'falhou',
+                             RECUSA_CERTA if getattr(erro,'certo',False) else type(erro).__name__)
             log.warning('Aviso interno não enviado (%s)%s',type(erro).__name__,'' if de_novo else '; desistindo')
     return enviados

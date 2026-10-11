@@ -323,10 +323,14 @@ async def linha_do_tempo(conn,tenant,p):
         FROM pedido_eventos e LEFT JOIN avisos_internos a ON a.tenant_id=e.tenant_id AND a.tipo='pedido_cliente'
             AND a.referencia=$3||':'||e.para AND e.aviso='enfileirado'
         WHERE e.tenant_id=$1 AND e.pedido_id=$2 ORDER BY e.id''',tenant,p['id'],p['numero'])
+    from .avisos import incerto
     def aviso(r):
         if r['aviso'] is None: return None
-        if r['aviso']=='desligado': return {'status':'desligado','em':None,'erro':None}
-        return {'status':r['aviso_status'] or 'pendente','em':r['aviso_em'],'erro':r['aviso_erro']}
+        if r['aviso']=='desligado': return {'status':'desligado','em':None,'erro':None,'incerto':False,'pode_reenviar':False}
+        falhou=r['aviso_status']=='falhou'
+        # Só se reenvia aviso que falhou, e só enquanto o pedido ainda está naquele status. Incerto = pode ter chegado ao cliente.
+        return {'status':r['aviso_status'] or 'pendente','em':r['aviso_em'],'erro':r['aviso_erro'],
+                'incerto':falhou and incerto(r['aviso_erro']),'pode_reenviar':falhou and r['para']==p['status']}
     return [{'de':r['de'],'para':r['para'],'por':r['por'],'origem':r['origem'],'em':r['criado_em'],'motivo':r['motivo'],
              'previsao_min':r['previsao_min'],'aviso':aviso(r)} for r in rows]
 

@@ -161,6 +161,12 @@ def _credencial(cofre,tenant_id,canal):
     return cred['base_url'].rstrip('/'),cred['token']
 
 
+class EnvioRecusado(ValueError):
+    """Falha no /send/text. `certo` = o provedor recusou (4xx): a mensagem não saiu."""
+    def __init__(self,mensagem,certo=False):
+        super().__init__(mensagem);self.certo=certo
+
+
 class MenuRecusado(ValueError):
     """O provedor recusou o menu com certeza (4xx): nada foi enviado, dá para mandar em texto."""
 
@@ -195,7 +201,9 @@ async def enviar(client,cofre,tenant_id,canal,telefone,texto):
     Devolve o messageid do provedor (ou None), para a varredura reconhecer o que o bot enviou."""
     try: response=await _chamar(client,cofre,tenant_id,canal,'POST','/send/text',{'number':telefone,'text':texto})
     except ValueError as erro:
-        raise ValueError('Envio recusado' if 'HTTP' in str(erro) else str(erro)) from None
+        achado=re.search(r'HTTP (\d{3})',str(erro))
+        # 4xx (menos 408) é recusa certa: nada saiu. O resto pode ter saído.
+        raise EnvioRecusado('Envio recusado' if achado else str(erro),bool(achado and 400<=int(achado.group(1))<500 and achado.group(1)!='408')) from None
     try: return id_do_envio(response.json())
     except ValueError: return None
 
