@@ -14,6 +14,7 @@ from fastapi import HTTPException
 from agentes import skyone
 from canais import uazapi
 from nucleo import botoes
+from nucleo.contatos import nome_de_perfil,gravar_informado
 from nucleo.banco import Repositorio
 from nucleo.configuracao import Configuracoes
 from admin.servico import auditar
@@ -210,14 +211,18 @@ return 1
         mensagem_id=f'{canal_id}:{m["message_id"]}' if m.get('message_id') else None
         async with self.db.acquire() as conn,conn.transaction():
             await conn.execute('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',conversa)
-            contato=await conn.fetchval('INSERT INTO contatos(id,tenant_id,telefone,nome) VALUES ($1,$2,$3,$4) ON CONFLICT(tenant_id,telefone) DO UPDATE SET atualizado_em=now() RETURNING id','ct_'+uuid.uuid4().hex,tenant,identificador,m.get('nome'))
+            # Nome de perfil (senderName) a cada mensagem do cliente, não só na primeira (PED1-c). Mensagem do atendente vem sem nome.
+            perfil=None if humano else nome_de_perfil(m.get('nome'))
+            contato=await conn.fetchval('''INSERT INTO contatos(id,tenant_id,telefone,nome,nome_perfil) VALUES ($1,$2,$3,$4,$4)
+                ON CONFLICT(tenant_id,telefone) DO UPDATE SET atualizado_em=now(),nome_perfil=coalesce(EXCLUDED.nome_perfil,contatos.nome_perfil)
+                RETURNING id''','ct_'+uuid.uuid4().hex,tenant,identificador,perfil)
             anterior=await Repositorio(conn).obter(tenant,'conversas',conversa)
             if anterior and anterior['agente_id']!=cfg['id']:
                 await auditar(conn,tenant,'sistema','conversa.roteada',conversa)
-            await conn.execute('''INSERT INTO conversas(tenant_id,conversation_id,canal,canal_id,agente_id,telefone,nome)
-                VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(conversation_id) DO UPDATE
-                SET agente_id=EXCLUDED.agente_id,atualizado_em=now()
-                WHERE conversas.tenant_id=EXCLUDED.tenant_id''',tenant,conversa,canal['tipo'],canal_id,cfg['id'],identificador,m.get('nome'))
+            await conn.execute('''INSERT INTO conversas(tenant_id,conversation_id,canal,canal_id,agente_id,telefone,nome,simulada)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(conversation_id) DO UPDATE
+                SET agente_id=EXCLUDED.agente_id,nome=coalesce(EXCLUDED.nome,conversas.nome),atualizado_em=now()
+                WHERE conversas.tenant_id=EXCLUDED.tenant_id''',tenant,conversa,canal['tipo'],canal_id,cfg['id'],identificador,perfil,bool(m.get('simulacao')))
             await conn.execute('UPDATE conversas SET contato_id=$3 WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa,contato)
             reacao=m.get('tipo')=='reacao'
             comando_bot=humano and not reacao and m['texto'].strip().lower()==COMANDO_BOT
@@ -398,6 +403,7 @@ return 1
                 from nucleo.consumo import registrar,atualizar_cache
                 mes,total=await registrar(conn,tenant)
                 if motivo: await marcar_aguardando(conn,tenant,conversa,motivo)
+                if resultado and resultado.get('nome_cliente'): await gravar_informado(conn,tenant,conversa,resultado['nome_cliente'])
                 if origem=='sistema' and status=='ignorado':
                     await auditar(conn,tenant,'sistema','notificacao.nao_enviada',conversa)
                 if status=='ok' and resultado and resultado.get('acao')=='encerrar':
@@ -747,6 +753,7 @@ return 1
             from nucleo.consumo import registrar,atualizar_cache
             mes,total=await registrar(conn,tenant)
             if motivo: await marcar_aguardando(conn,tenant,conversa,motivo,resultado.get('motivo') if resultado and motivo=='transferido_pelo_agente' else None)
+            if resultado and resultado.get('nome_cliente'): await gravar_informado(conn,tenant,conversa,resultado['nome_cliente'])
             if turno['origem']=='sistema' and status=='ignorado':
                 await auditar(conn,tenant,'sistema','notificacao.nao_enviada',conversa)
             # INV03 antes do envio: o agente respondeu, mas a conversa foi pausada (ou saiu do piloto)

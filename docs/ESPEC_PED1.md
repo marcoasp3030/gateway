@@ -263,7 +263,7 @@ Três origens guardadas separadas no contato:
 | `cadastro` | Digitado no painel (`PATCH .../contatos/{id}` com `{"nome": "…"}`) | Manual, com auditoria |
 | `perfil` | Nome de perfil do WhatsApp (`senderName`) | **A cada mensagem recebida** (hoje só na primeira) |
 
-Prioridade: **informado > cadastro > perfil > telefone formatado** (`+55 11 94728-1513`). O gateway devolve o resultado pronto e de onde veio. (Decisão 1: você escreveu essa ordem; em muitos sistemas o cadastro manual vence o informado. Mantive a sua.)
+Prioridade: **cadastro > informado > perfil > telefone formatado** (`+55 11 94728-1513`), conforme a decisão 1 da seção 11. O gateway devolve o resultado pronto e de onde veio.
 
 ### 6.2 Campos novos em `GET /tenants/{t}/conversas`
 
@@ -620,4 +620,94 @@ Na **linha do tempo** (seção 12.1), o bloco `aviso` de cada passo ganhou dois 
 
 - O liga/desliga e o texto são **por status e modalidade**. Concluído em retirada nasce desligado e tem texto próprio ("retirado"), proposto por mim; os demais textos são os da seção 11.
 - Sem configuração da empresa, tudo funciona com os padrões (as outras empresas não mudam).
-- Falta o **PED1-c** (conversas e contatos).
+- O **PED1-c** (conversas e contatos) está na seção 14.
+
+---
+
+## 14. PED1-c — implementado (11/10/2026): contrato final para o painel e para o Skyone
+
+Migração **032** (aditiva). Nada do que existe mudou de forma; só há campos e parâmetros novos.
+
+### 14.1 Nome do contato
+
+Três origens guardadas separadas no contato. **Prioridade: cadastro > informado > perfil > telefone.**
+
+| Origem | De onde vem | Quando muda |
+|---|---|---|
+| `cadastro` | Painel: `PATCH /tenants/{t}/contatos/{id}` | Manual, auditado (`contato.nome_cadastro` / `contato.nome_cadastro_removido`) |
+| `informado` | Agente: campo `nome_cliente` no retorno | A cada retorno válido do agente; nunca toca no cadastro |
+| `perfil` | `senderName` do WhatsApp | **A cada mensagem do cliente** (mensagem do atendente não mexe) |
+
+`nome_origem`: `cadastro`, `informado`, `perfil`, `telefone` (sem nome: mostra `+55 11 94728-1513`), `identificador` (canal sem telefone e sem nome: mostra o identificador), `anonimizado`.
+Perfil que não tem letra nenhuma ("." ou só emoji) é guardado, mas não é exibido (cai para o telefone).
+
+**Regra do nome de cadastro e do `nome_cliente`:** 2 a 60 caracteres (espaços repetidos viram um), ao menos duas letras, sem número de telefone (8 ou mais dígitos, com ou sem separadores) e sem emoji nem caractere de controle. Motivos de recusa: `tamanho`, `telefone`, `caractere`, `letras`.
+
+O nome também passa a valer, sem telefone, para: `cliente.nome` do pacote do agente, `cliente_nome` gravado no pedido ao fechar, `{nome_cliente}` dos avisos (primeiro nome, lido **na hora do aviso**) e o alerta de transbordo.
+
+### 14.2 `GET /tenants/{t}/conversas`
+
+Campos antigos continuam. Cada item ganha:
+
+```json
+{
+  "contato_id": "ct_…",
+  "nome_exibicao": "Marco Silva", "nome_origem": "cadastro",
+  "nomes": {"cadastro": "Marco Silva", "informado": "Marquinho", "perfil": "Marco A."},
+  "telefone_e164": "+5511947281513", "telefone_formatado": "+55 11 94728-1513",
+  "canal_info": {"id": "can_…", "tipo": "uazapi", "nome": "WhatsApp Loja", "icone": "whatsapp", "teste": false},
+  "unidade_preferida": "patio_guedala", "unidade_preferida_nome": "Pátio Guedala",
+  "estado": "bot",
+  "ultima": {"texto": "Pra retirar", "em": "2026-10-11T00:40:02+00:00", "direcao": "entrada", "origem": "cliente", "tipo": "texto"},
+  "pedido_aberto": {"numero": "59859", "status": "em_preparo"}
+}
+```
+
+| Campo | Regra |
+|---|---|
+| `telefone_e164` / `telefone_formatado` | Canais `uazapi`/`meta`: sempre que houver 10–15 dígitos. Demais canais: só se o identificador for só número com 10–15 dígitos. Senão `null`. Formatado no padrão brasileiro (`+55 11 94728-1513`, fixo `+55 11 3333-4444`); outros países ficam no E.164 |
+| `canal_info.icone` | `uazapi`/`meta` → `whatsapp`; `site` → `globe`; `api` → `code`; `email` → `mail`; `teams` → `teams`; `luxbrain` → `luxbrain` |
+| `canal_info.teste` | `true` quando a empresa é de teste **ou** a conversa nasceu de simulação no painel (coluna nova `conversas.simulada`; as antigas foram marcadas pela auditoria `agente.simulado`) |
+| `unidade_preferida` | A da conversa; se vazia, a unidade do carrinho mais recente da conversa. `unidade_preferida_nome` vem do cadastro de unidades (ou repete o código) |
+| `estado` | Um só, nesta ordem: `encerrada` → `aguardando_atendente` → `atendente` (bot pausado vigente) → `bot` |
+| `ultima` | Última mensagem da conversa: `origem` é o autor (`cliente`, `bot`, `humano`, `sistema`), `direcao` `entrada`/`saida`, `tipo` (`texto`, `audio`, `imagem`, `localizacao`, `reacao`…). `null` se não houver mensagem |
+| `pedido_aberto` | Último pedido da conversa fora de `concluido`/`recusado`/`cancelado`; senão `null` |
+| Contato anonimizado | `nome_exibicao: "Contato anonimizado"`, `nome_origem: "anonimizado"`, três nomes, `nome`, `telefone` e telefones `null` |
+
+**Parâmetros novos:**
+- `estado=encerrada` (ou vários: `estado=aguardando_atendente,atendente`). Valor fora dos quatro → 400 `VALIDATION_ERROR`.
+- `ordem=recentes`: última atividade (`atualizado_em`) primeiro. `proximo_cursor` vem num formato próprio (`<ISO>|<conversation_id>`): o painel só repassa, não monta. Sem `ordem` (ou `ordem=id`) continua a ordem por ID com o cursor de sempre. Cursor inválido → 400.
+- `busca` procura também nos três nomes (além do nome antigo e do telefone).
+
+### 14.3 Contatos
+
+`GET /tenants/{t}/contatos?busca=` — campos de sempre (`id`, `tenant_id`, `telefone`, `email`, `nome`, `anonimizado_em`) + `nome_exibicao`, `nome_origem`, `nomes`, `telefone_e164`, `telefone_formatado`, `ultima_conversa_em`, `conversas` (quantidade). A busca cobre os três nomes.
+
+`PATCH /tenants/{t}/contatos/{id}` com `{"nome": "Marco Silva"}` grava o nome de cadastro; `{"nome": null}` apaga (volta a valer o informado/perfil). Qualquer papel (`membro` incluído); exige `X-Actor`. Resposta: o contato no mesmo formato da lista.
+
+| Situação | Resposta |
+|---|---|
+| Nome fora da regra | 400 `{"erro": {"codigo": "VALIDATION_ERROR", "detalhes": {"campo": "nome", "motivo": "tamanho\|telefone\|caractere\|letras"}}}` |
+| Corpo sem `nome` ou com campo a mais; sem `X-Actor` | 400 |
+| Contato de outra empresa ou inexistente | 404 |
+| Contato anonimizado | 409 |
+
+### 14.4 Anonimização
+
+Limpa também os três nomes (e quem/quando cadastrou) e, na linha do tempo dos pedidos da conversa, `motivo` e `por` (vira `anonimizado`).
+
+### 14.5 Skyone — `nome_cliente`
+
+**Retorno (volta):** campo novo, opcional:
+
+```json
+{ "request_id": "…", "conversation_id": "…", "status": "success", "tipo": "text",
+  "resposta": ["Prazer, Marco! O que vai querer hoje?"], "acao": "nenhuma",
+  "nome_cliente": "Marco" }
+```
+
+- Mandar **só quando o cliente disse o nome** na conversa. Não copiar o perfil do WhatsApp nem o `cliente.nome` recebido. Repetir em turnos seguintes não faz mal.
+- Regra: 2–60 caracteres, ao menos duas letras, sem telefone, sem emoji. Fora disso (ou tipo diferente de texto) o campo é **ignorado** e a resposta sai normal; o log registra só o motivo, nunca o valor.
+- Vale com qualquer `acao`. Grava como nome **informado**; o nome de **cadastro** do painel continua vencendo.
+
+**Pacote (ida):** `cliente` passa a ser `{"nome", "nome_origem", "unidade_preferida", "resumo_anterior"}`. `nome` já vem pela prioridade e nunca é telefone; `nome_origem` é `cadastro`, `informado`, `perfil` ou `null`. Sugestão para o prompt: com `nome_origem` `null` ou `perfil`, pode perguntar como o cliente prefere ser chamado; com `cadastro` ou `informado`, usar o nome e não perguntar de novo.

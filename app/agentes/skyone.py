@@ -4,11 +4,13 @@ import base64
 import os
 from .controle import CredencialRecusada, CircuitoAberto
 import json
+import logging
 import uuid
 from zoneinfo import ZoneInfo
 import httpx
 import seguranca
 from nucleo.banco import Repositorio
+from nucleo.contatos import validar_nome,nome_do_cliente
 from nucleo.credenciais import CredencialInvalida
 
 
@@ -16,6 +18,8 @@ from .erros import FalhaAgente, FalhaTransitoria, TempoEsgotado, SilencioSemMoti
 import re
 import time
 from datetime import datetime,timezone,timedelta
+
+log=logging.getLogger('gateway.skyone')
 
 # Nova tentativa única (Fase 0.6): só depois deste intervalo e dentro do timeout_s.
 ESPERA_NOVA_TENTATIVA_S=2
@@ -100,6 +104,8 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
     intervalo = max(primeira-anterior,timedelta(0)) if anterior else None
     contato = await repo.obter(tenant_id,'contatos',conv['contato_id']) if conv.get('contato_id') else None
     canal = await repo.obter(tenant_id,'tenant_canais',conv['canal_id']) if conv.get('canal_id') else None
+    if contato: nome_cliente,nome_origem = nome_do_cliente(contato)
+    else: nome_cliente,nome_origem = (conv.get('nome'),'perfil') if conv.get('nome') else (None,None)
     from modulos import contextos
     from modulos.pedidos.servico import acoes_recentes
     from nucleo.horarios import pacote as unidades
@@ -125,7 +131,8 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
         'acoes_ja_executadas':acoes or [],
         # Sempre presente (UX3.1): chamadas de Skill desta conversa nos últimos minutos, com há quantos segundos foi cada uma.
         'acoes_recentes':await acoes_recentes(repo.db,tenant_id,conversa_id,cfg.get('acoes_recentes_min')),
-        'cliente':{'nome':(contato or {}).get('nome') or conv.get('nome'),'unidade_preferida':conv.get('unidade_preferida'),
+        # Nome pela prioridade cadastro > informado > perfil (PED1-c); nunca o telefone. nome_origem diz de onde veio.
+        'cliente':{'nome':nome_cliente,'nome_origem':nome_origem,'unidade_preferida':conv.get('unidade_preferida'),
                    'resumo_anterior':(contato or {}).get('resumo')},
     }
 
@@ -205,6 +212,11 @@ async def _chamar(client,repo,cofre,tenant_id,cfg,payload):
         from nucleo import botoes as mod_botoes
         escolhas=mod_botoes.do_retorno(corpo.get('botoes'),acao,textos)
         if escolhas: result['botoes']=escolhas
+        # Nome que o cliente disse na conversa (PED1-c). Opcional; inválido é ignorado sem derrubar o turno.
+        if corpo.get('nome_cliente') is not None:
+            nome,recusa=validar_nome(corpo.get('nome_cliente'))
+            if nome: result['nome_cliente']=nome
+            else: log.warning('nome_cliente ignorado: %s',recusa)
         uso=corpo.get('uso')
         if isinstance(uso,dict) and all(isinstance(k,str) and type(v) is int and v>=0 for k,v in uso.items()): result['uso']=uso
         # Não permitir eco da credencial mesmo dentro de campos do contrato.

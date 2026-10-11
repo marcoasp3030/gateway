@@ -5,6 +5,7 @@ atendente) e enviado depois pelo agendador. A recepção nunca chama o canal. Av
 alerta só sai de verdade quando o agente do canal está com envio real; senão fica "simulado"."""
 import logging,re,time
 from canais import uazapi
+from nucleo.contatos import nome_da_conversa
 
 log=logging.getLogger('gateway.avisos')
 MAX_TENTATIVAS=3
@@ -152,8 +153,10 @@ async def avisar_cliente_do_pedido(conn,tenant,p):
     """Aviso do status atual ao cliente, uma vez por pedido e status. Devolve 'enfileirado' ou 'desligado'."""
     ativo,modelo=efetivo(await configuracao(conn,tenant),p['status'],p['modalidade'])
     if not ativo: return 'desligado'
+    # {nome_cliente} pelo nome de hoje (cadastro > informado > perfil); o gravado no pedido fica de reserva.
+    atual,_=await nome_da_conversa(conn,tenant,p['conversation_id']) if p['conversation_id'] else (None,None)
     await enfileirar(conn,tenant,'pedido_cliente',f'{p["numero"]}:{p["status"]}',
-                     texto_cliente(p,await nome_da_unidade(conn,tenant,p['unidade']),modelo),None,p['conversation_id'])
+                     texto_cliente({**dict(p),'cliente_nome':atual or p['cliente_nome']},await nome_da_unidade(conn,tenant,p['unidade']),modelo),None,p['conversation_id'])
     return 'enfileirado'
 
 
@@ -172,8 +175,9 @@ async def avisar_transbordo(conn,tenant,conversa,motivo,detalhe=None,painel_url=
     if not conv: return None
     pedido=await conn.fetchrow("SELECT numero,status FROM pedidos WHERE tenant_id=$1 AND conversation_id=$2 ORDER BY id DESC LIMIT 1",tenant,conversa)
     marca=conv['aguardando_atendente_desde'].isoformat() if conv['aguardando_atendente_desde'] else str(time.time())
+    nome,_=await nome_da_conversa(conn,tenant,conversa)
     return await enfileirar(conn,tenant,'transbordo',conversa+'@'+marca,
-        texto_transbordo(conv['telefone'],conv['nome'],motivo,(detalhe or '')[:120] or None,pedido,painel_url),destino,conversa)
+        texto_transbordo(conv['telefone'],nome,motivo,(detalhe or '')[:120] or None,pedido,painel_url),destino,conversa)
 
 
 async def _canal_de_envio(db,tenant,conversa):

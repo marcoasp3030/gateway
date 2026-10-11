@@ -3,6 +3,7 @@ preço sempre do catálogo, carrinho de uma unidade só, item só entra se for v
 bebida alcoólica só fecha com maioridade confirmada (SEG06: o que o agente pedir não muda isso)."""
 import json,secrets
 from decimal import Decimal
+from nucleo.contatos import nome_da_conversa
 
 MAX_LINHAS=50
 MAX_QUANTIDADE=99
@@ -394,8 +395,8 @@ async def fechar(conn,tenant,conversa):
     itens=[{'item_id':l['item_id'],'codigo':l['codigo'],'nome':l['nome'],'categoria':l['categoria'],'quantidade':l['quantidade'],
             'preco_unitario':dinheiro(l['preco_unitario']),'subtotal':dinheiro(l['preco_unitario']*l['quantidade']),
             'observacao':l['observacao'],'alcoolico':l['alcoolico']} for l in ls]
-    conv=await conn.fetchrow('SELECT telefone,nome,contato_id FROM conversas WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa)
-    nome=conv['nome'] or (await conn.fetchval('SELECT nome FROM contatos WHERE tenant_id=$1 AND id=$2',tenant,conv['contato_id']) if conv['contato_id'] else None)
+    conv=await conn.fetchrow('SELECT telefone FROM conversas WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa)
+    nome,_=await nome_da_conversa(conn,tenant,conversa)
     p=await conn.fetchrow('''INSERT INTO pedidos(tenant_id,numero,conversation_id,carrinho_id,unidade,modalidade,endereco,horario,observacao,
         itens,subtotal,taxa_entrega,total,cliente_nome,cliente_telefone,tem_alcoolico,maioridade_confirmada)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15,$16,$17) RETURNING *''',

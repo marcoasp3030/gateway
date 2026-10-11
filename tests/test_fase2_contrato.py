@@ -41,7 +41,7 @@ def test_INV10_pacote_do_apendice_a():
         assert p['tempo_desde_ultima'] is None and p['retomada'] is False and p['tarefa']=='responder' and p['modo_resposta']=='sync'
         assert p['canal']['id']=='canal' and p['canal']['tipo']=='api' and set(p['canal'])=={'id','tipo','publico'}
         assert p['mensagens_do_lote']==[{'enviada_em':p['agora'],'tipo':'texto','texto':'oi'}] and p['agora'].endswith('-03:00')
-        assert p['cliente']=={'nome':None,'unidade_preferida':None,'resumo_anterior':None}
+        assert p['cliente']=={'nome':None,'nome_origem':None,'unidade_preferida':None,'resumo_anterior':None}
         assert isinstance(p['unidades'],list) and isinstance(p['contexto_modulos'],dict)
         await conn.execute("DELETE FROM mensagens WHERE conversation_id=$1",conv)
 
@@ -64,7 +64,7 @@ def test_INV10_pacote_do_apendice_a():
         assert all(m['enviada_em'].endswith('-03:00') for m in p['mensagens_do_lote']+p['historico'])
         assert p['mensagens_do_lote'][0]['enviada_em']<p['mensagens_do_lote'][1]['enviada_em']<=p['agora']
         assert [h['content'] for h in p['historico']]==['pedido antigo','resposta antiga']   # o lote não entra no histórico
-        assert p['cliente']=={'nome':'Ana','unidade_preferida':'Morumbi','resumo_anterior':'Costuma pedir temaki.'}
+        assert p['cliente']=={'nome':'Ana','nome_origem':'perfil','unidade_preferida':'Morumbi','resumo_anterior':'Costuma pedir temaki.'}
         assert p['message']=='oi\n[localização: -23.6, -46.7]' and p['session_id']==p['request_id']
         # Conversa em andamento: minutos, sem retomada. Exatamente 12 h ainda não é retomada.
         await conn.execute("UPDATE mensagens SET enviada_em=$1 WHERE conteudo='resposta antiga'",agora-timedelta(minutes=2,seconds=20))

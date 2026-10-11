@@ -13,6 +13,7 @@ from .servico import auditar
 from nucleo.autenticacao import painel
 from nucleo.banco import Repositorio
 from nucleo.configuracao import Configuracoes
+from nucleo.contatos import exibicao, canal_info
 from canais import uazapi
 from agentes.controle import CredencialRecusada, CircuitoAberto
 
@@ -111,32 +112,96 @@ async def rotacionar(request: Request, tenant: str, canal: str, actor=Depends(pa
 @router.get('/tenants/{tenant}/conversas')
 async def conversas(request: Request, tenant: str, agente: str | None = None, canal: str | None = None,
                     status: Literal['ativa','pausada'] | None = None, busca: str | None = None,
-                    aguardando: bool | None = None,
+                    aguardando: bool | None = None, estado: str | None = None,
+                    ordem: Literal['id','recentes'] = 'id',
                     desde: datetime | None = None, limite: int = 50, cursor: str | None = None):
     repo = Repositorio(request.app.state.db)
     if not await repo.tenant(tenant): raise HTTPException(404, 'TENANT_NOT_FOUND')
     if agente: await exigir(request, tenant, 'agentes', agente)
     if canal: await exigir(request, tenant, 'tenant_canais', canal)
-    if not 1 <= limite <= 100 or (busca and len(busca)>200) or (desde and desde.tzinfo is None):
+    estados = [e for e in (estado or '').split(',') if e] or None
+    if (not 1 <= limite <= 100 or (busca and len(busca)>200) or (desde and desde.tzinfo is None)
+            or (estados and any(e not in ESTADOS for e in estados))):
         raise HTTPException(400, 'VALIDATION_ERROR')
-    rows = await request.app.state.db.fetch('''SELECT c.conversation_id,c.agente_id,c.canal_id,c.canal,c.nome,
+    # ordem=recentes: cursor próprio "<atualizado_em ISO>|<conversation_id>" (opaco para o painel).
+    apos_em = apos_id = None
+    if cursor and ordem == 'recentes':
+        try:
+            bruto, apos_id = cursor.split('|', 1)
+            apos_em = datetime.fromisoformat(bruto)
+            if apos_em.tzinfo is None or not apos_id: raise ValueError
+        except ValueError: raise HTTPException(400, 'VALIDATION_ERROR') from None
+    rows = await request.app.state.db.fetch(f'''SELECT c.conversation_id,c.agente_id,c.canal_id,c.canal,c.nome,
         c.telefone,c.bot_pausado_ate,c.atualizado_em,c.aguardando_atendente_desde,c.aguardando_motivo,
-        c.encerrada_em,c.desfecho,c.limitado_ate,
+        c.encerrada_em,c.desfecho,c.limitado_ate,c.contato_id,c.simulada,
         CASE WHEN c.bot_pausado_ate>now() THEN 'pausada' ELSE 'ativa' END AS status,
-        m.conteudo AS ultima_mensagem,m.enviada_em AS ultima_em
-        FROM conversas c LEFT JOIN LATERAL (
-            SELECT conteudo,enviada_em FROM mensagens WHERE tenant_id=c.tenant_id
+        {ESTADO_SQL} AS estado,
+        m.conteudo AS ultima_mensagem,m.enviada_em AS ultima_em,m.direcao AS ultima_direcao,m.origem AS ultima_origem,m.tipo AS ultima_tipo,
+        ct.nome AS contato_nome,ct.nome_cadastro,ct.nome_informado,ct.nome_perfil,ct.anonimizado_em,
+        k.tipo AS canal_tipo,k.nome AS canal_nome,t.tenant_teste,
+        coalesce(c.unidade_preferida,ca.unidade) AS unidade_preferida,u.nome AS unidade_preferida_nome,
+        p.numero AS pedido_numero,p.status AS pedido_status
+        FROM conversas c
+        JOIN tenants t ON t.id=c.tenant_id
+        LEFT JOIN tenant_canais k ON k.tenant_id=c.tenant_id AND k.id=c.canal_id
+        LEFT JOIN contatos ct ON ct.tenant_id=c.tenant_id AND ct.id=c.contato_id
+        LEFT JOIN LATERAL (
+            SELECT conteudo,enviada_em,direcao,origem,tipo FROM mensagens WHERE tenant_id=c.tenant_id
             AND conversation_id=c.conversation_id ORDER BY id DESC LIMIT 1) m ON true
+        LEFT JOIN LATERAL (
+            SELECT unidade FROM carrinhos WHERE tenant_id=c.tenant_id AND conversation_id=c.conversation_id
+            AND unidade IS NOT NULL ORDER BY id DESC LIMIT 1) ca ON c.unidade_preferida IS NULL
+        LEFT JOIN tenant_unidades u ON u.tenant_id=c.tenant_id AND u.codigo=coalesce(c.unidade_preferida,ca.unidade)
+        LEFT JOIN LATERAL (
+            SELECT numero,status FROM pedidos WHERE tenant_id=c.tenant_id AND conversation_id=c.conversation_id
+            AND status NOT IN ('concluido','recusado','cancelado') ORDER BY id DESC LIMIT 1) p ON true
         WHERE c.tenant_id=$1 AND ($2::text IS NULL OR c.agente_id=$2)
         AND ($3::text IS NULL OR c.canal_id=$3)
         AND ($4::text IS NULL OR (CASE WHEN c.bot_pausado_ate>now() THEN 'pausada' ELSE 'ativa' END)=$4)
-        AND ($5::text IS NULL OR strpos(lower(coalesce(c.nome,'')||' '||coalesce(c.telefone,'')),lower($5))>0)
+        AND ($5::text IS NULL OR strpos(lower(concat_ws(' ',c.nome,c.telefone,ct.nome_cadastro,ct.nome_informado,ct.nome_perfil)),lower($5))>0)
         AND ($6::timestamptz IS NULL OR c.atualizado_em>=$6)
-        AND ($7::text IS NULL OR c.conversation_id>$7)
+        AND ($7::text IS NULL OR $11<>'id' OR c.conversation_id>$7)
+        AND ($12::timestamptz IS NULL OR (c.atualizado_em,c.conversation_id)<($12,$13::text))
         AND ($9::boolean IS NULL OR (c.aguardando_atendente_desde IS NOT NULL)=$9)
-        ORDER BY c.conversation_id LIMIT $8''', tenant, agente, canal, status, busca, desde, cursor, limite+1, aguardando)
-    return {'itens': [dict(r) for r in rows[:limite]],
-            'proximo_cursor': rows[limite-1]['conversation_id'] if len(rows)>limite else None}
+        AND ($10::text[] IS NULL OR {ESTADO_SQL}=ANY($10))
+        ORDER BY {'c.atualizado_em DESC,c.conversation_id DESC' if ordem == 'recentes' else 'c.conversation_id'} LIMIT $8''',
+        tenant, agente, canal, status, busca, desde, cursor, limite+1, aguardando, estados, ordem, apos_em, apos_id)
+    proximo = None
+    if len(rows) > limite:
+        r = rows[limite-1]
+        proximo = f"{r['atualizado_em'].isoformat()}|{r['conversation_id']}" if ordem == 'recentes' else r['conversation_id']
+    return {'itens': [conversa_do_painel(r) for r in rows[:limite]], 'proximo_cursor': proximo}
+
+
+ESTADOS = ('encerrada','aguardando_atendente','atendente','bot')
+# Um estado só, nesta ordem de precedência (docs/ESPEC_PED1.md, seção 6.2).
+ESTADO_SQL = """(CASE WHEN c.encerrada_em IS NOT NULL THEN 'encerrada'
+    WHEN c.aguardando_atendente_desde IS NOT NULL THEN 'aguardando_atendente'
+    WHEN c.bot_pausado_ate>now() THEN 'atendente' ELSE 'bot' END)"""
+CAMPOS_ANTIGOS = ('conversation_id','agente_id','canal_id','canal','nome','telefone','bot_pausado_ate','atualizado_em',
+                  'aguardando_atendente_desde','aguardando_motivo','encerrada_em','desfecho','limitado_ate','status',
+                  'ultima_mensagem','ultima_em')
+
+
+def conversa_do_painel(r):
+    """Campos de sempre (nada quebra) + os do PED1-c. Contato anonimizado: nomes e telefones nulos."""
+    linha = dict(r)
+    anon = bool(linha['anonimizado_em'])
+    base = {k: linha[k] for k in CAMPOS_ANTIGOS}
+    if anon: base.update(nome=None, telefone=None)
+    nomes = exibicao({'nome': linha['contato_nome'] or linha['nome'], 'nome_cadastro': linha['nome_cadastro'],
+                      'nome_informado': linha['nome_informado'], 'nome_perfil': linha['nome_perfil'],
+                      'anonimizado_em': linha['anonimizado_em']},
+                     None if anon else linha['telefone'], linha['canal_tipo'] or linha['canal'])
+    ultima = None if linha['ultima_em'] is None and linha['ultima_mensagem'] is None else {
+        'texto': linha['ultima_mensagem'], 'em': linha['ultima_em'], 'direcao': linha['ultima_direcao'],
+        'origem': linha['ultima_origem'], 'tipo': linha['ultima_tipo']}
+    return {**base, 'contato_id': linha['contato_id'], **nomes,
+            'canal_info': canal_info(linha['canal_id'], linha['canal_tipo'], linha['canal_nome'], linha['tenant_teste'], linha['simulada']),
+            'unidade_preferida': linha['unidade_preferida'],
+            'unidade_preferida_nome': linha['unidade_preferida_nome'] or linha['unidade_preferida'],
+            'estado': linha['estado'], 'ultima': ultima,
+            'pedido_aberto': {'numero': linha['pedido_numero'], 'status': linha['pedido_status']} if linha['pedido_numero'] else None}
 
 
 async def pausar(request, tenant, conv, minutos, actor, acao):

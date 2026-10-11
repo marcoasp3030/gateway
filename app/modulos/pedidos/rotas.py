@@ -221,7 +221,7 @@ class MudancaDeStatus(Estrito):
 
 
 admin=APIRouter(prefix='/admin/v1',dependencies=[Depends(painel)])
-ICONES={'uazapi':'whatsapp','meta':'whatsapp','site':'globe','api':'code','email':'mail','teams':'teams','luxbrain':'luxbrain'}
+from nucleo.contatos import ICONES
 SELECAO="""SELECT p.*,u.nome AS unidade_nome,k.id AS canal_id,k.tipo AS canal_tipo,k.nome AS canal_nome,
         a.status AS aviso_status,e.aviso AS aviso_evento
     FROM pedidos p

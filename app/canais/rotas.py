@@ -86,7 +86,7 @@ async def simular(request:Request,tenant_id:str,agente_id:str,dados:EntradaAPI,a
     cfg=await request.app.state.configuracoes.efetiva(tenant_id,agente_id)
     # Simulação aceita IA real (agente live) porque nada sai para fora com envio em teste (dry).
     if cfg['send_mode']!='dry': raise HTTPException(400,{'campo':'send_mode'})
-    result=await request.app.state.pipeline.receber(tenant_id,dados.canal_id,dados.model_dump(exclude={'canal_id'}))
+    result=await request.app.state.pipeline.receber(tenant_id,dados.canal_id,{**dados.model_dump(exclude={'canal_id'}),'simulacao':True})
     async with request.app.state.db.acquire() as conn,conn.transaction():
         await auditar(conn,tenant_id,actor,'agente.simulado',agente_id)
     return result
