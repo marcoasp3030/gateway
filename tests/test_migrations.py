@@ -37,7 +37,7 @@ def test_migracoes_seed_e_reaplicacao():
         assert await conn.fetchval('SELECT count(*) FROM schema_migrations') == len(migrar.arquivos())
         agente = await conn.fetchrow("SELECT * FROM agentes WHERE id='bykoji_atendimento'")
         assert (agente['timeout_s'],agente['provedor'],agente['send_mode'],agente['status']) == (60,'mock','dry','rascunho')
-        assert await conn.fetchval('SELECT count(*) FROM modelos_agente') == 2
+        assert await conn.fetchval('SELECT count(*) FROM modelos_agente') == 3   # atendente_delivery, assistente_generico e o segmento delivery_restaurante (CFG1-a)
         assert await conn.fetchval('SELECT count(*) FROM tenant_canais') == 0
     banco(cenario)
 

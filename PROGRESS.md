@@ -1109,3 +1109,16 @@ PY
 
 - Decisões do Marco para o CFG1 registradas na seção 12 de `docs/ESPEC_CFG1.md`. Ordem nova: PED1-c → CFG1-a → G4 → G5/G6 → G3 → B4 → R1 → C1 → CFG1-b → carrossel. **CFG1-a só com liberação do Marco.**
 - PED1-c já estava implantado desde 03:00 UTC (`gateway:6f89149`, schema 32). Conferido agora: 4 containers nessa imagem, fila zerada, admin por fora 404, `/api/v1` sem chave 401, zero erros na última hora, árvore do git limpa.
+
+## CFG1-a — perfil de atendimento e comportamentos por empresa e por agente — 2026-10-11 15:12 UTC
+
+- Status: **implantado**. Código `8b921cb`, imagem `gateway:8b921cb`, schema **33**. Volta: `gateway:6f89149` (roda sobre o schema 33; a 033 só acrescenta).
+- `nucleo/atendimento.py` (esquema, validação, bloqueio de texto que parece instrução de sistema, herança) e `admin/atendimento.py` (rotas de empresa e de agente: ler, rascunho, publicar, versões, restaurar, prévia; `GET /segmentos`). Contrato final na seção 13 de `docs/ESPEC_CFG1.md`.
+- Pacote do agente ganhou `perfil_versao` e `perfil_atendimento` (13 campos, sempre presentes). O Skyone atual os ignora; nenhum comportamento depende deles. `turnos.perfil_versao` gravado.
+- Comportamentos novos guardados e versionados, **sem efeito ainda** (`disponivel: false`): reações, fora do horário, transbordo.
+- Segmento `delivery_restaurante` criado pela migração. **By Koji migrado** às 15:14 UTC (ator "gateway (ordem do Marco)"): empresa com `segmento`, agente `bykoji_atendimento` do modelo `atendente_delivery` para `delivery_restaurante`. Configuração efetiva comparada campo a campo: 38 campos, 37 iguais em valor e origem; só `modelo_id` mudou. Perfil do By Koji: padrões do segmento (equilibrado, moderado, curtas, leves), `perfil_versao` `e0`, nada publicado.
+- **Falha de processo minha:** a suíte completa da primeira rodada teve 1 falha (233 passaram) e a trava do meu comando de implantação não barrou; implantei assim. A falha era expectativa antiga de `tests/test_migrations.py` (contava 2 modelos; agora são 3). Corrigida; segunda rodada: **234 passed**. Nenhum defeito no código implantado.
+- Backup `/home/twadmin/backups/gateway/pre-cfg1a-20261011T151114Z/gateway.dump` (30 tabelas, 600). Migração aplicada com a imagem antiga no ar (health 200).
+- Conferência: 4 containers `healthy`, fila zerada, admin por fora 404, `/api/v1` sem chave 401, envio real em 1 de 5 agentes, `reacoes` off em todos, zero erros nos logs.
+- Não entrou: bloco `recursos` do pacote (fica para o R1).
+- Próximos (ordem do Marco): G4 → G5/G6 → G3 → B4 → R1 → C1 → CFG1-b → carrossel.
