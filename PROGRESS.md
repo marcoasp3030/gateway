@@ -1003,3 +1003,17 @@ PY
 - Reação: teste real autorizado, UMA reação 👍 na última mensagem do piloto às 23:35:48 UTC (`POST /message/react {id,text}`) → 200, `ReactionMessage`; webhook próprio com `wasSentByApi: true`, ignorado; gravada em `mensagens` como reação do bot; conversa sem pausa.
 - Presença: evento `presence` existe na documentação, sem formato; a instância assina só `messages` e `connection`. Teste depende de autorização para assinar o evento.
 - Carrossel: `POST /send/carousel` existe (cartões com texto, mídia e botões REPLY/URL/COPY/CALL); limites e comportamento no Web não documentados. Nenhum teste enviado.
+
+## UX2 P1 + P2 — espera adaptativa e refazer o turno — 2026-10-11 00:02 UTC
+
+- Status: **implantado; `refazer_turno` DESLIGADO em todos os agentes** (o Marco liga depois). Código `2297054`, imagem `gateway:2297054`, schema **27**. Volta: `gateway:90bbfdc` (roda sobre o schema 27; não sobe do zero nele).
+- `docs/ESPEC_UX2.md` aprovada (decisões na seção 7; andamento e contrato de `acoes_ja_executadas` na seção 8).
+- P1: `forma_da_mensagem()` / `debounce_da_mensagem()` em três faixas; `debounce_incompleta_s` (nulo na plataforma = como antes). Única mudança geral: reticências deixaram de contar como frase completa.
+- P2: `_deve_refazer`, `_descartar`, `_refeito_de`; `skill_chamadas` (ligação por conversa + janela do turno); `acoes_ja_executadas` no pacote (lista vazia em turno comum); `turnos.refeito_de` e `refazer_recusado`; bloco `picotadas` em `GET /metricas`.
+- Presença: evento `presence` é descartado na entrada do webhook, guardando só os 20 primeiros.
+- Testes: **208 passed** (3 novos em `tests/test_ux2.py`, incluindo carrinho sem duplicar, limite de um refazer, efeitos que impedem, queda do worker; 1 teste antigo de debounce ajustado para as reticências), só bancos `_test`. Backup `/home/twadmin/backups/gateway/pre-ux2-p1p2-20261011T000017Z/gateway.dump` (27 tabelas, 600). Migração 027 aplicada com a imagem antiga no ar (health 200).
+- Conferência: 4 containers `healthy`, fila zerada, admin por fora 404, `/api/v1` sem chave 401, envio real em 1 de 5 agentes, zero erros nos logs.
+- Configuração aplicada só em `bykoji/bykoji_atendimento` (aprovada pelo Marco): `debounce_incompleta_s` nulo → 7; `debounce_curto_s` 1,5 → 2,5; `debounce_s` 4 e `max_wait_s` 12 sem mudança. Demais agentes inalterados.
+- Assinatura do webhook da instância (autorizada): eventos `messages, connection` → `messages, connection, presence`, às 00:01:47 UTC; mesma URL (129 caracteres), mesmo `excludeMessages`. Nenhum evento de presença recebido até 00:02. **Pendente:** olhar a amostra e decidir o P3; se não servir, voltar a assinatura (`presenca.py voltar`).
+- Botões em produção (contato final 1513, 23:55–00:00 UTC): 2 mensagens saíram como botão ("Entrega / Retirada" e "Adicionar mais / Finalizar pedido"), nenhum plano B; 1 clique recebido ("Adicionar mais", `atual: true`).
+- Observado: conversa uazapi do piloto final 7046 pausada até 00:47 UTC por 3 mensagens enviadas pelo celular da instância (23:45–23:47, `fromMe`, origem `android`). Não retomei.
