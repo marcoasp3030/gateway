@@ -1063,3 +1063,15 @@ PY
 - Testes: **217 passed** (4 novos em `tests/test_ped1a.py`; `tests/test_fase4_avisos.py` ajustado às regras novas), só bancos `_test`. Backup `/home/twadmin/backups/gateway/pre-ped1a-20261011T012110Z/gateway.dump` (28 tabelas, 600). Migração 030 aplicada com a imagem antiga no ar (health 200).
 - Conferência: 4 containers `healthy`, fila zerada, admin por fora 404, `/api/v1` sem chave 401, envio real em 1 de 5 agentes, zero erros nos logs, nenhum aviso pendente. Nenhum pedido de produção foi alterado.
 - Próximos: PED1-b (textos por empresa, liga/desliga, prévia, reenvio, `X-Role`) e PED1-c (conversas e contatos), cada um com liberação do Marco. B3 aguarda o toque na lista pelo aparelho do final 1513.
+
+## PED1-b — avisos de pedido por empresa, prévia, reenvio e X-Role — 2026-10-11 01:40 UTC
+
+- Status: **implantado**. Código `84fccaa`, imagem `gateway:84fccaa`, schema **31**. Volta: `gateway:e5cfc03` (roda sobre o schema 31; não sobe do zero nele).
+- `pedido_avisos_config` (empresa, status, modalidade, ativo, texto; nulo = padrão). Rotas: `GET/PUT .../pedidos/avisos[/{status}]`, `POST .../avisos/{status}/previa`, `POST .../pedidos/{numero}/avisos/{status}/reenviar`. Contrato na seção 13 de `docs/ESPEC_PED1.md`.
+- `X-Role` (`nucleo/autenticacao.py`: `papel`, `exigir_admin`): sem o cabeçalho = membro; membro não altera textos (403).
+- Reenvio: só aviso `falhou` e pedido ainda no status; falha incerta exige `mesmo_incerto`. `uazapi.EnvioRecusado.certo` distingue recusa certa (4xx) de falha incerta; a linha do tempo ganhou `incerto` e `pode_reenviar`.
+- Texto padrão de concluído em retirada ("retirado", desligado por padrão) foi proposto por mim; o Marco ainda não o aprovou.
+- Testes: **220 passed** (3 novos em `tests/test_ped1b.py`), só bancos `_test`. Backup `/home/twadmin/backups/gateway/pre-ped1b-20261011T013921Z/gateway.dump` (29 tabelas, 600). Migração 031 aplicada com a imagem antiga no ar (health 200).
+- Conferência: 4 containers `healthy`, fila zerada, admin por fora 404, `/api/v1` sem chave 401, envio real em 1 de 5 agentes, zero erros nos logs. Nenhuma configuração de aviso gravada em produção (tudo no padrão).
+- Diagnóstico (só leitura): transferência da conversa do final 1513 às 01:24 UTC = agente respondeu `transferir_humano` / `pedido_para_confirmar` porque a unidade Vila Nova Conceição não tem preço no catálogo (só o Pátio Guedala tem: 193 de 205 itens).
+- Próximos: B3 (lista) liberado pelo Marco para depois do PED1-b; PED1-c aguarda liberação.
