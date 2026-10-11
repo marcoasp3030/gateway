@@ -32,7 +32,7 @@ ESPERA_NOVA_TENTATIVA_S=2
 # Acima disto o cliente está voltando depois de um tempo: o agente deve retomar, não continuar (INV10).
 RETOMADA_APOS=timedelta(hours=12)
 MAX_BALOES=10
-ACOES=('nenhuma','silencio','transferir_humano','encerrar','pedido_fechado')
+ACOES=('nenhuma','silencio','transferir_humano','encerrar','pedido_fechado','notificar_equipe')
 
 
 def ha_quanto_tempo(intervalo):
@@ -92,14 +92,28 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
     historico = await repo.historico(tenant_id,conversa_id,antes_id,cfg['history_turns'])
     rid = request_id or str(uuid.uuid4())
     agora = datetime.now(timezone.utc)
-    do_lote = []; ultima_interacao = None
+    do_lote = []; ultima_interacao = None; origens = []
     for i in (dict(x) for x in (lote or [])):
         item = {'enviada_em':iso(i.get('enviada_em') or i.get('criado_em') or agora),'tipo':i.get('tipo') or 'texto','texto':i['conteudo']}
         clique = await interacao(repo.db,tenant_id,conversa_id,conv.get('canal_id'),i)
+        origem_do_clique = None
         if clique:
             item['interacao'] = {k:clique[k] for k in ('tipo','id','atual')}
             ultima_interacao = clique
-        do_lote.append(item)
+            meta = i.get('meta'); meta = json.loads(meta) if isinstance(meta,str) else (meta or {})
+            origem_do_clique = (meta.get('interacao') or {}).get('mensagem')
+        do_lote.append(item); origens.append(origem_do_clique)
+    # Toques contraditórios (SOL1): dois ou mais cliques na MESMA mensagem de botões ou lista → só o último vai ao agente,
+    # levando em "substituiu" os ids dos anteriores. Cliques em mensagens diferentes e texto digitado ficam como estão.
+    descartados = set()
+    for origem_msg in {o for o in origens if o}:
+        posicoes = [n for n,o in enumerate(origens) if o==origem_msg]
+        if len(posicoes)>1:
+            do_lote[posicoes[-1]]['interacao']['substituiu'] = [do_lote[n]['interacao']['id'] for n in posicoes[:-1]]
+            descartados.update(posicoes[:-1])
+    if descartados:
+        do_lote = [item for n,item in enumerate(do_lote) if n not in descartados]
+        message = '\n'.join(item['texto'] for item in do_lote)
     do_lote = do_lote or [{'enviada_em':iso(agora),'tipo':'texto','texto':message}]
     # Tempo explícito (INV10): da última mensagem da conversa antes deste lote até a primeira do lote.
     anterior = await repo.db.fetchval('SELECT max(enviada_em) FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND id<$3',
@@ -113,9 +127,14 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
     from modulos import contextos
     from modulos.pedidos.servico import acoes_recentes
     from nucleo.horarios import pacote as unidades
+    contexto = await contextos(repo,tenant_id,conversa_id,cfg)
+    if cfg.get('notificar_equipe')=='on':
+        # SOL1: o que a equipe já foi avisada nesta conversa (para o agente complementar em vez de repetir). Só com o recurso ligado.
+        from nucleo.solicitacoes import abertas
+        contexto['solicitacoes'] = await abertas(repo.db,tenant_id,conversa_id)
     return {
         'unidades':await unidades(repo.db,tenant_id,tenant['timezone']),
-        'contexto_modulos':await contextos(repo,tenant_id,conversa_id,cfg),
+        'contexto_modulos':contexto,
         'conversation_id':conversa_id,'request_id':rid,'session_id':rid,'message':message,
         'instrucoes_agente':cfg['instrucoes_agente'],
         # CFG1-a: preferências de estilo da empresa (versão publicada), sempre com todos os campos. São dados, não instruções de sistema.
@@ -223,6 +242,11 @@ async def _chamar(client,repo,cofre,tenant_id,cfg,payload):
             nome,recusa=validar_nome(corpo.get('nome_cliente'))
             if nome: result['nome_cliente']=nome
             else: log.warning('nome_cliente ignorado: %s',recusa)
+        # Dados coletados para a equipe (SOL1). Opcional; só o que é do contrato; campo inválido é ignorado.
+        if corpo.get('solicitacao') is not None and acao in ('notificar_equipe','transferir_humano'):
+            from nucleo.solicitacoes import validar as validar_solicitacao
+            solicitacao=validar_solicitacao(corpo.get('solicitacao'))
+            if solicitacao: result['solicitacao']=solicitacao
         uso=corpo.get('uso')
         if isinstance(uso,dict) and all(isinstance(k,str) and type(v) is int and v>=0 for k,v in uso.items()): result['uso']=uso
         # Não permitir eco da credencial mesmo dentro de campos do contrato.

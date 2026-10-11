@@ -16,7 +16,7 @@ BOTAO_DA_LISTA='Ver opções'
 ID=re.compile(r'[a-z0-9_]{1,40}')
 MOTIVOS=('canal_sem_botao','acima_do_limite','titulo_longo','descricao_longa','invalido','provedor_recusou','provedor_incerto','desligado')
 # Só com estas ações faz sentido oferecer escolha.
-ACOES_COM_BOTAO=('nenhuma','pedido_fechado')
+ACOES_COM_BOTAO=('nenhuma','pedido_fechado','notificar_equipe')
 
 
 def _chave(titulo):

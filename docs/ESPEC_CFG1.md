@@ -152,6 +152,7 @@ O agente transfere com `acao: transferir_humano` e um `motivo`. Hoje o motivo é
 | `pagamento` | Dúvida ou problema de pagamento |
 | `restricao_alimentar` | Alergia ou restrição em que o agente não deve garantir nada |
 | `evento_ou_encomenda` | Pedido grande, evento, encomenda |
+| `catering` | Serviço de catering (acrescentado no SOL1, ligado por padrão) |
 | `fora_do_escopo` | Assunto que não é do atendimento |
 | `assunto_proibido` | Assunto da lista da empresa com ação `transferir` |
 

@@ -17,6 +17,7 @@ from nucleo import botoes
 from nucleo.contatos import nome_de_perfil,gravar_informado
 from nucleo.banco import Repositorio
 from nucleo.configuracao import Configuracoes
+from nucleo.solicitacoes import converter as converter_transferencia,registrar as registrar_solicitacao
 from admin.servico import auditar
 
 log=logging.getLogger('gateway.pipeline')
@@ -365,6 +366,7 @@ return 1
                             aviso=await self.enviar(tenant,conversa,cfg['id'],cfg['aviso_demora'])
                             entregue=aviso
                         resultado=await tarefa
+                        await converter_transferencia(self.db,tenant,conversa,cfg,resultado)
                     finally:
                         if not tarefa.done():
                             tarefa.cancel()
@@ -404,6 +406,8 @@ return 1
                 mes,total=await registrar(conn,tenant)
                 if motivo: await marcar_aguardando(conn,tenant,conversa,motivo)
                 if resultado and resultado.get('nome_cliente'): await gravar_informado(conn,tenant,conversa,resultado['nome_cliente'])
+                if status=='ok' and resultado and resultado.get('acao')=='notificar_equipe': await registrar_solicitacao(conn,tenant,conversa,cfg,resultado,PAINEL_URL)
+                if resultado and resultado.get('acao_original'): await conn.execute('UPDATE turnos SET acao_original=$3 WHERE tenant_id=$1 AND request_id=$2',tenant,uuid.UUID(rid),resultado['acao_original'])
                 if origem=='sistema' and status=='ignorado':
                     await auditar(conn,tenant,'sistema','notificacao.nao_enviada',conversa)
                 if status=='ok' and resultado and resultado.get('acao')=='encerrar':
@@ -615,6 +619,7 @@ return 1
                         # Enviar mensagem cancela o "digitando" no canal: pede de novo.
                         if aviso: await self.digitando(tenant,conv,cfg)
                     resultado=await tarefa
+                    await converter_transferencia(self.db,tenant,conversa,cfg,resultado)
                     await asyncio.gather(presenca,return_exceptions=True)
                     # Nada vai ser enviado (silêncio ou transferência sem texto): tira o "digitando".
                     if not resultado.get('resposta'): await self.digitando(tenant,conv,cfg,'paused')
@@ -754,6 +759,9 @@ return 1
             mes,total=await registrar(conn,tenant)
             if motivo: await marcar_aguardando(conn,tenant,conversa,motivo,resultado.get('motivo') if resultado and motivo=='transferido_pelo_agente' else None)
             if resultado and resultado.get('nome_cliente'): await gravar_informado(conn,tenant,conversa,resultado['nome_cliente'])
+            # SOL1: avisa a equipe e segue atendendo (sem pausa, sem "aguardando atendente"). Só a resposta que saiu registra.
+            if status=='ok' and resultado and resultado.get('acao')=='notificar_equipe': await registrar_solicitacao(conn,tenant,conversa,cfg,resultado,PAINEL_URL)
+            if resultado and resultado.get('acao_original'): await conn.execute('UPDATE turnos SET acao_original=$3 WHERE tenant_id=$1 AND id=$2',tenant,turno['id'],resultado['acao_original'])
             if turno['origem']=='sistema' and status=='ignorado':
                 await auditar(conn,tenant,'sistema','notificacao.nao_enviada',conversa)
             # INV03 antes do envio: o agente respondeu, mas a conversa foi pausada (ou saiu do piloto)

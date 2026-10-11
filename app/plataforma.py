@@ -181,6 +181,8 @@ def criar_app(infra,db=None,redis=None):
     app.include_router(gestao)
     from admin.atendimento import router as atendimento
     app.include_router(atendimento)
+    from admin.solicitacoes import router as solicitacoes
+    app.include_router(solicitacoes)
     app.include_router(contatos)
     app.include_router(unidades)
     from admin.entrega import router as entrega

@@ -58,6 +58,9 @@ class Comportamento(Estrito):
     transbordo_alerta: str | None = Field(None,pattern=r'^\d{10,15}$')
     transbordo_horario_equipe: dict | None = None
     transbordo_fora_do_horario: str | None = Field(None,min_length=1,max_length=500)
+    # SOL1
+    notificar_equipe: Literal['on','off'] | None = None
+    transbordo_destino_externo: bool | None = None
     skyone_dominios_permitidos: list[str] | None = None
 
 

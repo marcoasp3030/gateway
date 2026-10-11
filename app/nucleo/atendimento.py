@@ -4,7 +4,7 @@ nada aqui executa comportamento nem fala com banco."""
 import re
 import unicodedata
 
-MOTIVOS_TRANSFERENCIA=('pediu_humano','reclamacao','pedido_para_confirmar','pagamento','restricao_alimentar','evento_ou_encomenda','fora_do_escopo','assunto_proibido')
+MOTIVOS_TRANSFERENCIA=('pediu_humano','reclamacao','pedido_para_confirmar','pagamento','restricao_alimentar','evento_ou_encomenda','catering','fora_do_escopo','assunto_proibido')
 # Nunca desligáveis: o cliente sempre consegue chegar a uma pessoa, e reclamação sempre sobe.
 MOTIVOS_FIXOS=('pediu_humano','reclamacao')
 MAX_ASSUNTOS=15
@@ -52,6 +52,8 @@ COMPORTAMENTOS={
     'fora_do_horario_mensagem':('fora_do_horario','texto',1,500,None,False),'fora_do_horario_aceita_agendado':('fora_do_horario','booleano',None,None,None,False),
     'transbordo_alerta':('transbordo','telefone',10,15,None,False),'transbordo_horario_equipe':('transbordo','horarios',None,None,None,False),
     'transbordo_fora_do_horario':('transbordo','texto',1,500,None,False),
+    # SOL1: avisar a equipe sem parar o atendimento; destino do alerta marcado como grupo externo mascara o telefone.
+    'notificar_equipe':('transbordo','escolha',None,None,['on','off'],True),'transbordo_destino_externo':('transbordo','booleano',None,None,None,True),
 }
 # De operação e proteção: fora da versão, efeito imediato, só a plataforma muda (pelas rotas de sempre).
 SO_PLATAFORMA=('send_mode','agente_mode','modo_piloto','contatos_permitidos','max_lotes_simultaneos','max_concorrencia',

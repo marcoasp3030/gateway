@@ -151,4 +151,9 @@ async def metricas(request:Request,tenant_id:str,agente:str|None=None):
                'mensagens_por_turno':{'media':float(pic['media']) if pic['media'] is not None else None,'um':pic['um'],'dois':pic['dois'],'tres_ou_mais':pic['tres_ou_mais']},
                'espera_media_ms':int(pic['espera_media_ms']) if pic['espera_media_ms'] is not None else None,
                'espera_p95_ms':int(pic['espera_p95_ms']) if pic['espera_p95_ms'] is not None else None}
-    return {**dict(linha),'fila':fila,'botoes':botoes,'picotadas':picotadas}
+    sol=await request.app.state.db.fetchrow("""SELECT count(*) AS criadas,coalesce(sum(atualizacoes),0) AS atualizadas,count(*) FILTER (WHERE origem='convertida') AS convertidas
+        FROM solicitacoes WHERE tenant_id=$1 AND ($2::text IS NULL OR agente_id=$2)""",tenant_id,agente)
+    alertas=await request.app.state.db.fetchval("SELECT count(*) FROM avisos_internos WHERE tenant_id=$1 AND tipo='solicitacao' AND status='enviado'",tenant_id)
+    # SOL1. convertidas = transferências que o gateway trocou por aviso à equipe (acao_original transferir_humano → acao_aplicada notificar_equipe).
+    solicitacoes={'criadas':sol['criadas'],'atualizadas':int(sol['atualizadas']),'convertidas':sol['convertidas'],'alertas_enviados':alertas}
+    return {**dict(linha),'fila':fila,'botoes':botoes,'picotadas':picotadas,'solicitacoes':solicitacoes}

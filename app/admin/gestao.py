@@ -170,7 +170,14 @@ async def conversas(request: Request, tenant: str, agente: str | None = None, ca
     if len(rows) > limite:
         r = rows[limite-1]
         proximo = f"{r['atualizado_em'].isoformat()}|{r['conversation_id']}" if ordem == 'recentes' else r['conversation_id']
-    return {'itens': [conversa_do_painel(r) for r in rows[:limite]], 'proximo_cursor': proximo}
+    itens = [conversa_do_painel(r) for r in rows[:limite]]
+    # SOL1: solicitação aberta para a equipe em cada conversa da página (uma consulta só).
+    abertas = {}
+    for s in await request.app.state.db.fetch("""SELECT conversation_id,id,numero,tipo,status FROM solicitacoes WHERE tenant_id=$1
+            AND conversation_id=ANY($2::text[]) AND status IN ('aberta','em_andamento') ORDER BY id""", tenant, [i['conversation_id'] for i in itens]):
+        abertas[s['conversation_id']] = {'id': s['id'], 'numero': s['numero'], 'tipo': s['tipo'], 'status': s['status']}
+    for i in itens: i['solicitacao_aberta'] = abertas.get(i['conversation_id'])
+    return {'itens': itens, 'proximo_cursor': proximo}
 
 
 ESTADOS = ('encerrada','aguardando_atendente','atendente','bot')

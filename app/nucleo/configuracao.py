@@ -14,6 +14,7 @@ COMPORTAMENTO = {
     # CFG1-a: já no contrato; a execução vem nos blocos R1 (reações) e G3 (fora do horário e transbordo).
     'reacoes','reacoes_emojis','reacoes_max_dia','fora_do_horario','fora_do_horario_mensagem','fora_do_horario_aceita_agendado',
     'transbordo_alerta','transbordo_horario_equipe','transbordo_fora_do_horario',
+    'notificar_equipe','transbordo_destino_externo',
 }
 # debounce_curto_s vale quando a mensagem parece completa (pontuação final ou mais de
 # debounce_palavras palavras); mensagem curta/picada espera debounce_s.
@@ -36,7 +37,9 @@ PADROES = dict(debounce_s=4,debounce_curto_s=1.5,debounce_palavras=6,max_wait_s=
     reacoes='off',reacoes_emojis=['👍','❤️','🙏','😊'],reacoes_max_dia=2,
     fora_do_horario='atender',fora_do_horario_mensagem='Estamos fechados agora. Abrimos {abre}.',fora_do_horario_aceita_agendado=False,
     transbordo_alerta=None,transbordo_horario_equipe=None,
-    transbordo_fora_do_horario='Nossa equipe atende {horario}. Deixei seu recado e voltamos assim que possível.')
+    transbordo_fora_do_horario='Nossa equipe atende {horario}. Deixei seu recado e voltamos assim que possível.',
+    # SOL1. notificar_equipe: o agente avisa a equipe (evento, catering, encomenda…) sem pausar o bot.
+    notificar_equipe='off',transbordo_destino_externo=False)
 
 
 class Configuracoes:

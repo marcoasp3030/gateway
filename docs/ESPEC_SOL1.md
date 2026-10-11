@@ -223,3 +223,112 @@ Testes (além dos da seção 6):
 - Dois toques na mesma opção → fica um, com `substituiu` trazendo o id repetido.
 - Lista: o mesmo comportamento dos botões.
 - As mensagens descartadas continuam no histórico da conversa.
+
+---
+
+## 10. Implementado (11/10/2026) — contrato exato para o Skyone
+
+Migração 036 (aditiva). Código em `nucleo/solicitacoes.py`, `admin/solicitacoes.py`, `agentes/skyone.py` e `nucleo/pipeline.py`. Testes em `tests/test_sol1.py`.
+
+**Compatibilidade:** o Skyone de hoje, que não conhece `notificar_equipe` nem `solicitacao`, continua funcionando sem nenhuma mudança. Tudo o que está aqui é opcional.
+
+### 10.1 O que o fluxo deve devolver
+
+O envelope é o de sempre (`request_id`, `conversation_id`, `status: "success"`, `tipo: "text"`, `resposta`, `acao`). Mudam três coisas:
+
+| Campo | Valor | Regra |
+|---|---|---|
+| `acao` | `"notificar_equipe"` | Valor novo, além de `nenhuma`, `silencio`, `transferir_humano`, `encerrar`, `pedido_fechado`. Minúsculas, exatamente assim |
+| `motivo` | texto | Obrigatório na prática: um dos motivos do catálogo (abaixo). Fora do catálogo não é erro: o gateway grava `fora_do_escopo` e guarda o texto recebido (até 200 caracteres) |
+| `solicitacao` | objeto | Opcional. Só é lido quando `acao` é `notificar_equipe` ou `transferir_humano`. Em outra ação é ignorado |
+
+```json
+{"request_id": "…", "conversation_id": "…", "status": "success", "tipo": "text",
+ "resposta": ["Fazemos eventos sim! Já avisei nossa equipe, eles falam com você por aqui.", "Enquanto isso, quer finalizar seu pedido?"],
+ "acao": "notificar_equipe",
+ "motivo": "evento_ou_encomenda",
+ "solicitacao": {"tipo": "evento", "data": "25 de dezembro", "pessoas": 50, "local": null, "observacao": "Só queria saber se fazem."},
+ "botoes": {"opcoes": [{"id": "finalizar_pedido", "titulo": "Finalizar pedido"}]}}
+```
+
+**Campos de `solicitacao`** (todos opcionais):
+
+| Campo | Tipo | Limite | Observação |
+|---|---|---|---|
+| `tipo` | texto | um de `evento`, `catering`, `encomenda`, `orcamento`, `parceria`, `outro` | Outro valor, ou ausente, vira `outro` |
+| `data` | **texto livre** | até 80 caracteres | Como o cliente disse: "25 de dezembro", "sábado à noite". **Não é data ISO**; o gateway não interpreta nem converte |
+| `pessoas` | número inteiro | 1 a 100000 | Aceita também texto só com dígitos (`"50"`). Fora disso é ignorado |
+| `local` | texto | até 160 | |
+| `observacao` | texto | até 500 | Uma linha (quebras viram espaço) |
+
+- Campo com tipo errado, vazio ou `null` é **ignorado**, sem erro. Texto maior que o limite é cortado. Campo fora da lista é descartado.
+- `solicitacao` que não seja um objeto (texto, lista) é ignorada inteira; a ação vale mesmo assim.
+- `resposta` pode vir vazia com `notificar_equipe` (a equipe é avisada e nenhum balão sai). Com texto, os balões saem normalmente.
+- `botoes` é aceito com `notificar_equipe`, como com `nenhuma`.
+- `nome_cliente`, `desfecho` e `uso` continuam valendo como hoje.
+
+**Motivos do catálogo:** `pediu_humano`, `reclamacao`, `pedido_para_confirmar`, `pagamento`, `restricao_alimentar`, `evento_ou_encomenda`, `catering`, `fora_do_escopo`, `assunto_proibido`.
+
+**Quando usar cada ação** (para o prompt):
+
+| Situação | `acao` | Efeito no gateway |
+|---|---|---|
+| Evento, encomenda grande, catering, orçamento, parceria | `notificar_equipe` | Registra, avisa a equipe, **não pausa**; o agente segue atendendo |
+| Cliente pede atendente; reclamação; pagamento; pedido que o agente não consegue fechar | `transferir_humano` | Pausa o bot e põe a conversa em "aguardando atendente" |
+
+O agente **não** deve prometer que a equipe "já vai responder" como se fosse uma transferência: o atendimento continua com ele.
+
+### 10.2 O que o gateway espera do fluxo
+
+- **Nada novo é exigido.** Nenhum campo novo no Retorno é obrigatório, e o `Interpretar Resposta` só precisa **deixar passar** `acao: "notificar_equipe"` e o objeto `solicitacao` como vieram do modelo.
+- Se o `Interpretar Resposta` hoje valida `acao` contra uma lista fechada, `notificar_equipe` precisa entrar nela; senão o fluxo devolveria erro antes de o gateway ver.
+- Se o recurso estiver **desligado** no agente, o gateway trata `notificar_equipe` como `nenhuma`: os balões saem, nada é gravado e ninguém é avisado. Por isso o agente só deve usar a ação quando o pacote trouxer `contexto_modulos.solicitacoes` (seção 10.3).
+
+### 10.3 O que o pacote passa a levar
+
+Só com o recurso ligado no agente:
+
+```json
+"contexto_modulos": {
+  "pedidos": {"…": "…"},
+  "solicitacoes": [
+    {"numero": "S-0012", "motivo": "evento_ou_encomenda", "tipo": "evento", "status": "aberta",
+     "data": "25 de dezembro", "pessoas": 50, "local": null, "observacao": "Só queria saber se fazem.", "ha_segundos": 95}]
+}
+```
+
+- **A presença da chave `solicitacoes` (mesmo vazia, `[]`) é o sinal de que `notificar_equipe` está ligado.** Sem a chave, o agente não deve usar a ação.
+- A lista traz as solicitações abertas ou em andamento desta conversa. Se já existe uma do mesmo motivo, o agente não precisa avisar de novo: só devolve `notificar_equipe` outra vez quando houver **dado novo** (por exemplo, o cliente informou o local), mandando só os campos novos; o gateway junta com o que já tinha.
+
+Toques contraditórios (seção 9): quando o cliente toca em duas opções da mesma mensagem no mesmo lote, o lote traz só o último toque, com `interacao.substituiu`:
+
+```json
+"mensagens_do_lote": [{"enviada_em": "…", "tipo": "texto", "texto": "Retirada",
+                       "interacao": {"tipo": "botao", "id": "retirada", "atual": true, "substituiu": ["entrega"]}}]
+```
+
+`substituiu` só aparece quando houve troca. Vale sempre, com o recurso ligado ou não.
+
+### 10.4 O que acontece no gateway
+
+- **Registro:** uma solicitação aberta por conversa e motivo, com número (`S-0001`, sequencial por empresa). Nova ação com o mesmo motivo atualiza: campo que veio substitui, campo ausente não apaga.
+- **Alerta:** ao criar, para o destino de transbordo da empresa (`whatsapp_alerta_transbordo`), com nome, telefone inteiro, dados e o endereço do painel. Atualização só alerta quando preenche um campo que estava vazio, e no máximo uma vez a cada 30 min por solicitação. Sem destino cadastrado, a solicitação é gravada e aparece no painel, sem alerta. `transbordo_destino_externo: true` mascara o telefone.
+- **Sem pausa:** não mexe em `bot_pausado_ate` nem em "aguardando atendente". Só a resposta que de fato sai registra (resposta descartada por refazer não).
+- **Proteção:** `transferir_humano` com motivo `evento_ou_encomenda` ou `catering`, numa conversa com carrinho com itens ou pedido ativo (`aguardando_loja`, `confirmado`, `em_preparo`, `pronto_retirada`, `saiu_entrega`), é aplicado como `notificar_equipe`. O turno guarda `acao = notificar_equipe` e `acao_original = transferir_humano`; a solicitação nasce com `origem: convertida`; o log registra as duas ações; `GET /metricas` conta em `solicitacoes.convertidas`. Os botões que o agente tiver mandado junto com a transferência não saem (o gateway já os descarta em `transferir_humano`).
+- **Configuração** (herança e versões do CFG1, grupo `transbordo`): `notificar_equipe` (`on`/`off`; `off` na plataforma, `on` na versão 2 do segmento `delivery_restaurante`) e `transbordo_destino_externo` (sim/não; padrão não).
+- **Webhooks de saída:** `solicitacao.criada` e `solicitacao.atualizada`. Auditoria: `solicitacao.criada`, `solicitacao.atualizada`, `solicitacao.status`, `solicitacao.nota`.
+
+### 10.5 Rotas do painel (como ficaram)
+
+| Rota | Uso |
+|---|---|
+| `GET /admin/v1/tenants/{t}/solicitacoes` | `status` (vários), `motivo`, `tipo`, `desde`, `ate`, `busca` (número, nome, telefone), `limite`, `cursor` |
+| `GET /admin/v1/tenants/{t}/solicitacoes/contagem` | `{"abertas", "em_andamento", "mais_antiga_em"}` |
+| `GET /admin/v1/tenants/{t}/solicitacoes/{id}` | Detalhe |
+| `PATCH /admin/v1/tenants/{t}/solicitacoes/{id}` | `{"status"?: "em_andamento" \| "concluida" \| "cancelada", "nota"?}`; qualquer papel; exige `X-Actor` |
+
+Cada item: `id`, `numero`, `status`, `motivo`, `motivo_informado`, `tipo`, `origem` (`agente` \| `convertida`), `dados {data, pessoas, local, observacao}`, `cliente {nome, nome_origem, telefone, contato_id}`, `conversation_id`, `conversa {estado, pedido_aberto}`, `alerta {status, em}` (`status`: `pendente`, `enviado`, `simulado`, `falhou` ou `sem_destino`), `atualizacoes`, `criado_em`, `atualizado_em`, `atendido_por`, `concluido_em`, `nota`, `proximos_status`.
+
+- Status só anda para frente: `aberta` → `em_andamento` → `concluida`; `cancelada` a partir de `aberta` ou `em_andamento`. Fora disso → 409 com o status atual. `em_andamento` grava `atendido_por`.
+- `GET /admin/v1/tenants/{t}/conversas`: cada conversa ganha `solicitacao_aberta: {"id", "numero", "tipo", "status"}` ou `null`.
+- `GET /admin/v1/tenants/{t}/metricas`: bloco `solicitacoes: {"criadas", "atualizadas", "convertidas", "alertas_enviados"}`.
