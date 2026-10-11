@@ -281,7 +281,8 @@ Ordem sugerida: B1 → B2 → B4 → B3 → B5. O B1 vem primeiro porque sem ler
 | B1 — Ler o clique | Implementado em 10/10/2026: `uazapi.normalizar()` reconhece `TemplateButtonReplyMessage`; `mensagens.meta.interacao`; `ultima_interacao` no pacote (`skyone.interacao()`); testes em `tests/test_botoes.py` |
 | B2 — Botões de resposta do agente | Implementado em 10/10/2026: `nucleo/botoes.py` (leitura do Retorno e tabela 3.1), `uazapi.enviar_menu()`, plano B em texto, `meta.botoes`, configuração `botoes_interativos` (migração 026, padrão `off`), bloco `botoes` em `GET /metricas`; testes em `tests/test_botoes_b2.py`. **Desligado em todos os agentes** até o Marco pedir |
 | B4 | Aguarda liberação |
-| B3, B5 | Junto do G3 |
+| B3 | Payload real do envio e do clique registrado na seção 10 (11/10/2026). Implementação depois do PED1, com liberação do Marco |
+| B5 | Junto do G3 |
 
 Detalhes do B1 que a implementação fixou:
 - O item de `mensagens_do_lote` só ganha a chave `interacao` quando é um clique; as mensagens comuns continuam com as três chaves de sempre.
@@ -297,3 +298,65 @@ Detalhes do B2 que a implementação fixou:
 - **Aviso de plano B:** linha no log (`Botões enviados como texto numerado: <motivo>`, sem telefone e sem texto) e registro `botoes.fallback` na auditoria da empresa; o motivo fica em `mensagens.meta.botoes.motivo`.
 - **Envio de teste (`dry`):** nada é enviado; a mensagem fica gravada com a forma que teria saído.
 - **Métricas:** `enviados` conta só o que saiu como botão; tudo que tem motivo entra em `em_texto.por_motivo` (inclusive `provedor_incerto`). Clique cuja mensagem de origem não é do bot conta como `antigo`.
+
+## 10. B3 — payload real da lista (teste de 11/10/2026)
+
+**Envio** (`POST /send/menu`, `type: "list"`, `listButton: "Ver unidades"`, `choices: ["[Unidades]", "Título|id|descrição", …]`): HTTP 200, `messageType: "ListMessage"`, id do provedor devolvido. O webhook do próprio envio chega com `wasSentByApi: true` e é ignorado, como nos botões.
+
+**Clique** (webhook `messages`, registro 184 do `webhook_raw`, 00:56:43 UTC). Campos que importam, com dados mascarados:
+
+```json
+{
+  "EventType": "messages",
+  "message": {
+    "messageType": "ListResponseMessage",
+    "type": "media",
+    "mediaType": "list_response",
+    "text": "",
+    "vote": "Pátio Guedala",
+    "buttonOrListid": "patio_guedala",
+    "quoted": "3EB0…1249",
+    "content": {
+      "title": "Pátio Guedala",
+      "description": "Aberta até 22h",
+      "listType": 1,
+      "singleSelectReply": {"selectedRowID": "patio_guedala"},
+      "contextInfo": {
+        "stanzaID": "3EB0…1249",
+        "quotedMessage": {"listMessage": {
+          "buttonText": "Ver unidades",
+          "description": "Teste de lista do gateway (B3). Em qual unidade você quer pedir?",
+          "sections": [{"title": "Unidades", "rows": [
+            {"rowID": "einstein", "title": "Einstein", "description": "Aberta até amanhã 17h"},
+            {"rowID": "morumbi", "title": "Morumbi", "description": "Aberta até 22h30"},
+            {"rowID": "patio_guedala", "title": "Pátio Guedala", "description": "Aberta até 22h"},
+            {"rowID": "vila_nova_conceicao", "title": "Vila Nova Conceição", "description": "Aberta até 23h"}]}]}}
+      }
+    },
+    "chatid": "*******1513@s.whatsapp.net",
+    "sender_pn": "*******9899@s.whatsapp.net",
+    "fromMe": true,
+    "wasSentByApi": false,
+    "source": "android",
+    "messageid": "ACE8…8A89",
+    "messageTimestamp": 1791680203000
+  }
+}
+```
+
+O que o B3 vai ler:
+
+| Informação | Campo | Observação |
+|---|---|---|
+| É clique de lista | `messageType == "ListResponseMessage"` (ou `mediaType == "list_response"`) | Diferente do botão (`TemplateButtonReplyMessage`) |
+| Id da opção | `buttonOrListid` | Mesmo campo do clique em botão. Reserva: `content.singleSelectReply.selectedRowID` |
+| Título da opção | `vote` | `text` vem **vazio**. Reserva: `content.title` |
+| Mensagem de origem | `quoted` | Id do provedor da lista enviada. Reserva: `content.contextInfo.stanzaID` |
+| Descrição da opção | `content.description` | Não vai para o agente |
+
+**Ressalva deste teste:** o clique registrado veio com `fromMe: true` e `sender_pn` igual ao número da **instância** (final 9899), origem `android`: o toque foi feito no aparelho logado como a instância, dentro da conversa com o final 1513, e não no aparelho do cliente. Por isso o gateway o tratou como mensagem de atendente (gravou como `humano`, tipo não lido, e pausou o bot — regra INV03). O formato serve para escrever a leitura; o clique vindo do **cliente** (`fromMe: false`) ainda não foi observado e deve ser igual, trocando remetente. Fica como primeira conferência do B3 em produção.
+
+Consequências para o B3:
+- `ListResponseMessage` entra em `CLIQUES_DE_BOTAO`, com o título lido de `vote`.
+- Clique de lista com `fromMe: true` (feito no aparelho da instância) **não** deve pausar o bot nem virar mensagem de atendente: é ignorado, com registro.
+- A fixture de teste sai deste payload (anonimizado), nas duas versões: do cliente e da instância.
