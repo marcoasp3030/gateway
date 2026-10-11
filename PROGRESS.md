@@ -1099,3 +1099,8 @@ PY
 - Conferência: 4 containers `healthy`, fila zerada, admin por fora 404, `/api/v1` sem chave 401, envio real em 1 de 5 agentes, piloto com os dois contatos, zero erros nos logs. Em produção: estados 7 encerradas / 3 aguardando / 0 atendente / 93 bot; contatos com origem `perfil`, `telefone` ou `identificador` (ninguém tem cadastro ou informado ainda).
 - Clique em lista do final 1513: **nenhum registro** no `webhook_raw` da bykoji desde a implantação do B3 (02:03 UTC) até 03:00 UTC; segue a conferir.
 - Próximos: painel consome a seção 14; Skyone passa a devolver `nome_cliente`. Depois C1 → R1 → B4 → carrossel → G4.
+
+## CFG1 — especificação da configuração do agente por empresa — 2026-10-11
+
+- `docs/ESPEC_CFG1.md` escrita: levantamento das 26 configurações com herança, três camadas (prompt base / `perfil_atendimento` / comportamentos do gateway), versionamento, segmentos, prévia, base de conhecimento (CFG1-b) e contratos. **Nada implementado; aguardando aprovação e 10 decisões do Marco (seção 11).**
+- Achado: `instrucoes_agente` está vazio nos 5 agentes de produção; tudo o que é do By Koji está no prompt do Skyone.
