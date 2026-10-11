@@ -1037,3 +1037,13 @@ PY
 - Conferência: 4 containers `healthy` na imagem nova, fila zerada, admin por fora 404, `/api/v1` sem chave 401, envio real em 1 de 5 agentes (piloto com 2 contatos), zero erros nos logs. Os dois campos novos valem 120 s / 6 h em todos os agentes, herdados da plataforma.
 - Na mesma rodada (antes do UX3): diagnóstico do teste de mensagens picotadas (seção 11.1 da `docs/ESPEC_UX2.md`); carrinho aberto da conversa do contato final 1513 esvaziado (`carrinho.esvaziado`, ator `marco`); nenhum clique da lista de teste chegou ao `webhook_raw`; decisões do C1 registradas (seção 10.6); P3 suspenso.
 - Ordem: B3 lista (aguarda liberação do Marco e o clique) → C1 → R1 → B4 → carrossel (estudo) → G4.
+
+## UX3.1 — segundo refazer, acoes_recentes e carrinho esvaziado no estado inicial — 2026-10-11 00:55 UTC
+
+- Status: **implantado**. Código `dd6f93b`, imagem `gateway:dd6f93b`, schema **29**. Volta: `gateway:23e6225` (roda sobre o schema 29; não sobe do zero nele).
+- Segundo refazer: até 2 por turno (`MAX_REFAZER`); o 2º só se o turno refeito não chamou Skill nem saiu balão, e se o turno original começou há até 30 s (`TETO_REFAZER_S`). Motivos novos em `turnos.refazer_recusado`: `skill_chamada`, `balao_enviado`, `teto_de_espera`. O 1º refazer segue sem teto.
+- `acoes_recentes`: sempre no pacote; chamadas de Skill da conversa nos últimos `acoes_recentes_min` minutos (padrão 15; 0–1440), até 20, com `ha_segundos`. Contrato na seção 12.2 de `docs/ESPEC_UX2.md`.
+- `esvaziar_carrinho` limpa também unidade, modalidade, endereço, horário, observação e maioridade (pedido do Marco no meio do bloco). Expiração: o agente passa a ver um carrinho novo, inicial.
+- Testes: **213 passed** (3 novos em `tests/test_ux31.py`; `tests/test_ux2.py` ajustado ao limite de dois), só bancos `_test`. Backup `/home/twadmin/backups/gateway/pre-ux31-20261011T005441Z/gateway.dump` (28 tabelas, 600). Migração 029 aplicada com a imagem antiga no ar.
+- Conferência: 4 containers `healthy` na imagem nova, fila zerada, admin por fora 404, `/api/v1` sem chave 401, envio real em 1 de 5 agentes, zero erros nos logs.
+- B3: a MESMA lista de teste reenviada ao contato final 1513 (celular do Marco) às 00:55:28 UTC → HTTP 200, `ListMessage`. **Pendente: o clique**, para mostrar o payload.
