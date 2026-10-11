@@ -1104,3 +1104,8 @@ PY
 
 - `docs/ESPEC_CFG1.md` escrita: levantamento das 26 configurações com herança, três camadas (prompt base / `perfil_atendimento` / comportamentos do gateway), versionamento, segmentos, prévia, base de conhecimento (CFG1-b) e contratos. **Nada implementado; aguardando aprovação e 10 decisões do Marco (seção 11).**
 - Achado: `instrucoes_agente` está vazio nos 5 agentes de produção; tudo o que é do By Koji está no prompt do Skyone.
+
+## CFG1 aprovado; PED1-c conferido — 2026-10-11 13:45 UTC
+
+- Decisões do Marco para o CFG1 registradas na seção 12 de `docs/ESPEC_CFG1.md`. Ordem nova: PED1-c → CFG1-a → G4 → G5/G6 → G3 → B4 → R1 → C1 → CFG1-b → carrossel. **CFG1-a só com liberação do Marco.**
+- PED1-c já estava implantado desde 03:00 UTC (`gateway:6f89149`, schema 32). Conferido agora: 4 containers nessa imagem, fila zerada, admin por fora 404, `/api/v1` sem chave 401, zero erros na última hora, árvore do git limpa.

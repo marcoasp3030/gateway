@@ -1,7 +1,7 @@
 # CFG1 — Configuração do comportamento do agente por empresa e por agente
 
-**Situação:** especificação para aprovação. **Nada implementado.**
-**Data:** 11/10/2026. Base: produção em `gateway:ca22728`, schema 31.
+**Situação:** **aprovada em 11/10/2026**, com as decisões da seção 12 (que valem sobre o texto das seções anteriores onde houver diferença). **Nada implementado ainda**; o CFG1-a começa só com a liberação do Marco.
+**Data:** 11/10/2026. Produção hoje: `gateway:6f89149`, schema 32 (PED1-c).
 
 **Objetivo:** um único fluxo e um único prompt base no Skyone por segmento. Tudo o que é da empresa vem do gateway no pacote, ou é executado pelo próprio gateway.
 
@@ -460,3 +460,33 @@ Testes:
 8. **Fora do horário:** os dois modos (`atender`, `so_avisar`) e o "aceita pedido agendado" cobrem o que você quer para o G3?
 9. **Base de conhecimento:** os limites por plano da seção 7.4 e os nomes dos planos; e se aceita a dependência nova de leitura de PDF na imagem.
 10. **Ordem:** onde o CFG1-a entra na fila (hoje: PED1-c → C1 → R1 → B4 → carrossel → G4)?
+
+---
+
+## 12. Decisões do Marco (11/10/2026) — aprovada
+
+1. **`instrucoes_agente`:** mantido só para a plataforma; invisível e não editável pela empresa.
+2. **Versão única** para perfil + comportamentos editáveis pela empresa. Ficam **fora** da versão, com efeito imediato: pausa de unidade, pausa do bot por conversa, `send_mode`/piloto e qualquer chave de emergência da plataforma.
+3. **Boas-vindas e despedida:** usadas pelo agente (vão no perfil); o gateway não as envia.
+4. **Segmento:** a empresa herda e acompanha o padrão do segmento **campo a campo**; campo personalizado pela empresa nunca é sobrescrito por mudança no segmento. O contrato informa, por campo, se o valor é `"segmento"` ou `"personalizado"`, e existe "voltar ao padrão do segmento" por campo (enviar o campo com `null` no rascunho).
+5. **Motivos de transferência:** catálogo da seção 3.2 aprovado; `pediu_humano` **e** `reclamacao` sempre ligados (não desligáveis).
+6. **Regras da casa:**
+   - **Bloqueia a publicação** quando houver padrão claro de instrução de sistema ("ignore as instruções", "responda em JSON", "você agora é", "esqueça", pedido de dados de cartão ou senha), com mensagem indicando o trecho.
+   - Casos **duvidosos**: avisa e exige **confirmação explícita** de quem publica.
+   - No pacote, `regras_da_casa` vai sempre num campo próprio do perfil, nunca concatenada às instruções do sistema.
+7. **Reações, fora do horário e transbordo:** entram no contrato do CFG1-a; cada um traz `"disponivel": false` até o bloco que o executa (R1, G3) estar em produção. O painel mostra como "em breve".
+8. **Fora do horário:** `so_avisar` | `atender` + `aceita_agendado` cobrem. Padrão do segmento delivery: **`so_avisar`** (muda o padrão da seção 4).
+9. **Planos** (nomes e limites **configuráveis pela plataforma**, não fixos no código):
+
+| Plano | FAQ | Documentos | Tamanho |
+|---|---|---|---|
+| essencial | 50 | 5 | 5 MB |
+| profissional | 300 | 30 | 30 MB |
+| rede | 1000 | 100 | 100 MB |
+
+   Dependência para PDF aprovada se for leve e só de texto (sem OCR); PDF sem texto extraível é recusado com mensagem clara.
+10. **Ordem:** PED1-c → **CFG1-a** → G4 → G5/G6 → G3 → B4 → R1 → C1 → CFG1-b → carrossel.
+
+**Para o CFG1-a:** criar o segmento `delivery_restaurante` com padrões razoáveis e migrar o By Koji para ele **sem mudar o comportamento atual**. O perfil do By Koji deve reproduzir o que o prompt faz hoje: tom equilibrado, emojis moderados, respostas curtas, sugestões leves.
+
+Ponto que a implementação precisa resolver (decisão 4 × seção 6): hoje o identificador do modelo do By Koji é `atendente_delivery`. Criar `delivery_restaurante` como segmento novo e apontar o agente para ele, mantendo os mesmos módulos e comportamentos, e conferir antes e depois que a configuração efetiva não mudou em nenhum campo.
