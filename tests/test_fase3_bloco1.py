@@ -16,9 +16,11 @@ CFG={'debounce_s':4,'debounce_curto_s':1.5,'debounce_palavras':6}
 def test_debounce_da_mensagem():
     d=lambda texto,cfg=CFG,**m: debounce_da_mensagem(cfg,{'texto':texto,**m})
     # Parece completa: pontuação de fim de frase (mesmo com emoji ou aspas depois) ou mais de 6 palavras.
-    for texto in ('vocês entregam no Morumbi?','Quero um temaki de salmão.','obrigado!','tudo bem? 🙂','"pode ser?"','então…',
+    for texto in ('vocês entregam no Morumbi?','Quero um temaki de salmão.','obrigado!','tudo bem? 🙂','"pode ser?"',
                   'quero dois temakis e uma coca zero por favor'):
         assert d(texto)==1.5,texto
+    # UX2 (P1): reticências deixaram de contar como frase completa (a frase continua); sem debounce_incompleta_s, espera o normal.
+    assert d('então…')==4
     # Curta ou picada: espera o debounce normal.
     for texto in ('oi','quero','um temaki','de salmão','Sim','rua das flores 123','um dois três quatro cinco seis','',None):
         assert d(texto)==4,texto

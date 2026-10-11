@@ -79,17 +79,36 @@ def parece_fechamento(itens):
     return all(p in FECHAMENTOS for p in palavras)
 
 
-def debounce_da_mensagem(cfg,m):
-    """Espera antes de chamar o agente. Texto que parece completo (termina com pontuação de
-    fim de frase ou tem mais de debounce_palavras palavras) espera menos; mensagem curta ou
-    picada, mídia, localização e reação esperam o debounce normal."""
-    normal=cfg['debounce_s']
-    if (m.get('tipo') or 'texto')!='texto': return normal
+# Palavra de ligação no fim = a frase continua na próxima mensagem ("quero um temaki e").
+LIGACOES=frozenset('e mas que tipo com sem de do da para pra ou também tambem tb aí ai'.split())
+CONTINUA=(',',':',';','-','–','—','…','...')
+
+
+def forma_da_mensagem(cfg,m):
+    """'incompleta' | 'completa' | 'normal' — como a última mensagem do lote termina (UX2, P1)."""
+    if (m.get('tipo') or 'texto')!='texto': return 'normal'
+    # Clique em botão é resposta decidida.
+    if isinstance(m.get('meta'),dict) and m['meta'].get('interacao'): return 'completa'
     texto=str(m.get('texto') or '').strip()
     # Emoji e fechamentos depois da pontuação não contam ("tudo bem? 🙂").
     sem_enfeite=texto.rstrip(' \t\n)"\'*_~'+''.join(c for c in texto[-6:] if ord(c)>0x2000 and c not in FIM_DE_FRASE))
-    completa=sem_enfeite.endswith(FIM_DE_FRASE) or len(texto.split())>cfg['debounce_palavras']
-    return min(normal,cfg['debounce_curto_s']) if completa else normal
+    if sem_enfeite.endswith(('…','...')): return 'incompleta'
+    if sem_enfeite.endswith(FIM_DE_FRASE): return 'completa'
+    palavras=sem_enfeite.split()
+    ultima=palavras[-1].lower().strip('"\'()*_~') if palavras else ''
+    if sem_enfeite.endswith(CONTINUA) or ultima in LIGACOES: return 'incompleta'
+    return 'completa' if len(texto.split())>cfg['debounce_palavras'] else 'normal'
+
+
+def debounce_da_mensagem(cfg,m):
+    """Espera antes de chamar o agente, decidida pela última mensagem: a que parece completa espera
+    menos (debounce_curto_s); a que parece incompleta espera mais (debounce_incompleta_s, se
+    configurado); curta, mídia, localização e reação esperam o debounce normal. O teto max_wait_s
+    é aplicado por quem enfileira."""
+    normal=cfg['debounce_s'];forma=forma_da_mensagem(cfg,m)
+    if forma=='completa': return min(normal,cfg['debounce_curto_s'])
+    if forma=='incompleta' and cfg.get('debounce_incompleta_s'): return max(normal,float(cfg['debounce_incompleta_s']))
+    return normal
 
 
 def _meta(marca_meta,plano):
@@ -433,6 +452,16 @@ return 1
                 await self.redis.delete(self.prefixo+':first:'+self.chave(tenant,conversa))
                 turno=await self._responder(tenant,conversa,conv,cfg)
                 if turno is None: return 'vazio'
+                # UX2: chegou mensagem do cliente antes de a resposta sair → descarta e refaz com o lote completo (uma vez).
+                if await self._deve_refazer(tenant,conversa,cfg,turno):
+                    await self._descartar(tenant,conversa,turno)
+                    # Mais uma consulta ao agente: a trava da conversa e a vaga ganham validade nova.
+                    await self.redis.eval("if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('EXPIRE',KEYS[1],ARGV[2]) else return 0 end",1,lock,token,cfg['timeout_s']+90)
+                    if reservada: await vaga.renovar(cfg)
+                    turno=await self._responder(tenant,conversa,conv,cfg)
+                    if turno is None: return 'vazio'
+                    # Limite de um refazer: se chegou mais mensagem, só fica registrado; ela vira o próximo turno.
+                    await self._deve_refazer(tenant,conversa,cfg,turno)
             await self._concluir(tenant,conversa,cfg,turno,await self._enviar_partes(tenant,conversa,cfg,turno))
             return 'concluido'
         finally:
@@ -445,21 +474,67 @@ return 1
             if not sem_vaga and await self.db.fetchval("SELECT EXISTS(SELECT 1 FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND processada_em IS NULL AND direcao='entrada' AND origem IN ('cliente','sistema'))",tenant,conversa):
                 await insistir(lambda: self.enfileirar(tenant,conversa,cfg),self.insistir_s)
 
+    async def _deve_refazer(self,tenant,conversa,cfg,turno):
+        """Há mensagem nova do cliente fora do lote e nada da resposta saiu ainda? Só refaz uma vez, e nunca
+        quando o turno já teve efeito para fora (pedido fechado/cancelado, transferência, encerramento)."""
+        if cfg.get('refazer_turno')!='on' or turno['origem']!='cliente' or turno['status']!='ok': return False
+        if not await self.db.fetchval("""SELECT EXISTS(SELECT 1 FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND processada_em IS NULL
+                AND direcao='entrada' AND origem='cliente' AND NOT (id=ANY($3::bigint[])))""",tenant,conversa,turno['mensagem_ids']): return False
+        resultado=json.loads(turno['resposta']) if isinstance(turno['resposta'],str) else (turno['resposta'] or {})
+        from modulos.pedidos import servico as pedidos
+        motivo=None
+        if turno['refeito_de'] is not None: motivo='ja_refeito'
+        elif resultado.get('acao') in ('transferir_humano','encerrar','pedido_fechado'): motivo='acao_com_efeito'
+        elif await self.db.fetchval("""SELECT EXISTS(SELECT 1 FROM skill_chamadas WHERE tenant_id=$1 AND conversation_id=$2 AND criado_em>=$3
+                AND resultado='ok' AND skill=ANY($4::text[]))""",tenant,conversa,turno['agente_inicio'],list(pedidos.SKILLS_COM_EFEITO)): motivo='skill_com_efeito'
+        if motivo:
+            # A resposta segue e a mensagem nova vira o próximo turno.
+            await self.db.execute('UPDATE turnos SET refazer_recusado=$3 WHERE tenant_id=$1 AND id=$2',tenant,turno['id'],motivo)
+            return False
+        return True
+
+    async def _descartar(self,tenant,conversa,turno):
+        """Conclui o turno como 'refeito': a resposta fica guardada para auditoria e não é enviada.
+        As mensagens do lote continuam pendentes e entram no turno seguinte, junto com as novas."""
+        async with self.db.acquire() as conn,conn.transaction():
+            await conn.execute('''UPDATE turnos SET etapa='concluido',status='refeito',
+                espera_ms=(extract(epoch FROM agente_inicio-ultima_msg_em)*1000)::int,
+                agente_ms=(extract(epoch FROM coalesce(agente_fim,now())-agente_inicio)*1000)::int,
+                total_ms=(extract(epoch FROM now()-ultima_msg_em)*1000)::int WHERE tenant_id=$1 AND id=$2''',tenant,turno['id'])
+            # O agente foi consultado: conta no consumo, como qualquer turno.
+            from nucleo.consumo import registrar,atualizar_cache
+            mes,total=await registrar(conn,tenant)
+            await auditar(conn,tenant,'sistema','resposta.descartada',conversa)
+            await auditar(conn,tenant,'sistema','turno.refeito',conversa)
+        await atualizar_cache(self.redis,self.prefixo,tenant,mes,total)
+        log.info('Turno refeito: chegou mensagem do cliente antes de a resposta sair')
+
+    async def _refeito_de(self,tenant,conversa,ids):
+        """Turno descartado cujo lote está (em parte) nestas mensagens pendentes: este turno é o refazer dele.
+        Lido do banco a cada vez, então vale também depois de queda do worker no meio."""
+        return await self.db.fetchrow("""SELECT id,agente_inicio,agente_fim,aviso_demora FROM turnos WHERE tenant_id=$1 AND conversation_id=$2
+            AND status='refeito' AND mensagem_ids && $3::bigint[] ORDER BY id DESC LIMIT 1""",tenant,conversa,ids)
+
     async def _responder(self,tenant,conversa,conv,cfg):
         itens=await self._pendentes(self.db,tenant,conversa)
         if not itens: return None
         origem=itens[0]['origem'];ids=[i['id'] for i in itens];rid=uuid.uuid4()
+        descartado=await self._refeito_de(tenant,conversa,ids) if origem=='cliente' else None
         turno=await self.db.fetchrow('''INSERT INTO turnos(tenant_id,conversation_id,agente_id,canal_id,request_id,n_mensagens,
-            primeira_msg_em,ultima_msg_em,agente_inicio,modo_agente,status,origem,etapa,mensagem_ids)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now(),$9,'em_andamento',$10,'processando',$11) RETURNING *''',
+            primeira_msg_em,ultima_msg_em,agente_inicio,modo_agente,status,origem,etapa,mensagem_ids,refeito_de)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now(),$9,'em_andamento',$10,'processando',$11,$12) RETURNING *''',
             tenant,conversa,cfg['id'],conv['canal_id'],rid,len(itens),itens[0]['criado_em'],itens[-1]['criado_em'],
-            cfg['agente_mode'],origem,ids)
+            cfg['agente_mode'],origem,ids,descartado['id'] if descartado else None)
         resultado=None;erro=None;status='ok';aviso=False;presenca=None
+        acoes=None
+        if descartado:
+            from modulos.pedidos import servico as pedidos
+            acoes=await pedidos.acoes_do_turno(self.db,tenant,conversa,descartado['agente_inicio'],descartado['agente_fim'] or datetime.now(timezone.utc))
         if not await self.permitido(tenant,conversa,cfg['id']):
             status='ignorado'
         else:
             try:
-                payload=await skyone.pacote(self.repo,tenant,conversa,min(ids),'\n'.join(i['conteudo'] for i in itens),cfg,str(rid),lote=itens)
+                payload=await skyone.pacote(self.repo,tenant,conversa,min(ids),'\n'.join(i['conteudo'] for i in itens),cfg,str(rid),lote=itens,acoes=acoes)
                 if origem=='sistema':
                     payload.update(tarefa='notificar',evento=json.loads(itens[0]['evento']) if isinstance(itens[0]['evento'],str) else itens[0]['evento'])
                 tarefa=asyncio.create_task(self.consultar(tenant,cfg,payload))
@@ -467,7 +542,8 @@ return 1
                 try:
                     feito,_=await asyncio.wait({tarefa},timeout=cfg['slow_notice_s'])
                     # Lote que parece só fechamento não recebe aviso: se a resposta for silêncio, nada é enviado.
-                    if not feito and cfg['aviso_demora'] and not parece_fechamento(itens):
+                    # No turno refeito o aviso de demora não sai de novo se a tentativa descartada já avisou.
+                    if not feito and cfg['aviso_demora'] and not parece_fechamento(itens) and not (descartado and descartado['aviso_demora']):
                         # Aviso de demora é a parte 0 do turno: nunca sai duas vezes no mesmo turno.
                         aviso=await self._enviar_parte(tenant,conversa,cfg,rid,0,cfg['aviso_demora'])=='enviada'
                         # Enviar mensagem cancela o "digitando" no canal: pede de novo.
@@ -648,6 +724,7 @@ return 1
         # Retenção de webhook por tenant; sem logs de conteúdo ou telefones.
         for row in await self.db.fetch('SELECT id,retencao_dias FROM tenants'):
             await self.db.execute('DELETE FROM webhook_raw WHERE tenant_id=$1 AND recebido_em < now()-make_interval(days=>$2)',row['id'],row['retencao_dias'])
+            await self.db.execute('DELETE FROM skill_chamadas WHERE tenant_id=$1 AND criado_em < now()-make_interval(days=>$2)',row['id'],row['retencao_dias'])
 
     async def agendador(self):
         if self.fila_duravel: return

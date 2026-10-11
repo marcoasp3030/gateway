@@ -68,14 +68,17 @@ def recusa(r,carrinho=None):
     return JSONResponse(corpo,status_code=r.status,headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
 
 
-async def escrever(request,tenant,conversa,operacao):
-    """Roda a operação numa transação e devolve o carrinho completo atualizado (ou a recusa com ele)."""
+async def escrever(request,tenant,conversa,operacao,skill=None,dados=None):
+    """Roda a operação numa transação e devolve o carrinho completo atualizado (ou a recusa com ele).
+    Com `skill`, deixa o registro curto da chamada (para o turno refeito saber o que já foi feito)."""
     async with request.app.state.db.acquire() as conn:
         try:
             async with conn.transaction():
                 await operacao(conn)
         except servico.Recusa as r:
+            if skill: await servico.registrar_skill(conn,tenant,conversa,skill,dados or {},r.motivo)
             return recusa(r,await servico.retrato(conn,tenant,conversa))
+        if skill: await servico.registrar_skill(conn,tenant,conversa,skill,dados or {},'ok')
         return {'ok':True,'carrinho':await servico.retrato(conn,tenant,conversa)}
 
 
@@ -88,32 +91,37 @@ async def ver(request:Request,conversation_id:str,ctx=Depends(chave)):
 @router.post('/api/v1/carrinho/{conversation_id}/itens')
 async def adicionar(request:Request,conversation_id:str,dados:NovoItem,ctx=Depends(chave)):
     t=await conversa_da_chave(request,ctx,conversation_id)
-    return await escrever(request,t,conversation_id,lambda c: servico.adicionar(c,t,conversation_id,dados.item_id,dados.quantidade,dados.observacao))
+    return await escrever(request,t,conversation_id,lambda c: servico.adicionar(c,t,conversation_id,dados.item_id,dados.quantidade,dados.observacao),
+        'adicionar_item',{'item':await servico.nome_do_item(request.app.state.db,t,item_id=dados.item_id),'quantidade':dados.quantidade})
 
 
 @router.patch('/api/v1/carrinho/{conversation_id}/itens/{linha_id}')
 async def alterar(request:Request,conversation_id:str,linha_id:int,dados:MudarItem,ctx=Depends(chave)):
     t=await conversa_da_chave(request,ctx,conversation_id)
-    return await escrever(request,t,conversation_id,lambda c: servico.alterar(c,t,conversation_id,linha_id,dados.quantidade,dados.observacao,'observacao' in dados.model_fields_set))
+    return await escrever(request,t,conversation_id,lambda c: servico.alterar(c,t,conversation_id,linha_id,dados.quantidade,dados.observacao,'observacao' in dados.model_fields_set),
+        'alterar_item',{'item':await servico.nome_do_item(request.app.state.db,t,linha_id=linha_id),'quantidade':dados.quantidade})
 
 
 @router.delete('/api/v1/carrinho/{conversation_id}/itens/{linha_id}')
 async def remover(request:Request,conversation_id:str,linha_id:int,ctx=Depends(chave)):
     t=await conversa_da_chave(request,ctx,conversation_id)
-    return await escrever(request,t,conversation_id,lambda c: servico.remover(c,t,conversation_id,linha_id))
+    return await escrever(request,t,conversation_id,lambda c: servico.remover(c,t,conversation_id,linha_id),
+        'remover_item',{'item':await servico.nome_do_item(request.app.state.db,t,linha_id=linha_id)})
 
 
 @router.delete('/api/v1/carrinho/{conversation_id}')
 async def esvaziar(request:Request,conversation_id:str,ctx=Depends(chave)):
     t=await conversa_da_chave(request,ctx,conversation_id)
-    return await escrever(request,t,conversation_id,lambda c: servico.esvaziar(c,t,conversation_id))
+    return await escrever(request,t,conversation_id,lambda c: servico.esvaziar(c,t,conversation_id),'esvaziar_carrinho')
 
 
 @router.put('/api/v1/carrinho/{conversation_id}/entrega')
 async def entrega(request:Request,conversation_id:str,dados:Entrega,ctx=Depends(chave)):
     t=await conversa_da_chave(request,ctx,conversation_id)
     enviados=dados.model_dump(include=dados.model_fields_set)
-    return await escrever(request,t,conversation_id,lambda c: servico.entrega(c,t,conversation_id,enviados))
+    # Só os nomes dos campos informados: endereço e observação não ficam no registro.
+    return await escrever(request,t,conversation_id,lambda c: servico.entrega(c,t,conversation_id,enviados),
+        'definir_entrega',{'detalhe':', '.join(sorted(enviados))})
 
 
 def resumo_evento(p):
@@ -137,10 +145,13 @@ async def fechar(request:Request,dados:Fechar,ctx=Depends(chave)):
                     # Unidade com WhatsApp de pedidos recebe o resumo; sem número, o pedido fica só no painel.
                     await avisos.avisar_unidade_do_pedido(conn,t,p,servico.retrato_pedido(p)['itens'])
         except servico.Recusa as r:
+            await servico.registrar_skill(conn,t,conversa,'fechar_pedido',{},r.motivo)
             return recusa(r,await servico.retrato(conn,t,conversa))
         if p is None:
             # Preço mudou no catálogo: o carrinho foi atualizado e volta para o cliente confirmar.
+            await servico.registrar_skill(conn,t,conversa,'fechar_pedido',{},'preco_alterado')
             return recusa(servico.Recusa('preco_alterado',409),await servico.retrato(conn,t,conversa))
+        await servico.registrar_skill(conn,t,conversa,'fechar_pedido',{'detalhe':'pedido '+str(p['numero'])},'ok')
         return {'ok':True,'pedido':servico.retrato_pedido(p),'carrinho':await servico.retrato(conn,t,conversa)}
 
 
@@ -163,7 +174,10 @@ async def cancelar(request:Request,numero:str,dados:Cancelar,ctx=Depends(chave))
                 if antes['status']!='cancelado':
                     await auditar(conn,t,'cliente','pedido.cancelado',p['numero'])
                     await emitir(conn,t,'pedido.cancelado',resumo_evento(p))
-        except servico.Recusa as r: return recusa(r)
+        except servico.Recusa as r:
+            await servico.registrar_skill(conn,t,dados.conversation_id,'cancelar_pedido',{'detalhe':'pedido '+str(numero)[:12]},r.motivo)
+            return recusa(r)
+        await servico.registrar_skill(conn,t,dados.conversation_id,'cancelar_pedido',{'detalhe':'pedido '+str(p['numero'])},'ok')
     return {'ok':True,'pedido':servico.retrato_pedido(p)}
 
 

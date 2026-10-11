@@ -1,6 +1,6 @@
 # Especificação — UX2: mensagens picotadas, reações, lista e carrossel
 
-Situação em 10/10/2026: **diagnóstico e proposta. Nada implementado.** Aguarda aprovação do Marco.
+Situação em 10/10/2026: **aprovada pelo Marco** (decisões na seção 7). Blocos **P1 e P2 implementados** (seção 8); os demais aguardam.
 Complementa `docs/ESPEC_BOTOES.md` (UX1).
 
 ---
@@ -261,11 +261,68 @@ G4 (entrega e pagamento) e B5 (botões de ação, junto do G3) seguem como estav
 
 ---
 
-## 7. Pontos para o Marco decidir
+## 7. Decisões do Marco (10/10/2026)
 
-1. **Teste de presença:** autoriza acrescentar `presence` aos eventos do webhook da instância para capturar o payload real? (Só assinatura de evento; a URL não muda.)
-2. **Refazer com efeito:** concorda em **não** refazer quando a resposta descartável fecha pedido, transfere ou encerra?
-3. **Valores:** 7 s para mensagem incompleta e 2,5 s (em vez de 1,5 s) para completa, no By Koji?
-4. **`refazer_turno` e `reacoes`** nascem desligados e você liga só no By Koji, como foi com os botões?
-5. **Reação antes dos balões** (e não depois)?
-6. **Lista:** a descrição de cada unidade ("Aberta até 22h30") vem do agente. Concorda, ou prefere que o gateway preencha sozinho a partir da situação da unidade quando o `id` for o código de uma unidade?
+1. **Presença:** autorizado acrescentar `presence` aos eventos do webhook da instância para capturar o payload real. Durante o teste, só uma amostra fica em `webhook_raw` (os 20 primeiros eventos de presença); o resto é descartado na entrada, sem processar. Se o formato não servir para o P3, a assinatura volta a `messages` e `connection`.
+2. **P2 (refazer o turno):**
+   - **Não refazer** se, no turno descartável, foi chamado `fechar_pedido` ou `cancelar_pedido` (com sucesso), ou se a resposta tem `acao` `transferir_humano`/`encerrar`. A resposta segue e a mensagem nova vira o próximo turno.
+   - Se houve alteração de carrinho (`adicionar_item`, `alterar_item`, `remover_item`, `esvaziar_carrinho`, `definir_entrega`), refazer é permitido, e o pacote do turno refeito leva `acoes_ja_executadas` (resumo das chamadas de Skill do turno descartado) e o carrinho atualizado.
+   - No máximo 1 refazer por turno.
+3. **P1:** 7 s para incompleta, 2,5 s para completa, 4 s para as demais, teto 12 s — aprovado para o By Koji.
+4. **`refazer_turno` e `reacoes`** nascem `off`; ligar só no agente do By Koji depois de validado.
+5. **Reação** sai antes dos balões.
+6. **Lista:** quando o `id` de uma opção for o código de uma unidade da empresa, o gateway preenche a descrição pela situação real ("Aberta até 22h30", "Fechada · abre amanhã 12h", "Pedidos pausados"); nos demais casos a descrição vem do agente (até 72 caracteres, validada).
+
+**Ordem:** P1 + P2 → (P3 se a presença servir) → B3 lista → reações → B4 → carrossel (estudo).
+
+## 8. Andamento
+
+| Bloco | Situação |
+|---|---|
+| P1 — Espera adaptativa | Implementado em 10/10/2026: `pipeline.forma_da_mensagem()` e `debounce_da_mensagem()`; configuração `debounce_incompleta_s` (migração 027) |
+| P2 — Refazer o turno | Implementado em 10/10/2026: `Pipeline._deve_refazer()`, `_descartar()`, `_refeito_de()`; tabela `skill_chamadas`; `acoes_ja_executadas` no pacote; `refazer_turno` (padrão `off`); bloco `picotadas` em `GET /metricas`. Testes em `tests/test_ux2.py` |
+| Amostra de presença | Implementado: evento `presence` é descartado na entrada do webhook, guardando só os 20 primeiros |
+| P3, B3, R1, B4 | Aguardam |
+
+### 8.1 Como as chamadas de Skill são ligadas ao turno
+
+- Cada Skill que muda carrinho ou pedido grava uma linha em `skill_chamadas` no momento da chamada: `tenant_id`, `conversation_id`, `skill`, `dados` (resumo), `resultado` (`ok` ou o motivo da recusa) e `criado_em`.
+- O turno não é informado pela Skill (o Skyone só manda o `conversation_id`). A ligação é por **conversa + janela do turno**: valem as chamadas da conversa com `criado_em` entre `agente_inicio` e `agente_fim` do turno descartado. Como a conversa tem trava (um turno por vez), essa janela não se mistura com a de outro turno.
+- `dados` nunca guarda endereço nem observação: para item, o nome e a quantidade; para `definir_entrega`, só os nomes dos campos informados; para pedido, o número.
+- Limpeza junto da retenção da empresa (`retencao_dias`), como o `webhook_raw`.
+
+### 8.2 Contrato de `acoes_ja_executadas` (gateway → agente)
+
+Campo sempre presente no pacote. **Lista vazia** em turno comum; preenchido só no turno refeito.
+
+```json
+"acoes_ja_executadas": [
+  {"skill": "adicionar_item", "item": "Edamame", "quantidade": 1, "resultado": "ok"},
+  {"skill": "definir_entrega", "item": null, "quantidade": null, "resultado": "ok", "detalhe": "modalidade, unidade"},
+  {"skill": "fechar_pedido", "item": null, "quantidade": null, "resultado": "falta_endereco"}
+]
+```
+
+| Campo | Conteúdo |
+|---|---|
+| `skill` | `adicionar_item`, `alterar_item`, `remover_item`, `esvaziar_carrinho`, `definir_entrega`, `fechar_pedido`, `cancelar_pedido` |
+| `item` | Nome do item do catálogo (nas três Skills de item); senão `null` |
+| `quantidade` | Quantidade informada (adicionar e alterar); senão `null` |
+| `resultado` | `ok` ou o motivo da recusa (`sem_preco`, `falta_maioridade`, …) |
+| `detalhe` | Só quando existe: campos informados em `definir_entrega`, ou `pedido <numero>` |
+
+- Na ordem em que foram chamadas; até 30.
+- **Significado para o agente:** "isto já foi feito na tentativa anterior desta mesma resposta; não repita". O carrinho em `contexto_modulos.pedidos.carrinho` já reflete essas ações.
+- `fechar_pedido`/`cancelar_pedido` com `resultado: ok` nunca aparecem aqui, porque turno com esse efeito não é refeito.
+- No turno refeito, `mensagens_do_lote` e `message` trazem o lote completo (as mensagens do turno descartado + as novas), na ordem.
+
+### 8.3 Detalhes que a implementação fixou
+
+- **Padrões da plataforma:** `debounce_incompleta_s` nasce **nulo** (mensagem incompleta espera o `debounce_s`, como antes) e `debounce_curto_s` continua 1,5. Os valores aprovados (7 s e 2,5 s) são configurados no agente do By Koji. Única mudança para todos: reticências deixaram de contar como frase completa.
+- **Status do turno descartado:** `status = 'refeito'`, `etapa = 'concluido'`, com a resposta guardada e nunca enviada. O turno seguinte tem `refeito_de` apontando para ele.
+- **Reconhecimento do refazer:** o turno novo é "refeito" quando o lote dele contém mensagens de um turno `refeito`. É lido do banco a cada vez, então vale também depois de queda do worker no meio.
+- **Motivos de não refazer** (`turnos.refazer_recusado`): `ja_refeito`, `acao_com_efeito` (`transferir_humano`, `encerrar` ou `pedido_fechado` na resposta), `skill_com_efeito` (`fechar_pedido`/`cancelar_pedido` com sucesso).
+- **Não refaz** também turno com erro do agente (a resposta é o fallback), turno de notificação do sistema e turno ignorado.
+- O turno descartado **conta no consumo** (o agente foi consultado).
+- Antes da segunda consulta, a trava da conversa e a vaga da empresa/agente ganham validade nova.
+- O aviso de demora não sai de novo no turno refeito se a tentativa descartada já avisou.

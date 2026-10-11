@@ -72,7 +72,7 @@ async def interacao(db,tenant_id,conversa_id,canal_id,mensagem):
     return {'tipo':'botao','id':clique['id'],'titulo':mensagem['conteudo'],'atual':not depois}
 
 
-async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None,lote=None):
+async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None,lote=None,acoes=None):
     """Pacote do Apêndice A. `lote` são as mensagens pendentes do turno (enviada_em, tipo, conteudo)."""
     conv = await repo.obter(tenant_id,'conversas',conversa_id)
     if not conv or conv['agente_id']!=cfg['id'] or cfg['tenant_id']!=tenant_id:
@@ -120,6 +120,8 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
         'mensagens_do_lote':do_lote,
         # Último clique em botão do lote (nulo se não houve). O texto do clique é o título do botão.
         'ultima_interacao':ultima_interacao,
+        # Só em turno refeito (UX2): o que a tentativa descartada já fez nas Skills. Lista vazia nos demais.
+        'acoes_ja_executadas':acoes or [],
         'cliente':{'nome':(contato or {}).get('nome') or conv.get('nome'),'unidade_preferida':conv.get('unidade_preferida'),
                    'resumo_anterior':(contato or {}).get('resumo')},
     }

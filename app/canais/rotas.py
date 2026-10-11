@@ -24,6 +24,9 @@ class EntradaAPI(Entrada):
     canal_id:str
 
 
+AMOSTRA_DE_PRESENCA=20
+
+
 @router.post('/webhooks/{tipo}/{canal_id}')
 async def webhook(request:Request,tipo:str,canal_id:str,s:str=''):
     # Só resolve identidade antes da autenticação. Todo acesso posterior usa tenant explícito.
@@ -38,6 +41,11 @@ async def webhook(request:Request,tipo:str,canal_id:str,s:str=''):
     try: bruto=await request.json()
     except ValueError: raise HTTPException(400,'JSON inválido') from None
     if not isinstance(bruto,dict): raise HTTPException(400,'Objeto JSON obrigatório')
+    if tipo=='uazapi' and (bruto.get('EventType') or bruto.get('event'))=='presence':
+        # Presença ("digitando") não é processada: guarda só uma amostra para estudo e descarta o resto na entrada.
+        if await request.app.state.db.fetchval("SELECT count(*) FROM webhook_raw WHERE tenant_id=$1 AND fonte='uazapi' AND payload->>'EventType'='presence'",tenant)<AMOSTRA_DE_PRESENCA:
+            await request.app.state.db.execute('INSERT INTO webhook_raw(tenant_id,fonte,payload) VALUES ($1,$2,$3::jsonb)',tenant,tipo,json.dumps(uazapi.limpar_bruto(sanitizar(bruto))))
+        return {'ok':True,'ignorado':True}
     raw_id=await request.app.state.db.fetchval('INSERT INTO webhook_raw(tenant_id,fonte,payload) VALUES ($1,$2,$3::jsonb) RETURNING id',
         tenant,tipo,json.dumps(uazapi.limpar_bruto(sanitizar(bruto)) if tipo=='uazapi' else sanitizar(bruto)))
     # Sinal de vida do canal para o painel: qualquer evento autenticado conta.
@@ -126,4 +134,21 @@ async def metricas(request:Request,tenant_id:str,agente:str|None=None):
     botoes={'enviados':{f:sum(r['n'] for r in bot if r['forma']==f and not r['motivo']) for f in ('botao','lista')},
             'em_texto':{'total':sum(texto.values()),'por_motivo':texto},
             'clicados':{'atual':cliques['atuais'],'antigo':cliques['total']-cliques['atuais']}}
-    return {**dict(linha),'fila':fila,'botoes':botoes}
+    # Mensagens picotadas (docs/ESPEC_UX2.md): turnos de cliente, sem os ignorados.
+    pic=await request.app.state.db.fetchrow("""SELECT count(*) FILTER (WHERE status='refeito') AS refeitos,
+        count(*) FILTER (WHERE status<>'refeito') AS respondidos,
+        round(avg(n_mensagens) FILTER (WHERE status<>'refeito'),2) AS media, count(*) FILTER (WHERE status<>'refeito' AND n_mensagens=1) AS um,
+        count(*) FILTER (WHERE status<>'refeito' AND n_mensagens=2) AS dois, count(*) FILTER (WHERE status<>'refeito' AND n_mensagens>=3) AS tres_ou_mais,
+        round(avg(espera_ms) FILTER (WHERE status<>'refeito')) AS espera_media_ms,
+        percentile_cont(0.95) WITHIN GROUP(ORDER BY espera_ms) FILTER (WHERE status<>'refeito') AS espera_p95_ms,
+        count(*) FILTER (WHERE status<>'refeito' AND EXISTS(SELECT 1 FROM mensagens m WHERE m.tenant_id=t.tenant_id AND m.conversation_id=t.conversation_id
+            AND m.direcao='entrada' AND m.origem='cliente' AND m.criado_em>t.agente_inicio AND m.criado_em<coalesce(t.enviado_em,t.agente_fim)
+            AND NOT (m.id=ANY(t.mensagem_ids)))) AS atropelados
+        FROM turnos t WHERE tenant_id=$1 AND etapa='concluido' AND origem='cliente' AND status<>'ignorado' AND ($2::text IS NULL OR agente_id=$2)""",tenant_id,agente)
+    recusas={r['refazer_recusado']:r['n'] for r in await request.app.state.db.fetch("""SELECT refazer_recusado,count(*) n FROM turnos
+        WHERE tenant_id=$1 AND refazer_recusado IS NOT NULL AND ($2::text IS NULL OR agente_id=$2) GROUP BY 1""",tenant_id,agente)}
+    picotadas={'turnos_refeitos':pic['refeitos'],'refazer_recusado':recusas,'atropelados':pic['atropelados'],
+               'mensagens_por_turno':{'media':float(pic['media']) if pic['media'] is not None else None,'um':pic['um'],'dois':pic['dois'],'tres_ou_mais':pic['tres_ou_mais']},
+               'espera_media_ms':int(pic['espera_media_ms']) if pic['espera_media_ms'] is not None else None,
+               'espera_p95_ms':int(pic['espera_p95_ms']) if pic['espera_p95_ms'] is not None else None}
+    return {**dict(linha),'fila':fila,'botoes':botoes,'picotadas':picotadas}

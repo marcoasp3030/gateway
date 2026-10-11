@@ -85,6 +85,13 @@ class Vaga:
                                              cfg['max_lotes_simultaneos'], cfg['max_concorrencia'], self.chave, int(validade)))
         return self.motivo
 
+    async def renovar(self, cfg):
+        """Estende a validade da vaga já reservada (turno refeito: mais uma consulta ao agente)."""
+        validade = (cfg['timeout_s'] + 90) * 1000; ate = time.time() * 1000 + validade
+        for chave in (self.lotes, self.ativo):
+            await self.fila.redis.zadd(chave, {self.chave: ate}, xx=True)
+            await self.fila.redis.pexpire(chave, int(validade))
+
     async def devolver(self):
         await self.fila.redis.zrem(self.lotes, self.chave)
         await self.fila.redis.zrem(self.ativo, self.chave)

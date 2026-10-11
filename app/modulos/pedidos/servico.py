@@ -102,6 +102,40 @@ async def tocar(conn,tenant,carrinho_id):
     await conn.execute('UPDATE carrinhos SET atualizado_em=now() WHERE tenant_id=$1 AND id=$2',tenant,carrinho_id)
 
 
+# Skills que mudam carrinho ou pedido. As duas últimas têm efeito para fora (unidade e cliente avisados):
+# turno que as chamou com sucesso não é refeito (UX2, P2).
+SKILLS_DE_CARRINHO=('adicionar_item','alterar_item','remover_item','esvaziar_carrinho','definir_entrega')
+SKILLS_COM_EFEITO=('fechar_pedido','cancelar_pedido')
+
+
+async def registrar_skill(db,tenant,conversa,skill,dados,resultado):
+    """Registro curto da chamada (sem endereço nem observação). Falha aqui nunca derruba a Skill."""
+    try:
+        await db.execute('INSERT INTO skill_chamadas(tenant_id,conversation_id,skill,dados,resultado) VALUES ($1,$2,$3,$4::jsonb,$5)',
+                         tenant,conversa,skill,json.dumps({k:v for k,v in dados.items() if v is not None},ensure_ascii=False),str(resultado)[:60])
+    except Exception:
+        import logging;logging.getLogger('gateway.pedidos').warning('Chamada de Skill não registrada')
+
+
+async def nome_do_item(db,tenant,item_id=None,linha_id=None):
+    """Nome do item do catálogo (pelo id do item ou pela linha do carrinho), para o resumo da chamada."""
+    if linha_id is not None:
+        return await db.fetchval('SELECT i.nome FROM carrinho_itens l JOIN catalogo_itens i ON i.tenant_id=l.tenant_id AND i.id=l.item_id WHERE l.tenant_id=$1 AND l.id=$2',tenant,linha_id)
+    return await db.fetchval('SELECT nome FROM catalogo_itens WHERE tenant_id=$1 AND id=$2',tenant,item_id)
+
+
+async def acoes_do_turno(db,tenant,conversa,inicio,fim):
+    """Chamadas de Skill feitas na conversa dentro da janela de um turno (agente_inicio..agente_fim)."""
+    rows=await db.fetch("""SELECT skill,dados,resultado FROM skill_chamadas WHERE tenant_id=$1 AND conversation_id=$2
+        AND criado_em>=$3 AND criado_em<=$4 ORDER BY id LIMIT 30""",tenant,conversa,inicio,fim)
+    saida=[]
+    for r in rows:
+        d=json.loads(r['dados']) if isinstance(r['dados'],str) else (r['dados'] or {})
+        saida.append({'skill':r['skill'],'item':d.get('item'),'quantidade':d.get('quantidade'),'resultado':r['resultado'],
+                      **({'detalhe':d['detalhe']} if d.get('detalhe') else {})})
+    return saida
+
+
 async def adicionar(conn,tenant,conversa,item_id,quantidade,observacao):
     await travar(conn,tenant,conversa)
     item=await conn.fetchrow('SELECT * FROM catalogo_itens WHERE tenant_id=$1 AND id=$2',tenant,item_id)
