@@ -11,6 +11,10 @@ import httpx
 import seguranca
 from nucleo.banco import Repositorio
 from nucleo.contatos import validar_nome,nome_do_cliente
+from nucleo.atendimento import PERFIL_PADRAO
+
+
+def perfil_padrao(): return {k:(list(v) if isinstance(v,list) else v) for k,v in PERFIL_PADRAO.items()}
 from nucleo.credenciais import CredencialInvalida
 
 
@@ -114,6 +118,8 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
         'contexto_modulos':await contextos(repo,tenant_id,conversa_id,cfg),
         'conversation_id':conversa_id,'request_id':rid,'session_id':rid,'message':message,
         'instrucoes_agente':cfg['instrucoes_agente'],
+        # CFG1-a: preferências de estilo da empresa (versão publicada), sempre com todos os campos. São dados, não instruções de sistema.
+        'perfil_versao':cfg.get('perfil_versao') or 'e0','perfil_atendimento':cfg.get('perfil_atendimento') or perfil_padrao(),
         'historico':[{'role':'user' if h['direcao']=='entrada' else 'assistant',
                      'content':h['conteudo'],'enviada_em':iso(h['enviada_em'])}
                     for h in historico],

@@ -490,3 +490,137 @@ Testes:
 **Para o CFG1-a:** criar o segmento `delivery_restaurante` com padrões razoáveis e migrar o By Koji para ele **sem mudar o comportamento atual**. O perfil do By Koji deve reproduzir o que o prompt faz hoje: tom equilibrado, emojis moderados, respostas curtas, sugestões leves.
 
 Ponto que a implementação precisa resolver (decisão 4 × seção 6): hoje o identificador do modelo do By Koji é `atendente_delivery`. Criar `delivery_restaurante` como segmento novo e apontar o agente para ele, mantendo os mesmos módulos e comportamentos, e conferir antes e depois que a configuração efetiva não mudou em nenhum campo.
+
+---
+
+## 13. CFG1-a — implementado (11/10/2026): contrato final
+
+Migração 033 (aditiva). Código em `nucleo/atendimento.py` (esquema, validação, herança) e `admin/atendimento.py` (rotas). Testes em `tests/test_cfg1a.py`.
+**Nesta implantação nada do comportamento do agente depende do perfil:** ele vai no pacote, e o Skyone atual o ignora até o prompt ser trocado.
+
+### 13.1 Rotas para o painel
+
+`{escopo}` = `/admin/v1/tenants/{t}` (empresa) ou `/admin/v1/tenants/{t}/agentes/{a}` (agente). Todas com a chave do painel.
+Escrita exige `X-Actor` **e** `X-Role: admin` ou `plataforma`; `membro`, papel desconhecido ou sem `X-Role` → **403** nas rotas de escrita, e lê normalmente as demais.
+
+| Rota | Uso | Quem |
+|---|---|---|
+| `GET {escopo}/atendimento` | Tudo para montar a tela | todos |
+| `PUT {escopo}/atendimento/rascunho` | Salvar rascunho | admin, plataforma |
+| `DELETE {escopo}/atendimento/rascunho` | Descartar rascunho | admin, plataforma |
+| `POST {escopo}/atendimento/publicar` | Publicar | admin, plataforma |
+| `GET {escopo}/atendimento/versoes` | Histórico (`limite` 1–100, `cursor`) | todos |
+| `GET {escopo}/atendimento/versoes/{n}` | Uma versão, com antes e depois | todos |
+| `POST {escopo}/atendimento/versoes/{n}/restaurar` | Restaurar | admin, plataforma |
+| `POST {escopo}/atendimento/previa` | Perfil como irá no pacote | todos |
+| `GET /admin/v1/segmentos`, `GET /admin/v1/segmentos/{id}` | Segmentos e seus padrões | todos |
+
+**`GET {escopo}/atendimento`**
+
+```json
+{
+  "escopo": "empresa", "segmento": "delivery_restaurante",
+  "versao_publicada": 2, "publicado_em": "2026-10-11T15:00:00Z", "publicado_por": "ana", "perfil_versao": "e2",
+  "publicado": {"perfil": {"tom": "descontraido", "nome_atendente": "Koji"}, "comportamentos": {"debounce_s": 5}},
+  "personalizado": {"perfil": ["nome_atendente", "tom"], "comportamentos": ["debounce_s"]},
+  "efetivo": {
+    "perfil": {"nome_atendente": "Koji", "apresentacao_inicial": true, "tom": "descontraido", "…": "…"},
+    "comportamentos": {"debounce_s": 5, "botoes_interativos": "on", "send_mode": "live", "…": "…"},
+    "origem": {"perfil": {"tom": "empresa", "emojis": "segmento", "regras_da_casa": "plataforma"},
+               "comportamentos": {"debounce_s": "empresa", "botoes_interativos": "segmento"}}
+  },
+  "rascunho": {
+    "baseado_em": 2, "desatualizado": false, "atualizado_em": "…", "atualizado_por": "ana",
+    "perfil": {"emojis": "nenhum"}, "comportamentos": {},
+    "efetivo": {"perfil": {"…": "…"}, "comportamentos": {"…": "…"}, "origem": {"…": "…"}},
+    "alteracoes": [{"campo": "perfil.emojis", "antes": null, "depois": "nenhum"}],
+    "bloqueios": [], "avisos": []
+  },
+  "esquema": {
+    "perfil": {"tom": {"tipo": "escolha", "opcoes": ["formal", "equilibrado", "descontraido"], "padrao": "equilibrado", "editavel": true},
+               "regras_da_casa": {"tipo": "texto", "max": 1500, "padrao": "", "linhas": 20, "editavel": true}},
+    "comportamentos": {"debounce_s": {"grupo": "ritmo", "tipo": "inteiro", "padrao": 4, "editavel": true, "disponivel": true, "min": 1, "max": 15},
+                       "reacoes": {"grupo": "reacoes", "tipo": "escolha", "padrao": "off", "editavel": true, "disponivel": false, "opcoes": ["on", "off"]},
+                       "send_mode": {"grupo": "operacao", "tipo": "so_plataforma", "padrao": "dry", "editavel": false, "disponivel": true}}
+  },
+  "pode_editar": true
+}
+```
+
+- `publicado` e `rascunho.perfil/comportamentos`: **só o que este escopo define**. `efetivo`: o resultado depois da herança.
+- `origem` por campo: `plataforma`, `segmento`, `empresa` ou `agente`. `personalizado` lista os campos definidos neste escopo; os demais vêm de cima (é o "segmento ou personalizado" da decisão 4).
+- **Voltar ao padrão do segmento:** enviar o campo com `null` no rascunho e publicar.
+- `rascunho: null` quando não há rascunho. `rascunho.efetivo` mostra como ficaria se publicado; `rascunho.bloqueios` e `rascunho.avisos` antecipam o que a publicação vai exigir.
+- `esquema`: o painel desenha a tela a partir dele. `disponivel: false` = "em breve" (reações, fora do horário, transbordo). Grupo `operacao` (`send_mode`, piloto, simultaneidade…): só leitura aqui; a plataforma muda pelas rotas de sempre, com efeito imediato e fora das versões.
+- Grupos de comportamento: `ritmo`, `mensagens`, `atendimento_humano`, `pedidos`, `reacoes`, `fora_do_horario`, `transbordo`, `operacao`.
+- `pode_editar`: `true` para `admin` e `plataforma`.
+
+**`PUT …/rascunho`** — `{"baseado_em": 2, "perfil": {…}, "comportamentos": {…}}`. Só os campos enviados mudam (juntam-se ao rascunho que já existe); `null` = voltar a herdar. Resposta 200: o mesmo do `GET`.
+400 → `{"erro": {"codigo": "VALIDATION_ERROR", "detalhes": {"campos": [{"campo": "perfil.tom", "motivo": "opcao"}, {"campo": "comportamentos.send_mode", "motivo": "so_plataforma"}]}}}`, com **todos** os campos errados.
+Motivos: `opcao`, `tipo`, `tamanho`, `linhas`, `caractere`, `contato_ou_link`, `item`, `quantidade`, `repetido`, `valor`, `campo_desconhecido`, `so_plataforma`.
+
+**`POST …/publicar`** — `{"baseado_em": 2, "nota": "tom mais informal", "confirmar_avisos": false}` → 200 com o `GET` atualizado (versão nova, rascunho apagado).
+
+| Resposta | `detalhes.motivo` | Quando |
+|---|---|---|
+| 409 | `sem_rascunho` | Não há rascunho |
+| 409 | `versao_desatualizada` | Outra versão foi publicada depois deste rascunho (vem `versao_publicada`) |
+| 409 | `sem_alteracoes` | O rascunho não muda nada |
+| 409 | `confirmacao_necessaria` | Texto duvidoso no que está mudando; vem `avisos: [{campo, motivo, trecho}]`. Reenviar com `confirmar_avisos: true` |
+| 400 | `texto_bloqueado` | Texto com instrução de sistema; vem `bloqueios: [{campo, motivo, trecho}]`. Não há como confirmar |
+| 400 | — | Campo inválido (`campos`, como no rascunho) ou regra de sempre (ex.: teto de espera menor que a espera) |
+
+Bloqueios (`motivo`): `ignorar_instrucoes`, `esquecer_instrucoes`, `formato_de_resposta`, `trocar_de_papel`, `prompt_do_sistema`, `dados_sensiveis`.
+Avisos: `parece_instrucao`, `parece_papel`, `dado_sensivel`, `link`. A confirmação só é pedida para trechos de campos alterados nesta publicação.
+
+**`GET …/versoes`** → `{"itens": [{"versao": 2, "publicado_em", "publicado_por", "nota", "origem": "publicacao" | "restauracao" | "alteracao_direta", "restaurada_de": null, "campos_alterados": ["perfil.tom"]}], "proximo_cursor": null}` (mais recente primeiro).
+
+**`GET …/versoes/{n}`** → o resumo acima mais `perfil`, `comportamentos` (o que o escopo definia naquela versão) e `alteracoes: [{"campo", "antes", "depois"}]`.
+
+**`POST …/versoes/{n}/restaurar`** — corpo opcional `{"nota"}` → 200 com o `GET` atualizado. Cria uma versão **nova** (`origem: restauracao`, `restaurada_de: n`); as antigas não mudam. 409 `sem_alteracoes` se já é o que está em vigor; 400 se a versão antiga não passa nas regras de hoje.
+
+**`POST …/previa`** — corpo opcional `{"fonte": "rascunho" | "publicado"}` (padrão `rascunho`; sem rascunho, cai no publicado) → `{"fonte", "perfil_versao": "rascunho" | "e2", "perfil_atendimento": {…}}`, igual ao que o pacote leva.
+
+**`GET /segmentos`** → `{"itens": [{"id": "delivery_restaurante", "nome", "versao", "modulos", "perfil_padrao": {…13 campos…}, "comportamento_padrao": {…}}]}`.
+Empresa: campo novo `segmento` em `POST`/`PATCH /tenants` (id de um segmento existente; senão 400).
+
+### 13.2 Formato no pacote
+
+Dois campos novos na raiz, **sempre presentes**:
+
+```json
+"perfil_versao": "e0",
+"perfil_atendimento": {
+  "nome_atendente": null,
+  "apresentacao_inicial": true,
+  "tom": "equilibrado",
+  "emojis": "moderado",
+  "tamanho_respostas": "curtas",
+  "tratamento": "voce",
+  "pedir_nome": false,
+  "sugestoes": "leve",
+  "regras_da_casa": "",
+  "assuntos_proibidos": [],
+  "motivos_transferencia": ["pediu_humano", "reclamacao", "pedido_para_confirmar", "pagamento", "restricao_alimentar", "evento_ou_encomenda", "fora_do_escopo", "assunto_proibido"],
+  "mensagem_boas_vindas": null,
+  "mensagem_despedida": null
+}
+```
+
+- Os 13 campos vêm sempre, nesta ordem, já resolvidos pela herança. Nunca falta campo.
+- `nome_atendente`, `mensagem_boas_vindas`, `mensagem_despedida`: texto ou `null`. `regras_da_casa`: texto, `""` quando vazio. `assuntos_proibidos`: `[{"assunto", "acao": "recusar" | "transferir"}]`.
+- `motivos_transferencia` sempre contém `pediu_humano` e `reclamacao`.
+- `perfil_versao`: `"e7"` = versão 7 da empresa; `"e7.a2"` quando o agente tem versão própria; `"e0"` = nada publicado (padrões). Fica gravado em cada turno.
+- `regras_da_casa` vai só dentro de `perfil_atendimento`; nunca é juntada a `instrucoes_agente` nem a outro campo.
+- `instrucoes_agente` continua na raiz, só da plataforma.
+- O bloco `recursos` previsto na seção 9.1 **não** entrou agora; fica para o bloco das reações (R1), quando passa a fazer diferença.
+
+### 13.3 O que a implementação fixou
+
+- **Onde fica o publicado:** os comportamentos, nas mesmas colunas de sempre (o motor não mudou); o perfil, numa coluna própria de cada escopo. Publicar escreve nelas; rascunho fica à parte.
+- **Versão = escopo inteiro:** cada versão guarda tudo o que o escopo define (perfil e comportamentos) e a lista do que mudou. A numeração é separada para a empresa e para cada agente.
+- **Rotas antigas** (`PUT /config`, `PATCH agente`) num comportamento versionado geram versão automática (`origem: alteracao_direta`, nota "Alteração direta"). Em campo de operação, não geram.
+- **Auditoria:** `atendimento.publicado` / `atendimento.restaurado`, com quem fez e a versão (`empresa:v3`, `<agente>:v2`). O antes e o depois ficam na própria versão (`alteracoes`), não no registro de auditoria, que segue sem conteúdo.
+- **Segmento do agente × da empresa:** o agente herda do modelo em que está (com a versão fixada, como já era); a empresa, do `segmento` dela (versão mais recente). Mudança no padrão de um segmento chega aos agentes quando a plataforma publica a nova versão do modelo e move o agente para ela.
+- **Novos comportamentos guardados e versionados, ainda sem efeito:** `reacoes`, `reacoes_emojis`, `reacoes_max_dia`, `fora_do_horario`, `fora_do_horario_mensagem`, `fora_do_horario_aceita_agendado`, `transbordo_alerta`, `transbordo_horario_equipe`, `transbordo_fora_do_horario`. O alerta de transbordo de hoje (`whatsapp_alerta_transbordo`) continua funcionando como antes.
+- **Segmento `delivery_restaurante`:** módulos e comportamentos do `atendente_delivery`, mais botões/listas ligados, refazer turno ligado, espera de incompleta 7 s, espera curta 2,5 s e fora do horário `so_avisar`. Perfil: equilibrado, emojis moderados, respostas curtas, você, apresentação ligada, sem pedir nome, sugestões leves.

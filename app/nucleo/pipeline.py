@@ -586,10 +586,10 @@ return 1
         origem=itens[0]['origem'];ids=[i['id'] for i in itens];rid=uuid.uuid4()
         descartado=await self._refeito_de(tenant,conversa,ids) if origem=='cliente' else None
         turno=await self.db.fetchrow('''INSERT INTO turnos(tenant_id,conversation_id,agente_id,canal_id,request_id,n_mensagens,
-            primeira_msg_em,ultima_msg_em,agente_inicio,modo_agente,status,origem,etapa,mensagem_ids,refeito_de)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now(),$9,'em_andamento',$10,'processando',$11,$12) RETURNING *''',
+            primeira_msg_em,ultima_msg_em,agente_inicio,modo_agente,status,origem,etapa,mensagem_ids,refeito_de,perfil_versao)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now(),$9,'em_andamento',$10,'processando',$11,$12,$13) RETURNING *''',
             tenant,conversa,cfg['id'],conv['canal_id'],rid,len(itens),itens[0]['criado_em'],itens[-1]['criado_em'],
-            cfg['agente_mode'],origem,ids,descartado['id'] if descartado else None)
+            cfg['agente_mode'],origem,ids,descartado['id'] if descartado else None,cfg.get('perfil_versao'))
         resultado=None;erro=None;status='ok';aviso=False;presenca=None
         acoes=None
         if origem=='cliente': await self._expirar_carrinho(tenant,conversa,cfg)

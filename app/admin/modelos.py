@@ -18,6 +18,8 @@ class Tenant(Estrito):
     status: Literal['ativo','suspenso'] | None = None
     # Fase 4: número que recebe o alerta quando uma conversa fica aguardando atendente (nulo = desligado).
     whatsapp_alerta_transbordo: str | None = Field(None,pattern=r'^\d{10,15}$')
+    # CFG1-a: segmento da empresa (id de um modelo de agente); dele vêm os padrões de perfil e comportamento.
+    segmento: str | None = Field(None,pattern=r'^[a-z0-9_]{3,40}$')
 
 
 class Comportamento(Estrito):
@@ -46,6 +48,16 @@ class Comportamento(Estrito):
     aviso_demora_janela_s: int | None = Field(None,ge=0,le=3600)
     carrinho_expira_h: int | None = Field(None,ge=1,le=720)
     acoes_recentes_min: int | None = Field(None,ge=0,le=1440)
+    # CFG1-a: no contrato desde já; executados nos blocos R1 e G3.
+    reacoes: Literal['on','off'] | None = None
+    reacoes_emojis: list[Literal['👍','❤️','🙏','😊','😂','👏','🎉','✅']] | None = Field(None,min_length=1,max_length=8)
+    reacoes_max_dia: int | None = Field(None,ge=0,le=10)
+    fora_do_horario: Literal['atender','so_avisar'] | None = None
+    fora_do_horario_mensagem: str | None = Field(None,min_length=1,max_length=500)
+    fora_do_horario_aceita_agendado: bool | None = None
+    transbordo_alerta: str | None = Field(None,pattern=r'^\d{10,15}$')
+    transbordo_horario_equipe: dict | None = None
+    transbordo_fora_do_horario: str | None = Field(None,min_length=1,max_length=500)
     skyone_dominios_permitidos: list[str] | None = None
 
 

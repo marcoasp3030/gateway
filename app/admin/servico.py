@@ -76,6 +76,14 @@ async def auditar(conn, tenant, actor, acao, alvo):
         tenant,actor,acao,alvo,'{}')
 
 
+async def versao_por_alteracao_direta(conn,tenant_id,agente_id,actor,antes,depois):
+    """Mudança feita pelas rotas antigas (PUT /config, PATCH agente) num comportamento versionado
+    também entra no histórico de versões: nada fica fora dele (CFG1-a)."""
+    from admin.atendimento import registrar_versao,definicao_do_escopo,COMPORTAMENTOS
+    alteracoes=[{'campo':'comportamentos.'+c,'antes':antes.get(c),'depois':depois.get(c)} for c in COMPORTAMENTOS if antes.get(c)!=depois.get(c)]
+    if alteracoes: await registrar_versao(conn,tenant_id,agente_id,definicao_do_escopo(depois),alteracoes,'alteracao_direta',actor,'Alteração direta')
+
+
 class Administracao:
     def __init__(self, db, cofre, configuracoes, infra):
         self.db,self.cofre,self.configuracoes,self.infra = db,cofre,configuracoes,infra
@@ -94,6 +102,8 @@ class Administracao:
             try: ZoneInfo(dados['timezone'])
             except (ValueError,KeyError): raise HTTPException(400,'Timezone inválido') from None
         async with self.db.acquire() as conn, conn.transaction():
+            if dados.get('segmento') and not await conn.fetchval('SELECT EXISTS(SELECT 1 FROM modelos_agente WHERE id=$1 AND (tenant_id IS NULL OR tenant_id=$2))',dados['segmento'],tenant_id):
+                raise HTTPException(400,{"campo":"segmento"})
             if novo:
                 cols = ['id']+list(dados)
                 result = await conn.fetchrow(f'INSERT INTO tenants({",".join(cols)}) VALUES '
@@ -135,7 +145,9 @@ class Administracao:
             repo = Repositorio(conn)
             tenant = await repo.tenant(tenant_id)
             if not tenant: raise HTTPException(404,'TENANT_NOT_FOUND')
+            antes = await repo.obter(tenant_id,'tenant_config',tenant_id) or {}
             result = await repo.alterar(tenant_id,'tenant_config',tenant_id,dados)
+            await versao_por_alteracao_direta(conn,tenant_id,None,actor,antes,result)
             # Toda configuração afetada é validada antes de confirmar a escrita.
             for agente in await conn.fetch('SELECT * FROM agentes WHERE tenant_id=$1',tenant_id):
                 await self.checar_agente(repo,tenant,dict(agente))
@@ -203,7 +215,9 @@ class Administracao:
                     dados['hash'] = hash_chave(unico['chave'],self.infra.pepper)
             result = (await repo.inserir(tenant_id,tabela,identidade,dados) if novo
                       else await repo.alterar(tenant_id,tabela,identidade,dados))
-            if entidade=='agentes': await self.checar_agente(repo,tenant,result)
+            if entidade=='agentes':
+                await self.checar_agente(repo,tenant,result)
+                if not novo: await versao_por_alteracao_direta(conn,tenant_id,identidade,actor,anterior,result)
             await auditar(conn,tenant_id,actor,entidade+('.criado' if novo else '.alterado'),identidade)
         self.configuracoes.invalidar(tenant_id)
         return {**limpar(result),**unico}

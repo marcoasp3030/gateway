@@ -11,6 +11,9 @@ COMPORTAMENTO = {
     'contatos_permitidos','encerrar_vazia_min','max_lotes_simultaneos','max_concorrencia',
     'skyone_dominios_permitidos','debounce_curto_s','debounce_palavras','max_msgs_por_minuto_contato',
     'botoes_interativos','debounce_incompleta_s','refazer_turno','aviso_demora_janela_s','carrinho_expira_h','acoes_recentes_min',
+    # CFG1-a: já no contrato; a execução vem nos blocos R1 (reações) e G3 (fora do horário e transbordo).
+    'reacoes','reacoes_emojis','reacoes_max_dia','fora_do_horario','fora_do_horario_mensagem','fora_do_horario_aceita_agendado',
+    'transbordo_alerta','transbordo_horario_equipe','transbordo_fora_do_horario',
 }
 # debounce_curto_s vale quando a mensagem parece completa (pontuação final ou mais de
 # debounce_palavras palavras); mensagem curta/picada espera debounce_s.
@@ -28,7 +31,12 @@ PADROES = dict(debounce_s=4,debounce_curto_s=1.5,debounce_palavras=6,max_wait_s=
     # Carrinho sem alteração há mais de carrinho_expira_h horas é arquivado na próxima mensagem do cliente.
     aviso_demora_janela_s=120,carrinho_expira_h=6,
     # UX3.1. acoes_recentes do pacote: chamadas de Skill da conversa nos últimos N minutos (0 = lista vazia).
-    acoes_recentes_min=15)
+    acoes_recentes_min=15,
+    # CFG1-a. Guardados e versionados; ainda sem efeito (R1 e G3).
+    reacoes='off',reacoes_emojis=['👍','❤️','🙏','😊'],reacoes_max_dia=2,
+    fora_do_horario='atender',fora_do_horario_mensagem='Estamos fechados agora. Abrimos {abre}.',fora_do_horario_aceita_agendado=False,
+    transbordo_alerta=None,transbordo_horario_equipe=None,
+    transbordo_fora_do_horario='Nossa equipe atende {horario}. Deixei seu recado e voltamos assim que possível.')
 
 
 class Configuracoes:
@@ -66,6 +74,27 @@ class Configuracoes:
             'timeout_s','instrucoes_agente','modo_resposta')})
         # Não cachear credenciais nem ciphertexts.
         cfg['origem_config'] = origem
+        # Perfil de atendimento (CFG1-a): mesma herança, sempre a versão publicada de cada escopo.
+        from nucleo.atendimento import resolver_perfil,bloco_do_pacote,versao_texto
+        perfil,origem_perfil = resolver_perfil(('segmento',modelo.get('perfil_padrao')),('empresa',tenant.get('perfil')),('agente',agente.get('perfil')))
+        cfg['perfil_atendimento'] = bloco_do_pacote(perfil); cfg['origem_perfil'] = origem_perfil
+        cfg['perfil_versao'] = versao_texto(tenant.get('perfil_versao'),agente.get('perfil_versao'))
         if geracao == self._geracao:
             self._cache[key] = (self.relogio()+self.ttl,copy.deepcopy(cfg))
         return cfg
+
+    async def da_empresa(self, tenant_id):
+        """Configuração no nível da empresa (sem agente): plataforma → segmento da empresa → empresa.
+        Devolve (valores, origem, perfil, origem do perfil, versão). Sem cache: só o painel usa."""
+        from nucleo.atendimento import resolver_perfil,bloco_do_pacote,versao_texto
+        empresa = await self.repo.tenant(tenant_id)
+        if empresa is None: raise LookupError('Empresa não encontrada')
+        tenant = await self.repo.obter(tenant_id,'tenant_config',tenant_id) or {}
+        modelo = await self.repo.segmento(tenant_id,empresa.get('segmento')) if empresa.get('segmento') else None
+        cfg, origem = copy.deepcopy(PADROES), {k:'plataforma' for k in PADROES}
+        for nome,dados in [('modelo',(modelo or {}).get('comportamento_padrao') or {}),('tenant',tenant)]:
+            for campo in COMPORTAMENTO:
+                if dados.get(campo) is not None:
+                    cfg[campo] = copy.deepcopy(dados[campo]); origem[campo] = nome
+        perfil,origem_perfil = resolver_perfil(('segmento',(modelo or {}).get('perfil_padrao')),('empresa',tenant.get('perfil')))
+        return cfg,origem,bloco_do_pacote(perfil),origem_perfil,versao_texto(tenant.get('perfil_versao'))

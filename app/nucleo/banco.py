@@ -7,7 +7,8 @@ TABELAS = {
     'mensagens': 'id', 'turnos': 'id', 'contatos': 'id',
     'audit_log': 'id', 'modulos_tenant': 'modulo',
 }
-JSON = {'credenciais_enc', 'triagem', 'dados', 'config', 'resposta', 'perfil', 'evento', 'meta', 'payload', 'uso', 'horarios', 'followups_padrao'}
+JSON = {'credenciais_enc', 'triagem', 'dados', 'config', 'resposta', 'perfil', 'evento', 'meta', 'payload', 'uso', 'horarios', 'followups_padrao',
+        'perfil_padrao', 'transbordo_horario_equipe'}
 # Colunas de escrita são declaradas pelo serviço, nunca por SQL enviado pelo cliente.
 COLUNAS = {
     'nome','modelo_id','modelo_versao','status','provedor','skyone_estrategia','skyone_webhook_url',
@@ -15,7 +16,9 @@ COLUNAS = {
     'modo_resposta','debounce_s','debounce_curto_s','debounce_palavras','max_wait_s','media_wait_s','pause_minutes','history_turns',
     'slow_notice_s','aviso_demora','fallback','alerta_telefone','send_mode','agente_mode',
     'modo_piloto','contatos_permitidos','encerrar_vazia_min','max_lotes_simultaneos',
-    'max_concorrencia','max_msgs_por_minuto_contato','botoes_interativos','debounce_incompleta_s','refazer_turno','aviso_demora_janela_s','carrinho_expira_h','acoes_recentes_min','skyone_dominios_permitidos','tipo','agente_id','triagem','webhook_secret',
+    'max_concorrencia','max_msgs_por_minuto_contato','botoes_interativos','debounce_incompleta_s','refazer_turno','aviso_demora_janela_s','carrinho_expira_h','acoes_recentes_min',
+    'reacoes','reacoes_emojis','reacoes_max_dia','fora_do_horario','fora_do_horario_mensagem','fora_do_horario_aceita_agendado',
+    'transbordo_alerta','transbordo_horario_equipe','transbordo_fora_do_horario','skyone_dominios_permitidos','tipo','agente_id','triagem','webhook_secret',
     'credenciais_enc','publico','ativo','status_conexao','ultimo_evento_em','hash','escopos',
     'expira_em','ips_permitidos','revogada_em','ultimo_uso_em','actor','acao','alvo','dados',
     'config','modulo',
@@ -88,6 +91,12 @@ class Repositorio:
         return registro(await self.db.fetchrow(
             'SELECT * FROM modelos_agente WHERE id=$2 AND versao=$3 '
             'AND (tenant_id=$1 OR tenant_id IS NULL)',escopo(tenant_id),modelo_id,versao))
+
+    async def segmento(self, tenant_id, modelo_id):
+        """Versão mais recente do modelo (segmento) visível para a empresa."""
+        return registro(await self.db.fetchrow(
+            'SELECT * FROM modelos_agente WHERE id=$2 AND (tenant_id=$1 OR tenant_id IS NULL) ORDER BY versao DESC LIMIT 1',
+            escopo(tenant_id),modelo_id))
 
     async def historico(self, tenant_id, conversa_id, antes_id, limite):
         if not 0 <= limite <= 100:

@@ -217,6 +217,8 @@ Estado persistente por agente: três falhas consecutivas em cinco minutos abrem 
 - **`X-Role`** (`plataforma | admin | membro`): enviado pelo painel a partir da sessão. Ausente ou desconhecido = `membro` (falha fechada). Hoje só restringe a alteração dos textos e do liga/desliga dos avisos.
 - Webhooks de saída novos: `pedido.em_preparo`, `pedido.pronto_retirada`, `pedido.saiu_entrega`, `pedido.concluido`. Auditoria: `pedido.<status>` com o `X-Actor`; `pedido.aviso_enviado` / `pedido.aviso_simulado`.
 
+**Configuração de atendimento (CFG1-a, `docs/ESPEC_CFG1.md` seção 13 — contrato completo):** perfil enviado ao agente (`perfil_atendimento`) e comportamentos que a empresa ajusta, por empresa (`/tenants/{t}/atendimento`) e por agente (`/tenants/{t}/agentes/{a}/atendimento`), com rascunho → publicar, versões, restaurar e prévia: `GET`, `PUT …/rascunho`, `DELETE …/rascunho`, `POST …/publicar`, `GET …/versoes[/{n}]`, `POST …/versoes/{n}/restaurar`, `POST …/previa`; `GET /segmentos[/{id}]`. Escrita só com `X-Role: admin` ou `plataforma`. Campos de operação (`send_mode`, `agente_mode`, piloto, simultaneidade, limite por contato, domínios do Skyone) ficam fora das versões e continuam em `PUT /config` / `PATCH agente`, com efeito imediato. Mudança por essas rotas antigas em comportamento versionado gera versão automática. Empresa ganhou `segmento`.
+
 **Gestão G1 — horários da unidade** (`docs/ESPEC_GESTAO.md`). Todas sob `/admin/v1/tenants/{t}/unidades`, rede interna, chave do painel e `X-Actor`.
 
 | Rota | Corpo | Resposta |
