@@ -1087,3 +1087,15 @@ PY
 - **A conferir no primeiro uso real:** clique em lista vindo do aparelho do cliente.
 - Cadastro (não alterado): `einstein` segue com sábado `19:00–17:00`; na lista aparece "Aberta até amanhã 17h".
 - Próximos: PED1-c (aguarda liberação) → C1 → R1 → B4 → carrossel → G4.
+
+## PED1-c — conversas e contatos no painel, nome_cliente do agente — 2026-10-11 03:00 UTC
+
+- Status: **implantado**. Código `6f89149`, imagem `gateway:6f89149`, schema **32**. Volta: `gateway:ca22728` (roda sobre o schema 32: a 032 só acrescenta colunas e índice).
+- Migração 032: `contatos.nome_cadastro/nome_informado/nome_perfil` (+ quem/quando), `conversas.simulada`, índice `ix_conversas_recentes`. Preenchida: 5 contatos com `nome_perfil` (vindos do `nome` antigo); 104 conversas marcadas como simuladas pela auditoria `agente.simulado` (todas as de canal API).
+- `nucleo/contatos.py`: prioridade **cadastro > informado > perfil > telefone**, validação do nome (2–60, duas letras, sem telefone, sem emoji), E.164 e formatado, `canal_info`. Perfil (`senderName`) atualizado a cada mensagem do cliente.
+- `GET conversas`: `nome_exibicao`, `nome_origem`, `nomes`, `telefone_e164/formatado`, `canal_info`, `unidade_preferida(_nome)` (da conversa ou do último carrinho), `estado`, `ultima`, `pedido_aberto`; filtros `estado=` e `ordem=recentes` (cursor próprio); `busca` nos três nomes. Contatos: campos novos e `PATCH` do nome de cadastro (qualquer papel, auditado). Anonimização limpa os nomes novos e `por`/`motivo` da linha do tempo dos pedidos.
+- Skyone: retorno aceita `nome_cliente` (inválido é ignorado sem erro; nunca sobrescreve cadastro); pacote `cliente` ganha `nome_origem` e o nome nunca é telefone. Pedido, `{nome_cliente}` do aviso e alerta de transbordo usam o mesmo nome. Contrato na seção 14 de `docs/ESPEC_PED1.md`.
+- Testes: **230 passed** (5 novos em `tests/test_ped1c.py`; `test_fase2_contrato.py` ajustado para `nome_origem`), só bancos `_test`. Backup `/home/twadmin/backups/gateway/pre-ped1c-20261011T025809Z/gateway.dump` (30 tabelas, 600). Migração aplicada com a imagem antiga no ar (health 200).
+- Conferência: 4 containers `healthy`, fila zerada, admin por fora 404, `/api/v1` sem chave 401, envio real em 1 de 5 agentes, piloto com os dois contatos, zero erros nos logs. Em produção: estados 7 encerradas / 3 aguardando / 0 atendente / 93 bot; contatos com origem `perfil`, `telefone` ou `identificador` (ninguém tem cadastro ou informado ainda).
+- Clique em lista do final 1513: **nenhum registro** no `webhook_raw` da bykoji desde a implantação do B3 (02:03 UTC) até 03:00 UTC; segue a conferir.
+- Próximos: painel consome a seção 14; Skyone passa a devolver `nome_cliente`. Depois C1 → R1 → B4 → carrossel → G4.
