@@ -1047,3 +1047,8 @@ PY
 - Testes: **213 passed** (3 novos em `tests/test_ux31.py`; `tests/test_ux2.py` ajustado ao limite de dois), só bancos `_test`. Backup `/home/twadmin/backups/gateway/pre-ux31-20261011T005441Z/gateway.dump` (28 tabelas, 600). Migração 029 aplicada com a imagem antiga no ar.
 - Conferência: 4 containers `healthy` na imagem nova, fila zerada, admin por fora 404, `/api/v1` sem chave 401, envio real em 1 de 5 agentes, zero erros nos logs.
 - B3: a MESMA lista de teste reenviada ao contato final 1513 (celular do Marco) às 00:55:28 UTC → HTTP 200, `ListMessage`. **Pendente: o clique**, para mostrar o payload.
+
+## PED1 — especificação do ciclo de status do pedido — 2026-10-11
+
+- `docs/ESPEC_PED1.md` escrita (levantamento + proposta + 7 decisões na seção 10). **Nada implementado; aguardando aprovação do Marco.** Entra antes do B3.
+- Achado do levantamento: o aviso ao cliente de pedido confirmado/recusado não sai quando o bot está pausado por atendente (fica `descartado`); o PED1 corrige. Nome do contato só é gravado na primeira mensagem (5 de 103 conversas do By Koji têm nome).
