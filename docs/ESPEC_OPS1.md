@@ -243,6 +243,8 @@ Nenhum teste escreve no banco de produção.
 | `GET /health/ops` | gateway | Situação da operação |
 | `ops_execucoes` (migração 035) | banco | Histórico de backups e testes de restauração |
 
+- **Horários no cron:** a VPS está em UTC e o cron dela não aceita fuso por tarefa; as tarefas estão gravadas como 07:30 UTC (04:30 em São Paulo) e domingo 08:00 UTC (05:00).
+- **`/health/ops` por fora:** o gateway responde, mas o proxy do painel (Caddy) só deixa passar `/gateway/health`, `/gateway/webhooks/*` e `/gateway/api/*`; `/gateway/health/ops` devolve 404 até a rota ser liberada lá. É uma linha na configuração do painel: trocar `path /gateway/health /gateway/webhooks/* /gateway/api/*` por `path /gateway/health /gateway/health/ops /gateway/webhooks/* /gateway/api/*`. O gateway não mexe no proxy do painel.
 - **rclone:** versão 1.75.2, em `/home/twadmin/.local/bin/rclone`, baixado de `downloads.rclone.org` com a soma oficial conferida. Foi instalado na pasta do usuário porque a conta não tem `sudo` sem senha; a versão do `apt` do Ubuntu 22.04 (1.53.3) é de 2020.
 - As credenciais do destino vão ao `rclone` só por variáveis de ambiente no momento do envio: não há arquivo de configuração do `rclone` com segredo, e nada aparece na linha de comando.
 - O token do Telegram vai ao `curl` pela entrada padrão, não pela linha de comando; nenhum script imprime valor de variável.

@@ -1159,3 +1159,16 @@ PY
 - Decisões do Marco para o SOL1 na seção 8 de `docs/ESPEC_SOL1.md`; item extra (toques contraditórios no mesmo lote) na seção 9. Nada implementado.
 - `docs/ESPEC_OPS1.md` escrita (backup diário cifrado fora da VPS, teste de restauração semanal, alertas pelo Telegram, disponibilidade, teste de carga do Skyone só especificado), com 11 decisões. **Nada implementado; o código só começa quando o Marco confirmar que a outra sessão foi encerrada e aprovar a especificação.**
 - Ordem do Marco: G4-a (feito) → OPS1 → SOL1 → R1 → G4-b → G5/G6 → G3 → B4 → C1 → CFG1-b → carrossel.
+
+## OPS1 — backup, teste de restauração, alertas e /health/ops — 2026-10-11 19:31 UTC
+
+- Status: **implantado** por `scripts/implantar.sh ops1`. Código `31fe5b0`, imagem `gateway:31fe5b0`, schema **35**. Volta: `gateway:2b19ef4`. Trava: **247 passed**. Backup de implantação `/home/twadmin/backups/gateway/pre-ops1-20261011T193000Z/gateway.dump` (34 tabelas).
+- Decisões do Marco na seção 9 e o que foi implementado na seção 10 de `docs/ESPEC_OPS1.md`; ensaio manual em `docs/RESTAURACAO_MANUAL.md`.
+- Scripts: `backup.sh`, `teste_restauracao.sh`, `vigia.sh`, `alerta.sh`, `ops/instalar_cron.sh`, `ops/comum.sh`. No gateway: `nucleo/alertas.py` (worker, fila, Skyone, WhatsApp, pelo agendador a cada 30 s), `GET /health/ops`, tabela `ops_execucoes` (migração 035).
+- rclone 1.75.2 em `/home/twadmin/.local/bin/rclone` (download oficial com a soma conferida; sem `sudo` na conta, por isso na pasta do usuário).
+- **Inerte nos envios** até o Marco cadastrar as credenciais: primeiro backup real `local` (355 KB de banco, manifesto com contagens exatas), teste de restauração real `ok` (banco temporário criado, comparado e apagado), `/health/ops` interno 503 com motivo `destino_nao_configurado`, alertas desligados (registro local avisa).
+- Ensaiado antes do commit, com chave gpg descartável e uma pasta como destino: arquivo cifrado enviado para `diario/` e `semanal/`, decifrado e conferido com o manifesto; sem a chave privada não abre; destino inacessível e chave ilegível geram falha com alerta e não deixam arquivo pela metade.
+- Tarefas no crontab do `twadmin`: backup 07:30 UTC (04:30 São Paulo), restauração domingo 08:00 UTC (05:00), vigia a cada 2 min. O cron da VPS não aceita fuso por tarefa (corrigido depois da primeira instalação, que usava `CRON_TZ`).
+- Erros meus durante o bloco, corrigidos antes da implantação ou logo depois: nome do banco de produção no script (o contêiner aponta para o de testes), listagem do crontab no instalador, fuso do cron.
+- **Pendente do Marco:** credenciais (B2, chave pública, Telegram) no `.env`; regras de ciclo de vida no bucket; liberar `/gateway/health/ops` no proxy do painel (hoje 404 por fora); primeiro ensaio manual.
+- Conferência: 4 containers `healthy`, fila zerada, `/gateway/health` 200, admin por fora 404, `/api/v1` sem chave 401, zero erros nos logs.
