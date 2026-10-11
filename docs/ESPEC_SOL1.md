@@ -1,7 +1,7 @@
 # SOL1 — Avisar a equipe sem parar o atendimento
 
-**Situação:** especificação para aprovação. **Nada implementado.**
-**Data:** 11/10/2026. Produção: `gateway:2b19ef4`, schema 34. Entra na fila depois do R1 (ordem: G4-a → OPS1 → R1 → **SOL1** → G4-b → …).
+**Situação:** **aprovada em 11/10/2026**, com as decisões da seção 8 (que valem sobre o texto das seções anteriores onde houver diferença) e o item extra da seção 9. **Nada implementado ainda.**
+**Data:** 11/10/2026. Produção: `gateway:2b19ef4`, schema 34. Ordem: G4-a (feito) → OPS1 → **SOL1** → R1 → G4-b → G5/G6 → G3 → B4 → C1 → CFG1-b → carrossel.
 
 ---
 
@@ -178,3 +178,48 @@ Um bloco só (SOL1), com parada e relatório.
 4. **Padrão:** `notificar_equipe` nasce desligado na plataforma e ligado no segmento de delivery (proposta), ou desligado em tudo até você ligar no By Koji?
 5. **Quem atualiza a solicitação no painel:** qualquer papel, inclusive `membro` (proposta), ou só admin?
 6. **Tipos de solicitação:** `evento`, `encomenda`, `orcamento`, `parceria`, `outro` servem?
+
+---
+
+## 8. Decisões do Marco (11/10/2026) — aprovada
+
+1. **Telefone no alerta:** inteiro, porque o destino é a equipe interna. Mascarado só quando o destino de transbordo estiver marcado como **grupo externo** — configuração nova `transbordo_destino_externo` (sim/não, padrão não), no grupo `transbordo`.
+2. **Alerta de atualização:** sim, no máximo **1 a cada 30 min por solicitação**, e só quando um **campo novo** for preenchido (campo que estava vazio; trocar o valor de um campo já preenchido não gera alerta).
+3. **Proteção (muda a 2.5):** `transferir_humano` com motivo `evento_ou_encomenda` **ou `catering`** vira `notificar_equipe` quando houver **carrinho com itens ou pedido ativo** na conversa (`aguardando_loja`, `confirmado`, `em_preparo`, `pronto_retirada`, `saiu_entrega`). A conversão fica no log e nas métricas, com `acao_original` e `acao_aplicada`.
+   - `catering` entra no catálogo de motivos de transferência do CFG1 (seção 3.2 de `ESPEC_CFG1.md`), ligado por padrão.
+4. **Padrão:** `notificar_equipe` desligado na plataforma, ligado no segmento `delivery_restaurante`. Na implantação, conferir que o By Koji herda ligado (origem `segmento`).
+   - O agente do By Koji está na versão 1 do segmento. Ligar o padrão exige criar a versão 2 do segmento e mover o agente para ela (procedimento da seção 14.3 de `ESPEC_CFG1.md`), comparando a configuração efetiva antes e depois.
+5. **Atualização da solicitação no painel:** qualquer papel (`plataforma`, `admin`, `membro`).
+6. **Tipos:** `evento`, `catering`, `encomenda`, `orcamento`, `parceria`, `outro`.
+
+## 9. Item extra do SOL1: toques contraditórios no mesmo lote
+
+No teste de 11/10 o cliente tocou em "Entrega" e, um segundo depois, em "Retirada"; os dois chegaram no mesmo lote e o agente seguiu o primeiro.
+
+**Regra:** quando o lote tiver 2 ou mais cliques em opções da **mesma mensagem** de botões ou de lista, fica no lote **só o último clique**.
+
+| Ponto | Como fica |
+|---|---|
+| O que sai | Os cliques anteriores da mesma mensagem saem de `mensagens_do_lote` e do texto `message` |
+| O que fica registrado | O clique mantido ganha `interacao.substituiu: ["entrega"]`, com os ids das opções descartadas, na ordem em que foram tocadas. `ultima_interacao` é a do clique mantido |
+| Cliques em mensagens diferentes | Nada muda: ficam todos |
+| Clique + texto digitado | Nada muda: fica tudo, na ordem |
+| Histórico e banco | As mensagens dos toques descartados continuam gravadas e aparecem no painel; só não vão ao agente como parte do lote |
+| "Mesma mensagem" | A mesma mensagem de origem do clique (o identificador que o clique cita), enviada pelo gateway nesta conversa |
+| Liga/desliga | Não tem: vale sempre, com ou sem `notificar_equipe` |
+
+```json
+"mensagens_do_lote": [
+  {"enviada_em": "2026-10-11T15:14:42-03:00", "tipo": "texto", "texto": "Retirada",
+   "interacao": {"tipo": "botao", "id": "retirada", "atual": true, "substituiu": ["entrega"]}}],
+"message": "Retirada"
+```
+
+Testes (além dos da seção 6):
+- "Entrega" e depois "Retirada" no mesmo lote → fica só "Retirada", com `substituiu: ["entrega"]`.
+- Três toques na mesma mensagem → fica o último, com os dois anteriores em `substituiu`.
+- Cliques em mensagens diferentes no mesmo lote → ficam os dois, sem `substituiu`.
+- Clique + texto digitado no mesmo lote → fica tudo.
+- Dois toques na mesma opção → fica um, com `substituiu` trazendo o id repetido.
+- Lista: o mesmo comportamento dos botões.
+- As mensagens descartadas continuam no histórico da conversa.

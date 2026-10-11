@@ -1153,3 +1153,9 @@ PY
 - Conversa devolvida ao bot por ordem do Marco (`conversa.devolvida`, ator `marco`, 18:28 UTC).
 - `docs/ESPEC_SOL1.md` escrita (ação `notificar_equipe`, tabela de solicitações, proteção, rotas), com 6 decisões. **Nada implementado.**
 - Ordem nova do Marco: G4-a (feito) → OPS1 → R1 → SOL1 → G4-b → G5/G6 → G3 → B4 → C1 → CFG1-b → carrossel.
+
+## SOL1 aprovado e OPS1 especificado — 2026-10-11
+
+- Decisões do Marco para o SOL1 na seção 8 de `docs/ESPEC_SOL1.md`; item extra (toques contraditórios no mesmo lote) na seção 9. Nada implementado.
+- `docs/ESPEC_OPS1.md` escrita (backup diário cifrado fora da VPS, teste de restauração semanal, alertas pelo Telegram, disponibilidade, teste de carga do Skyone só especificado), com 11 decisões. **Nada implementado; o código só começa quando o Marco confirmar que a outra sessão foi encerrada e aprovar a especificação.**
+- Ordem do Marco: G4-a (feito) → OPS1 → SOL1 → R1 → G4-b → G5/G6 → G3 → B4 → C1 → CFG1-b → carrossel.
