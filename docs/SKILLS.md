@@ -30,7 +30,8 @@ A cada turno o gateway envia, sem o agente pedir:
     "carrinho": { "...": "igual ao campo carrinho das respostas abaixo", "atualizado_em": "2026-10-10T21:10:48-03:00" },
     "carrinho_expirado": false,
     "itens_expirados": [],
-    "ultimo_pedido": {"numero": "48213", "status": "aguardando_loja", "total": 327.0, "criado_em": "2026-10-10T13:29:00+00:00"}
+    "ultimo_pedido": {"numero": "48213", "status": "aguardando_loja", "status_descricao": "Aguardando a confirmação da unidade", "total": 327.0, "criado_em": "2026-10-10T13:29:00+00:00", "atualizado_em": "2026-10-10T10:29:00-03:00"},
+    "ultimos_pedidos": [{"numero": "48213", "status": "aguardando_loja", "status_descricao": "Aguardando a confirmação da unidade", "unidade": "patio_guedala", "total": 327.0, "atualizado_em": "2026-10-10T10:29:00-03:00"}]
   }
 },
 "unidades": [
@@ -227,11 +228,37 @@ Depois de fechado, o pedido não muda. Se o cliente quiser outra coisa, `adicion
 
 ### 9. `consultar_pedido`
 
-**Descrição para o agente:** Informa a situação de um pedido desta conversa: aguardando a unidade, confirmado, recusado (com o motivo) ou cancelado.
+**Descrição para o agente:** Informa a situação de um pedido desta conversa e por onde ele já passou. Use quando o cliente perguntar pelo pedido ("cadê meu pedido?", "já saiu?"). Se o cliente não disser o número, chame sem número para ver os últimos pedidos da conversa.
 
-`GET /api/v1/pedidos/{numero}?conversation_id=<conversa>` → `{"ok": true, "pedido": {...}}`
+**Com número:** `GET /api/v1/pedidos/{numero}?conversation_id=<conversa>` → `{"ok": true, "pedido": {...}}`
 
-`status`: `aguardando_loja`, `confirmado`, `recusado`, `cancelado`.
+```json
+{"numero": "59859", "status": "saiu_entrega", "status_descricao": "Saiu para entrega",
+ "previsao_min": 40, "previsao_ate": "2026-10-10T22:22:50-03:00", "atualizado_ha_segundos": 310,
+ "linha_do_tempo": [
+   {"status": "aguardando_loja", "em": "2026-10-10T21:40:12-03:00"},
+   {"status": "confirmado", "em": "2026-10-10T21:42:50-03:00"},
+   {"status": "saiu_entrega", "em": "2026-10-10T21:58:30-03:00"}],
+ "motivo": null, "itens": [...], "total": 102.0, "unidade": "patio_guedala", "modalidade": "delivery"}
+```
+
+**Sem número:** `GET /api/v1/pedidos?conversation_id=<conversa>` → `{"ok": true, "pedidos": [...]}` com os 3 últimos, do mais recente para o mais antigo: `numero`, `status`, `status_descricao`, `unidade`, `total`, `atualizado_em`.
+
+| `status` | `status_descricao` |
+|---|---|
+| `aguardando_loja` | Aguardando a confirmação da unidade |
+| `confirmado` | Confirmado pela unidade |
+| `em_preparo` | Em preparo |
+| `pronto_retirada` | Pronto para retirada (só retirada) |
+| `saiu_entrega` | Saiu para entrega (só entrega) |
+| `concluido` | Concluído |
+| `recusado` | Recusado pela unidade (`motivo` diz por quê) |
+| `cancelado` | Cancelado (`motivo`, quando houver) |
+
+- `previsao_ate` só vem quando a unidade informou o tempo ao confirmar; senão é nulo e o agente **não inventa** prazo.
+- Datas no fuso da empresa. Só a conversa dona do pedido consegue consultar.
+- O cliente recebe sozinho um aviso do gateway a cada mudança de status (aparece no histórico). O agente não precisa repetir o aviso; responde quando o cliente perguntar.
+- O pacote já traz `contexto_modulos.pedidos.ultimos_pedidos` (os mesmos 3) e `ultimo_pedido.status_descricao`: muitas vezes dá para responder sem chamar a Skill.
 
 ### 10. `cancelar_pedido`
 

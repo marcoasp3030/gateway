@@ -70,6 +70,7 @@ async def anonimizar(request:Request,tenant_id:str,cid:str,body:Confirmacao,acto
                 # Carrinho e pedido acompanham a troca do identificador (ON UPDATE CASCADE); saem endereço e observações.
                 await c.execute('UPDATE carrinhos SET endereco=NULL,observacao=NULL WHERE tenant_id=$1 AND conversation_id=$2',t,new)
                 await c.execute('UPDATE pedidos SET endereco=NULL,observacao=NULL,cliente_nome=NULL,cliente_telefone=NULL WHERE tenant_id=$1 AND conversation_id=$2',t,new)
+                await c.execute('UPDATE pedido_eventos SET motivo=NULL WHERE tenant_id=$1 AND pedido_id IN (SELECT id FROM pedidos WHERE tenant_id=$1 AND conversation_id=$2)',t,new)
                 await c.execute("UPDATE avisos_internos SET conversation_id=$3,texto='[anonimizado]',referencia=md5(referencia) WHERE tenant_id=$1 AND conversation_id=$2",t,old,new)
             # Brutos sem vínculo legados: só anonimiza registros que contêm identificador.
             for raw in await c.fetch('SELECT id,payload,contato_id FROM webhook_raw WHERE tenant_id=$1',t):

@@ -298,6 +298,29 @@ return 1
             await auditar(conn,tenant,'sistema','mensagem.enviada',conversa)
         return True
 
+    async def enviar_transacional(self,tenant,conversa,texto,aviso):
+        """Aviso de status do pedido ao cliente (PED1): não é resposta do bot, então a pausa por atendente não o segura
+        e ele não mexe na pausa. Respeita empresa/agente/canal ativos, o piloto e o envio de teste.
+        Devolve 'enviado', 'simulado' (envio de teste ou canal sem envio) ou 'descartado'. Erro do provedor sobe para quem chamou."""
+        async with self.db.acquire() as conn,conn.transaction():
+            await conn.execute('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',conversa)
+            repo=Repositorio(conn);configuracoes=Configuracoes(repo)
+            conv=await repo.obter(tenant,'conversas',conversa)
+            if not conv or not conv['telefone']: return 'descartado'   # conversa anonimizada não recebe aviso
+            canal,empresa,cfg=await self.contexto(tenant,conv['canal_id'],repo,configuracoes)
+            if not (canal['ativo'] and empresa['status']=='ativo' and cfg['status']=='ativo'): return 'descartado'
+            if cfg['modo_piloto'] and conv['telefone'] not in cfg['contatos_permitidos']: return 'descartado'
+            real=cfg['send_mode']=='live' and canal['tipo']=='uazapi'
+            marca=uazapi.marca_do_envio(canal['id'],await uazapi.enviar(self.http,self.cofre,tenant,canal,conv['telefone'],texto)) if real else (None,None)
+            meta=json.loads(marca[1]) if marca[1] else {}
+            meta['aviso_pedido']=aviso
+            # Entra no histórico como "sistema": o agente vê o que o cliente já recebeu; com o id do provedor, a varredura não o confunde com atendente.
+            await conn.execute("""INSERT INTO mensagens(tenant_id,conversation_id,direcao,origem,conteudo,processada_em,message_id,meta)
+                VALUES ($1,$2,'saida','sistema',$3,now(),$4,$5::jsonb) ON CONFLICT(tenant_id,message_id) DO NOTHING""",tenant,conversa,texto,marca[0],json.dumps(meta,ensure_ascii=False))
+            await conn.execute('UPDATE conversas SET atualizado_em=now() WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa)
+            await auditar(conn,tenant,'sistema','pedido.aviso_enviado' if real else 'pedido.aviso_simulado',conversa)
+            return 'enviado' if real else 'simulado'
+
     async def processar(self,tenant,conversa):
         cfg=None
         conv=await self.repo.obter(tenant,'conversas',conversa)

@@ -102,9 +102,9 @@ def test_pedido_avisa_a_unidade_e_ela_confirma_pelo_whatsapp(monkeypatch):
             await avisos.despachar(p)
             assert sorted(e[0] for e in enviados)==sorted([UNIDADE,'5511900000002'])
             textos=dict(enviados);assert f'nº {numero} foi confirmado' in textos['5511900000002'] and 'Pátio Guedala' in textos['5511900000002'] and f'Pedido {numero} confirmado' in textos[UNIDADE]
-            # O aviso ao cliente entra na conversa como mensagem do bot (com o id do provedor).
-            m=await conn.fetchrow("SELECT origem,conteudo,message_id FROM mensagens WHERE conversation_id=$1 ORDER BY id DESC LIMIT 1",conv)
-            assert m['origem']=='bot' and 'foi confirmado' in m['conteudo'] and m['message_id']
+            # O aviso ao cliente entra na conversa como mensagem do sistema (com o id do provedor e a marca do pedido).
+            m=await conn.fetchrow("SELECT origem,conteudo,message_id,meta FROM mensagens WHERE conversation_id=$1 ORDER BY id DESC LIMIT 1",conv)
+            assert m['origem']=='sistema' and 'foi confirmado' in m['conteudo'] and m['message_id'] and json.loads(m['meta'])['aviso_pedido']=={'numero':numero,'status':'confirmado'}
             ev=[r[0] for r in await conn.fetch("SELECT evento FROM webhook_entregas WHERE tenant_id='bykoji' ORDER BY id")]
             assert ev.count('pedido.criado')==2 and ev.count('pedido.confirmado')==1
             assert await conn.fetchval("SELECT count(*) FROM audit_log WHERE acao='pedido.confirmado' AND alvo=$1 AND actor='unidade:whatsapp'",numero)==1
@@ -135,7 +135,7 @@ def test_recusa_devolve_o_carrinho_e_o_primeiro_que_decide_vale(monkeypatch):
             ped=await conn.fetchrow("SELECT status,motivo FROM pedidos WHERE numero=$1",numero);assert tuple(ped)==('recusado','estamos sem edamame')
             k=(await api('GET',f'/carrinho/{conv}')).json()['carrinho'];assert [(i['codigo'],i['quantidade']) for i in k['itens']]==[('GUE-0001',2)] and k['pode_fechar']
             await avisos.despachar(p);texto=dict(enviados)[CLIENTE]
-            assert 'não pôde ser aceito' in texto and 'Motivo: estamos sem edamame' in texto and 'carrinho' in texto
+            assert 'não conseguiu aceitar' in texto and 'Motivo: estamos sem edamame.' in texto and 'carrinho' in texto
             # O cliente pode fechar de novo: novo pedido, novo número.
             n2=(await api('POST','/pedidos',json={'conversation_id':conv})).json()['pedido']['numero'];assert n2!=numero
             # Painel confirma primeiro; o WhatsApp chega depois e não muda nada.
@@ -162,7 +162,7 @@ def test_recusa_devolve_o_carrinho_e_o_primeiro_que_decide_vale(monkeypatch):
 
 
 @pytest.mark.skipif(not DSN,reason='Postgres de teste obrigatório')
-def test_unidade_sem_whatsapp_fica_so_no_painel_e_aviso_ao_cliente_respeita_pausa(monkeypatch):
+def test_unidade_sem_whatsapp_fica_so_no_painel_e_aviso_ao_cliente_sai_mesmo_com_o_bot_pausado(monkeypatch):
     async def cenario(conn):
         await migrar.aplicar(conn)
         app,client=preparar(conn);fila=RedisFila();app.state.redis=fila;app.state.pipeline.redis=fila;p=app.state.pipeline
@@ -172,10 +172,11 @@ def test_unidade_sem_whatsapp_fica_so_no_painel_e_aviso_ao_cliente_respeita_paus
             # Sem WhatsApp de pedidos: nenhum aviso; o pedido fica no painel e é confirmado por lá.
             assert await conn.fetchval("SELECT count(*) FROM avisos_internos WHERE tipo='pedido_unidade'")==0
             assert [x['numero'] for x in (await client.get('/admin/v1/tenants/bykoji/pedidos',params={'status':'aguardando_loja'})).json()['itens']]==[numero]
-            # Conversa assumida por atendente: o aviso automático ao cliente não sai (fica descartado).
+            # Conversa assumida por atendente: o aviso de status é transacional e sai assim mesmo (PED1); a pausa não muda.
             await conn.execute("UPDATE conversas SET bot_pausado_ate=now()+interval '1 hour' WHERE conversation_id=$1",conv)
             assert (await client.post(f'/admin/v1/tenants/bykoji/pedidos/{numero}/confirmar')).status_code==200
-            await avisos.despachar(p);assert enviados==[] and (await conn.fetchrow("SELECT status FROM avisos_internos WHERE tipo='pedido_cliente'"))['status']=='descartado'
+            await avisos.despachar(p);assert [e[0] for e in enviados]==[CLIENTE] and (await conn.fetchrow("SELECT status FROM avisos_internos WHERE tipo='pedido_cliente'"))['status']=='enviado'
+            assert await conn.fetchval("SELECT bot_pausado_ate>now() FROM conversas WHERE conversation_id=$1",conv)
             # Falha do provedor no aviso à unidade: tenta de novo e desiste depois de 3; aviso ao cliente nunca é reenviado.
             uid=(await client.get('/admin/v1/tenants/bykoji/unidades')).json()['itens'][0]['id']
             await client.patch(f'/admin/v1/tenants/bykoji/unidades/{uid}',json={'whatsapp_pedidos':UNIDADE})

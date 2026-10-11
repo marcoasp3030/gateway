@@ -253,7 +253,113 @@ def retrato_pedido(p):
             'endereco':p['endereco'],'horario':p['horario'],'observacao':p['observacao'],'itens':itens,
             'subtotal':dinheiro(p['subtotal']),'taxa_entrega':dinheiro(p['taxa_entrega']),'total':dinheiro(p['total']),
             'tem_alcoolico':p['tem_alcoolico'],'motivo':p['motivo'],'cliente_nome':p['cliente_nome'],
-            'criado_em':p['criado_em'],'decidido_em':p['decidido_em']}
+            'criado_em':p['criado_em'],'decidido_em':p['decidido_em'],
+            'previsao_min':p.get('previsao_min'),'atualizado_em':p['atualizado_em']}
+
+
+# Ciclo do pedido (PED1). Só anda para frente; pronto_retirada e saiu_entrega ocupam a mesma etapa, cada um na sua modalidade.
+STATUS=('aguardando_loja','confirmado','em_preparo','pronto_retirada','saiu_entrega','concluido','recusado','cancelado')
+FINAIS=('concluido','recusado','cancelado')
+ETAPA={'aguardando_loja':0,'confirmado':1,'em_preparo':2,'pronto_retirada':3,'saiu_entrega':3,'concluido':4}
+MODALIDADE_DO_STATUS={'pronto_retirada':'retirada','saiu_entrega':'delivery'}
+DESCRICAO={'aguardando_loja':'Aguardando a confirmação da unidade','confirmado':'Confirmado pela unidade','em_preparo':'Em preparo',
+           'pronto_retirada':'Pronto para retirada','saiu_entrega':'Saiu para entrega','concluido':'Concluído',
+           'recusado':'Recusado pela unidade','cancelado':'Cancelado'}
+ACEITA_PREVISAO=('confirmado','em_preparo')
+
+
+class TransicaoInvalida(Exception):
+    """Mudança de status que a máquina não permite: o pedido fica como está."""
+    def __init__(self,pedido,motivo): self.pedido,self.motivo=pedido,motivo
+
+
+def conferir(status,modalidade,novo):
+    """Motivo pelo qual `novo` não vale a partir de `status`, ou None se vale."""
+    if status in FINAIS: return 'status_final'
+    if novo==status: return 'mesmo_status'
+    if novo in MODALIDADE_DO_STATUS and MODALIDADE_DO_STATUS[novo]!=modalidade: return 'modalidade_incompativel'
+    if novo=='recusado': return None if status=='aguardando_loja' else 'recusa_so_aguardando'
+    if novo=='cancelado': return None
+    if ETAPA[novo]<=ETAPA[status]: return 'nao_pode_voltar'
+    return None
+
+
+def proximos(p):
+    """Status para onde este pedido pode ir agora (o painel só desenha estes)."""
+    return [s for s in STATUS if conferir(p['status'],p['modalidade'],s) is None]
+
+
+async def registrar_evento(conn,tenant,pedido_id,de,para,por,origem,motivo=None,previsao_min=None):
+    return await conn.fetchval('''INSERT INTO pedido_eventos(tenant_id,pedido_id,de,para,por,origem,motivo,previsao_min)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (pedido_id,para) DO NOTHING RETURNING id''',tenant,pedido_id,de,para,por[:100],origem,motivo,previsao_min)
+
+
+async def transicionar(conn,tenant,numero,novo,por,origem,motivo=None,previsao_min=None):
+    """Muda o status do pedido (travado na transação) e grava a linha do tempo.
+    Devolve (pedido atualizado, id do evento); None se o pedido não existe; TransicaoInvalida se a máquina não permite."""
+    assert novo in STATUS and novo!='aguardando_loja'
+    p=await conn.fetchrow('SELECT * FROM pedidos WHERE tenant_id=$1 AND numero=$2 FOR UPDATE',tenant,numero)
+    if not p: return None
+    erro=conferir(p['status'],p['modalidade'],novo)
+    if erro: raise TransicaoInvalida(p,erro)
+    antes=p['status'];motivo=(motivo or '').strip()[:300] or None
+    # Quem tira o pedido de "aguardando a loja" é quem decidiu (confirmou, recusou ou cancelou).
+    p=await conn.fetchrow("""UPDATE pedidos SET status=$3,atualizado_em=now(),
+        motivo=CASE WHEN $3 IN ('recusado','cancelado') THEN $4 ELSE motivo END,
+        previsao_min=coalesce($5,previsao_min),
+        decidido_em=CASE WHEN $6 THEN now() ELSE decidido_em END,decidido_por=CASE WHEN $6 THEN $7 ELSE decidido_por END
+        WHERE tenant_id=$1 AND id=$2 RETURNING *""",tenant,p['id'],novo,motivo,previsao_min,antes=='aguardando_loja',por[:100])
+    if novo=='recusado' and p['carrinho_id']:
+        # Recusado: os itens voltam para o carrinho do cliente, se ele ainda não abriu outro.
+        if not await aberto(conn,tenant,p['conversation_id']):
+            await conn.execute("UPDATE carrinhos SET status='aberto',atualizado_em=now() WHERE tenant_id=$1 AND id=$2 AND status='fechado'",tenant,p['carrinho_id'])
+    return p,await registrar_evento(conn,tenant,p['id'],antes,novo,por,origem,motivo,previsao_min)
+
+
+async def linha_do_tempo(conn,tenant,p):
+    """Eventos do pedido, do mais antigo ao mais recente, com a situação do aviso ao cliente de cada um."""
+    rows=await conn.fetch('''SELECT e.de,e.para,e.por,e.origem,e.motivo,e.previsao_min,e.aviso,e.criado_em,
+            a.status AS aviso_status,a.enviado_em AS aviso_em,a.erro AS aviso_erro
+        FROM pedido_eventos e LEFT JOIN avisos_internos a ON a.tenant_id=e.tenant_id AND a.tipo='pedido_cliente'
+            AND a.referencia=$3||':'||e.para AND e.aviso='enfileirado'
+        WHERE e.tenant_id=$1 AND e.pedido_id=$2 ORDER BY e.id''',tenant,p['id'],p['numero'])
+    def aviso(r):
+        if r['aviso'] is None: return None
+        if r['aviso']=='desligado': return {'status':'desligado','em':None,'erro':None}
+        return {'status':r['aviso_status'] or 'pendente','em':r['aviso_em'],'erro':r['aviso_erro']}
+    return [{'de':r['de'],'para':r['para'],'por':r['por'],'origem':r['origem'],'em':r['criado_em'],'motivo':r['motivo'],
+             'previsao_min':r['previsao_min'],'aviso':aviso(r)} for r in rows]
+
+
+async def para_o_agente(conn,tenant,p):
+    """Pedido para a Skill consultar_pedido: situação em palavras, previsão e linha do tempo resumida (sem quem mexeu)."""
+    from zoneinfo import ZoneInfo
+    from datetime import timedelta
+    fuso=ZoneInfo(await conn.fetchval('SELECT timezone FROM tenants WHERE id=$1',tenant))
+    local=lambda d: d.astimezone(fuso).isoformat(timespec='seconds') if d else None
+    eventos=await conn.fetch('SELECT para,criado_em FROM pedido_eventos WHERE tenant_id=$1 AND pedido_id=$2 ORDER BY id',tenant,p['id'])
+    # A previsão conta de quando a unidade assumiu o pedido (confirmou ou já começou a preparar).
+    base=next((e['criado_em'] for e in eventos if e['para'] in ACEITA_PREVISAO),None)
+    r=retrato_pedido(p)
+    r.update(status_descricao=DESCRICAO[p['status']],criado_em=local(p['criado_em']),decidido_em=local(p['decidido_em']),atualizado_em=local(p['atualizado_em']),
+             previsao_ate=local(base+timedelta(minutes=p['previsao_min'])) if base and p['previsao_min'] else None,
+             atualizado_ha_segundos=await conn.fetchval('SELECT greatest(0,extract(epoch FROM now()-$1::timestamptz))::int',p['atualizado_em']),
+             linha_do_tempo=[{'status':e['para'],'em':local(e['criado_em'])} for e in eventos])
+    return r
+
+
+MAX_ULTIMOS_PEDIDOS=3
+
+
+async def ultimos(conn,tenant,conversa,fuso=None):
+    """Os últimos pedidos da conversa (mais recente primeiro), resumidos para o agente."""
+    from zoneinfo import ZoneInfo
+    rows=await conn.fetch('SELECT numero,status,unidade,total,atualizado_em FROM pedidos WHERE tenant_id=$1 AND conversation_id=$2 ORDER BY id DESC LIMIT $3',
+                          tenant,conversa,MAX_ULTIMOS_PEDIDOS)
+    if not rows: return []
+    z=ZoneInfo(fuso or await conn.fetchval('SELECT timezone FROM tenants WHERE id=$1',tenant))
+    return [{'numero':r['numero'],'status':r['status'],'status_descricao':DESCRICAO[r['status']],'unidade':r['unidade'],'total':dinheiro(r['total']),
+             'atualizado_em':r['atualizado_em'].astimezone(z).isoformat(timespec='seconds')} for r in rows]
 
 
 async def fechar(conn,tenant,conversa):
@@ -293,6 +399,7 @@ async def fechar(conn,tenant,conversa):
         c['horario'],c['observacao'],json.dumps(itens,ensure_ascii=False),subtotal,taxa,subtotal+(taxa or 0),nome,conv['telefone'],
         tem_alcool,bool(c['maioridade_confirmada']))
     await conn.execute("UPDATE carrinhos SET status='fechado',atualizado_em=now() WHERE tenant_id=$1 AND id=$2",tenant,c['id'])
+    await registrar_evento(conn,tenant,p['id'],None,'aguardando_loja','agente','agente')
     return p
 
 
@@ -310,8 +417,12 @@ async def cancelar(conn,tenant,conversa,numero,motivo):
     if not p: raise Recusa('pedido_inexistente',404)
     if p['status']=='cancelado': return p
     if p['status']!='aguardando_loja': raise Recusa('pedido_nao_cancelavel',409)
-    return await conn.fetchrow("""UPDATE pedidos SET status='cancelado',motivo=$3,decidido_em=now(),decidido_por='cliente',atualizado_em=now()
-        WHERE tenant_id=$1 AND id=$2 RETURNING *""",tenant,p['id'],(motivo or '').strip()[:300] or None)
+    motivo=(motivo or '').strip()[:300] or None
+    p=await conn.fetchrow("""UPDATE pedidos SET status='cancelado',motivo=$3,decidido_em=now(),decidido_por='cliente',atualizado_em=now()
+        WHERE tenant_id=$1 AND id=$2 RETURNING *""",tenant,p['id'],motivo)
+    # Cancelamento pedido pelo próprio cliente: entra na linha do tempo, sem aviso (o agente responde na hora).
+    await registrar_evento(conn,tenant,p['id'],'aguardando_loja','cancelado','cliente','cliente',motivo)
+    return p
 
 
 class JaDecidido(Exception):
@@ -319,20 +430,12 @@ class JaDecidido(Exception):
     def __init__(self,pedido): self.pedido=pedido
 
 
-async def decidir(conn,tenant,numero,novo,motivo,por):
+async def decidir(conn,tenant,numero,novo,motivo,por,origem='painel',previsao_min=None):
     """Confirmação ou recusa pela unidade (painel ou WhatsApp). O primeiro que decide vale.
-    Devolve o pedido atualizado; JaDecidido se não estava mais aguardando; None se não existe."""
+    Devolve (pedido, id do evento); JaDecidido se não estava mais aguardando; None se não existe."""
     assert novo in ('confirmado','recusado')
-    p=await conn.fetchrow('SELECT * FROM pedidos WHERE tenant_id=$1 AND numero=$2 FOR UPDATE',tenant,numero)
-    if not p: return None
-    if p['status']!='aguardando_loja': raise JaDecidido(p)
-    p=await conn.fetchrow("""UPDATE pedidos SET status=$3,motivo=$4,decidido_em=now(),decidido_por=$5,atualizado_em=now()
-        WHERE tenant_id=$1 AND id=$2 RETURNING *""",tenant,p['id'],novo,(motivo or '').strip()[:300] or None,por[:100])
-    if novo=='recusado' and p['carrinho_id']:
-        # Recusado: os itens voltam para o carrinho do cliente, se ele ainda não abriu outro.
-        if not await aberto(conn,tenant,p['conversation_id']):
-            await conn.execute("UPDATE carrinhos SET status='aberto',atualizado_em=now() WHERE tenant_id=$1 AND id=$2 AND status='fechado'",tenant,p['carrinho_id'])
-    return p
+    try: return await transicionar(conn,tenant,numero,novo,por,origem,motivo,previsao_min)
+    except TransicaoInvalida as t: raise JaDecidido(t.pedido)
 
 
 # "OK 48213" confirma; "NÃO 48213 motivo" recusa. Só vale vindo do WhatsApp de pedidos da unidade do pedido.
@@ -393,8 +496,11 @@ async def contexto(repo,tenant,conversa):
         carrinho['atualizado_em']=datetime.fromisoformat(carrinho['atualizado_em']).astimezone(ZoneInfo(fuso)).isoformat(timespec='seconds')
     antigos=await expirado(conn,tenant,conversa)
     p=await conn.fetchrow('SELECT numero,status,total,criado_em FROM pedidos WHERE tenant_id=$1 AND conversation_id=$2 ORDER BY id DESC LIMIT 1',tenant,conversa)
+    recentes=await ultimos(conn,tenant,conversa) if p else []
     return {'carrinho':carrinho,
             # true = o carrinho antigo foi arquivado por tempo; itens_expirados diz o que havia, para o agente oferecer refazer.
             'carrinho_expirado':antigos is not None,'itens_expirados':antigos or [],
-            'ultimo_pedido':{'numero':p['numero'],'status':p['status'],'total':dinheiro(p['total']),
-            'criado_em':p['criado_em'].isoformat()} if p else None}
+            'ultimo_pedido':{'numero':p['numero'],'status':p['status'],'status_descricao':DESCRICAO[p['status']],'total':dinheiro(p['total']),
+            'criado_em':p['criado_em'].isoformat(),'atualizado_em':recentes[0]['atualizado_em']} if p else None,
+            # Até 3, do mais recente para o mais antigo: para responder "cadê meu pedido?" sem pedir o número (PED1).
+            'ultimos_pedidos':recentes}

@@ -1,5 +1,6 @@
 """Rotas de carrinho e pré-pedido para as Skills do agente (X-API-Key, escopo ferramentas:pedidos)
 e consulta administrativa. A empresa vem sempre da chave, nunca de quem chama."""
+from datetime import datetime
 from typing import Literal
 from fastapi import APIRouter,Depends,Request,HTTPException
 from pydantic import BaseModel,ConfigDict,Field
@@ -155,12 +156,19 @@ async def fechar(request:Request,dados:Fechar,ctx=Depends(chave)):
         return {'ok':True,'pedido':servico.retrato_pedido(p),'carrinho':await servico.retrato(conn,t,conversa)}
 
 
+@router.get('/api/v1/pedidos')
+async def ultimos_pedidos(request:Request,conversation_id:str,ctx=Depends(chave)):
+    """consultar_pedido sem número: os últimos pedidos desta conversa (mais recente primeiro)."""
+    t=await conversa_da_chave(request,ctx,conversation_id)
+    return {'ok':True,'pedidos':await servico.ultimos(request.app.state.db,t,conversation_id)}
+
+
 @router.get('/api/v1/pedidos/{numero}')
 async def status(request:Request,numero:str,conversation_id:str,ctx=Depends(chave)):
     t=await conversa_da_chave(request,ctx,conversation_id)
     try: p=await servico.da_conversa(request.app.state.db,t,conversation_id,numero)
     except servico.Recusa as r: return recusa(r)
-    return {'ok':True,'pedido':servico.retrato_pedido(p)}
+    return {'ok':True,'pedido':await servico.para_o_agente(request.app.state.db,t,p)}
 
 
 @router.post('/api/v1/pedidos/{numero}/cancelar')
@@ -181,63 +189,147 @@ async def cancelar(request:Request,numero:str,dados:Cancelar,ctx=Depends(chave))
     return {'ok':True,'pedido':servico.retrato_pedido(p)}
 
 
-async def decidir_pedido(conn,tenant,numero,novo,motivo,por):
-    """Decisão da unidade, igual para painel e WhatsApp: grava, audita, dispara webhook e avisa o cliente.
-    Chamar dentro de transação. Devolve o pedido, None (não existe) ou levanta servico.JaDecidido."""
-    p=await servico.decidir(conn,tenant,numero,novo,motivo,por)
-    if p is None: return None
+async def mudar_status(conn,tenant,numero,novo,por,origem,motivo=None,previsao_min=None):
+    """Uma mudança de status, igual para painel e WhatsApp da unidade: grava, registra na linha do tempo, audita,
+    dispara o webhook de saída e enfileira o aviso ao cliente. Chamar dentro de transação.
+    Devolve o pedido, None (não existe) ou levanta servico.TransicaoInvalida."""
+    feito=await servico.transicionar(conn,tenant,numero,novo,por,origem,motivo,previsao_min)
+    if feito is None: return None
+    p,evento=feito
     await auditar(conn,tenant,por,'pedido.'+novo,p['numero'])
     await emitir(conn,tenant,'pedido.'+novo,{**resumo_evento(p),'motivo':p['motivo']})
-    await avisos.avisar_cliente_do_pedido(conn,tenant,p)
+    aviso=await avisos.avisar_cliente_do_pedido(conn,tenant,p)
+    if evento: await conn.execute('UPDATE pedido_eventos SET aviso=$3 WHERE tenant_id=$1 AND id=$2',tenant,evento,aviso)
     return p
+
+
+async def decidir_pedido(conn,tenant,numero,novo,motivo,por,origem='painel',previsao_min=None):
+    """Confirmação ou recusa pela unidade. Devolve o pedido, None (não existe) ou levanta servico.JaDecidido."""
+    try: return await mudar_status(conn,tenant,numero,novo,por,origem,motivo,previsao_min)
+    except servico.TransicaoInvalida as t: raise servico.JaDecidido(t.pedido)
 
 
 class Decisao(Estrito):
     motivo:str|None=Field(None,max_length=300)
+    previsao_min:int|None=Field(None,ge=1,le=600)
+
+
+class MudancaDeStatus(Estrito):
+    status:Literal['confirmado','em_preparo','pronto_retirada','saiu_entrega','concluido','recusado','cancelado']
+    motivo:str|None=Field(None,max_length=300)
+    previsao_min:int|None=Field(None,ge=1,le=600)
 
 
 admin=APIRouter(prefix='/admin/v1',dependencies=[Depends(painel)])
+ICONES={'uazapi':'whatsapp','meta':'whatsapp','site':'globe','api':'code','email':'mail','teams':'teams','luxbrain':'luxbrain'}
+SELECAO="""SELECT p.*,u.nome AS unidade_nome,k.id AS canal_id,k.tipo AS canal_tipo,k.nome AS canal_nome,
+        a.status AS aviso_status,e.aviso AS aviso_evento
+    FROM pedidos p
+    LEFT JOIN tenant_unidades u ON u.tenant_id=p.tenant_id AND u.codigo=p.unidade
+    LEFT JOIN conversas v ON v.tenant_id=p.tenant_id AND v.conversation_id=p.conversation_id
+    LEFT JOIN tenant_canais k ON k.tenant_id=v.tenant_id AND k.id=v.canal_id
+    LEFT JOIN pedido_eventos e ON e.tenant_id=p.tenant_id AND e.pedido_id=p.id AND e.para=p.status
+    LEFT JOIN avisos_internos a ON a.tenant_id=p.tenant_id AND a.tipo='pedido_cliente' AND a.referencia=p.numero||':'||p.status"""
+
+
+def e164(telefone):
+    d=''.join(c for c in str(telefone or '') if c.isdigit())
+    return '+'+d if 10<=len(d)<=15 else None
+
+
+def resumo_painel(r):
+    """Pedido como o painel vê na lista (inclui telefone do cliente: uso interno)."""
+    b=servico.retrato_pedido(r)
+    aviso=None if r['aviso_evento'] is None else {'status':'desligado' if r['aviso_evento']=='desligado' else (r['aviso_status'] or 'pendente')}
+    return {**b,'id':r['id'],'cliente_telefone':r['cliente_telefone'],'decidido_por':r['decidido_por'],
+            'unidade_nome':r['unidade_nome'] or r['unidade'],'numero_itens':sum(i['quantidade'] for i in b['itens']),
+            'cliente':{'nome':r['cliente_nome'],'telefone':e164(r['cliente_telefone']),
+                       'canal':{'id':r['canal_id'],'tipo':r['canal_tipo'],'nome':r['canal_nome'],'icone':ICONES.get(r['canal_tipo'])} if r['canal_id'] else None},
+            'aviso':aviso}
+
+
+async def detalhe_painel(db,tenant_id,numero):
+    r=await db.fetchrow(SELECAO+' WHERE p.tenant_id=$1 AND p.numero=$2',tenant_id,numero)
+    if not r: raise HTTPException(404,'NOT_FOUND')
+    return {**resumo_painel(r),'entrega':{'modalidade':r['modalidade'],'endereco':r['endereco'],'horario':r['horario'],'observacao':r['observacao']},
+            'status_descricao':servico.DESCRICAO[r['status']],'proximos_status':servico.proximos(r),'linha_do_tempo':await servico.linha_do_tempo(db,tenant_id,r)}
 
 
 @admin.get('/tenants/{tenant_id}/pedidos')
-async def lista(request:Request,tenant_id:str,status:str|None=None,unidade:str|None=None,limite:int=50,cursor:int=0):
+async def lista(request:Request,tenant_id:str,status:str|None=None,unidade:str|None=None,modalidade:Literal['delivery','retirada']|None=None,
+                desde:datetime|None=None,ate:datetime|None=None,busca:str|None=None,limite:int=50,cursor:int=0):
     if not await Repositorio(request.app.state.db).tenant(tenant_id): raise HTTPException(404,'NOT_FOUND')
-    if not 1<=limite<=100 or cursor<0 or (status and status not in ('aguardando_loja','confirmado','recusado','cancelado')): raise HTTPException(400,'VALIDATION_ERROR')
-    rows=await request.app.state.db.fetch('''SELECT * FROM pedidos WHERE tenant_id=$1 AND ($2::text IS NULL OR status=$2)
-        AND ($3::text IS NULL OR unidade=$3) AND ($4=0 OR id<$4) ORDER BY id DESC LIMIT $5''',tenant_id,status,unidade,cursor,limite+1)
-    # Painel vê também telefone do cliente (interno).
-    itens=[{**servico.retrato_pedido(r),'id':r['id'],'cliente_telefone':r['cliente_telefone'],'decidido_por':r['decidido_por']} for r in rows[:limite]]
-    return {'itens':itens,'proximo_cursor':rows[limite-1]['id'] if len(rows)>limite else None}
+    varios=[s for s in (status or '').split(',') if s] or None
+    if (not 1<=limite<=100 or cursor<0 or (varios and any(s not in servico.STATUS for s in varios)) or (busca is not None and not 2<=len(busca.strip())<=100)
+            or any(d is not None and d.tzinfo is None for d in (desde,ate))): raise HTTPException(400,'VALIDATION_ERROR')
+    termo=busca.strip() if busca else None;digitos=''.join(c for c in termo or '' if c.isdigit())
+    rows=await request.app.state.db.fetch(SELECAO+"""
+        WHERE p.tenant_id=$1 AND ($2::text[] IS NULL OR p.status=ANY($2)) AND ($3::text IS NULL OR p.unidade=$3) AND ($4=0 OR p.id<$4)
+        AND ($6::text IS NULL OR p.modalidade=$6) AND ($7::timestamptz IS NULL OR p.criado_em>=$7) AND ($8::timestamptz IS NULL OR p.criado_em<$8)
+        AND ($9::text IS NULL OR strpos(lower(p.numero),lower($9))>0 OR strpos(lower(coalesce(p.cliente_nome,'')),lower($9))>0
+             OR ($10<>'' AND strpos(coalesce(p.cliente_telefone,''),$10)>0))
+        ORDER BY p.id DESC LIMIT $5""",tenant_id,varios,unidade,cursor,limite+1,modalidade,desde,ate,termo,digitos)
+    return {'itens':[resumo_painel(r) for r in rows[:limite]],'proximo_cursor':rows[limite-1]['id'] if len(rows)>limite else None}
+
+
+@admin.get('/tenants/{tenant_id}/pedidos/contagem')
+async def contagem(request:Request,tenant_id:str):
+    """Pedidos novos por unidade (para o alerta do painel) e quantos estão em andamento. Feita para consulta frequente."""
+    db=request.app.state.db
+    if not await Repositorio(db).tenant(tenant_id): raise HTTPException(404,'NOT_FOUND')
+    novos=await db.fetch("""SELECT p.unidade,coalesce(u.nome,p.unidade) AS nome,count(*) AS total,min(p.criado_em) AS mais_antigo_em
+        FROM pedidos p LEFT JOIN tenant_unidades u ON u.tenant_id=p.tenant_id AND u.codigo=p.unidade
+        WHERE p.tenant_id=$1 AND p.status='aguardando_loja' GROUP BY 1,2 ORDER BY 4""",tenant_id)
+    andamento={r['status']:r['n'] for r in await db.fetch("""SELECT status,count(*) n FROM pedidos WHERE tenant_id=$1
+        AND status IN ('confirmado','em_preparo','pronto_retirada','saiu_entrega') GROUP BY 1""",tenant_id)}
+    falhas=await db.fetchval("""SELECT count(*) FROM avisos_internos a JOIN pedidos p ON p.tenant_id=a.tenant_id AND a.referencia=p.numero||':'||p.status
+        WHERE a.tenant_id=$1 AND a.tipo='pedido_cliente' AND a.status='falhou'""",tenant_id)
+    return {'aguardando_loja':{'total':sum(r['total'] for r in novos),'mais_antigo_em':novos[0]['mais_antigo_em'] if novos else None,
+                               'por_unidade':[dict(r) for r in novos]},
+            'em_andamento':{s:andamento.get(s,0) for s in ('confirmado','em_preparo','pronto_retirada','saiu_entrega')},
+            'avisos_com_falha':falhas}
 
 
 @admin.get('/tenants/{tenant_id}/pedidos/{numero}')
 async def detalhe(request:Request,tenant_id:str,numero:str):
-    r=await request.app.state.db.fetchrow('SELECT * FROM pedidos WHERE tenant_id=$1 AND numero=$2',tenant_id,numero)
-    if not r: raise HTTPException(404,'NOT_FOUND')
-    return {**servico.retrato_pedido(r),'id':r['id'],'cliente_telefone':r['cliente_telefone'],'decidido_por':r['decidido_por']}
+    return await detalhe_painel(request.app.state.db,tenant_id,numero)
 
 
-async def _decidir_pelo_painel(request,tenant_id,numero,novo,motivo,actor):
+def conflito(pedido,motivo):
+    return JSONResponse({'erro':{'codigo':'CONFLICT','mensagem':'Mudança de status não permitida.',
+                                 'detalhes':{'campo':'status','status':pedido['status'],'motivo':motivo}}},
+                        status_code=409,headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
+
+
+async def _mudar_pelo_painel(request,tenant_id,numero,novo,motivo,previsao_min,actor):
+    motivo=(motivo or '').strip() or None
+    # Cancelar exige dizer por quê; previsão só faz sentido quando a unidade assume o pedido.
+    if (novo=='cancelado' and (not motivo or len(motivo)<3)) or (previsao_min is not None and novo not in servico.ACEITA_PREVISAO):
+        raise HTTPException(400,'VALIDATION_ERROR')
     async with request.app.state.db.acquire() as conn:
         try:
             async with conn.transaction():
-                p=await decidir_pedido(conn,tenant_id,numero,novo,motivo,actor)
-        except servico.JaDecidido as ja:
-            # Quem decidiu primeiro vale (painel ou WhatsApp da unidade).
-            return JSONResponse({'erro':{'codigo':'CONFLICT','mensagem':'O pedido já foi decidido.','detalhes':{'campo':'status','status':ja.pedido['status']}}},
-                                status_code=409,headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
+                p=await mudar_status(conn,tenant_id,numero,novo,actor,'painel',motivo,previsao_min)
+        except servico.TransicaoInvalida as t:
+            # Quem chegou primeiro vale (painel ou WhatsApp da unidade); o painel recarrega com o status atual.
+            return conflito(t.pedido,t.motivo)
     if p is None: raise HTTPException(404,'NOT_FOUND')
-    return {**servico.retrato_pedido(p),'id':p['id'],'cliente_telefone':p['cliente_telefone'],'decidido_por':p['decidido_por']}
+    return await detalhe_painel(request.app.state.db,tenant_id,numero)
+
+
+@admin.post('/tenants/{tenant_id}/pedidos/{numero}/status')
+async def mudar(request:Request,tenant_id:str,numero:str,dados:MudancaDeStatus,actor=Depends(painel)):
+    return await _mudar_pelo_painel(request,tenant_id,numero,dados.status,dados.motivo,dados.previsao_min,actor)
 
 
 @admin.post('/tenants/{tenant_id}/pedidos/{numero}/confirmar')
-async def confirmar(request:Request,tenant_id:str,numero:str,actor=Depends(painel)):
-    return await _decidir_pelo_painel(request,tenant_id,numero,'confirmado',None,actor)
+async def confirmar(request:Request,tenant_id:str,numero:str,dados:Decisao|None=None,actor=Depends(painel)):
+    return await _mudar_pelo_painel(request,tenant_id,numero,'confirmado',None,dados.previsao_min if dados else None,actor)
 
 
 @admin.post('/tenants/{tenant_id}/pedidos/{numero}/recusar')
 async def recusar(request:Request,tenant_id:str,numero:str,dados:Decisao|None=None,actor=Depends(painel)):
-    return await _decidir_pelo_painel(request,tenant_id,numero,'recusado',dados.motivo if dados else None,actor)
+    return await _mudar_pelo_painel(request,tenant_id,numero,'recusado',dados.motivo if dados else None,None,actor)
 
 
 @admin.get('/tenants/{tenant_id}/avisos')
@@ -263,7 +355,7 @@ async def mensagem_de_numero_interno(conn,tenant,telefone,unidades,texto,message
         return {'ok':True,'interno':True,'comando':novo,'resultado':'nao_encontrado'}
     try:
         async with conn.transaction():
-            p=await decidir_pedido(conn,tenant,numero,novo,motivo,por)
+            p=await decidir_pedido(conn,tenant,numero,novo,motivo,por,'unidade_whatsapp')
         resposta=f'Pedido {numero} {"confirmado ✅" if novo=="confirmado" else "recusado ❌"}. O cliente foi avisado.';resultado=novo
     except servico.JaDecidido as ja:
         resposta=f'Pedido {numero} já estava {ja.pedido["status"].replace("_"," ")}; nada foi alterado.';resultado='ja_decidido'

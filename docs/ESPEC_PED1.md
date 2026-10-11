@@ -1,6 +1,6 @@
 # PED1 — Ciclo de status do pedido e avisos ao cliente
 
-**Situação:** especificação para aprovação. **Nada implementado.** Entra depois do UX3.1 e antes do B3.
+**Situação:** **aprovada em 11/10/2026**, com as decisões da seção 11 (que valem sobre o texto das seções 4, 6, 7 e 8 onde houver diferença). Andamento na seção 12.
 **Data:** 11/10/2026. Base: produção em `gateway:dd6f93b`, schema 29.
 
 Este documento tem três partes: o que existe hoje (seções 1 e 2), a proposta (seções 3 a 9) e o que precisa de decisão (seção 10). O contrato das rotas para o painel está na seção 5; os textos padrão, na seção 4.3.
@@ -395,3 +395,127 @@ Mesma rota (`GET /api/v1/pedidos/{numero}?conversation_id=`), mesma regra (só a
 5. **Lista dos últimos pedidos da conversa** para o agente (rota nova na seção 8): incluir?
 6. **Aviso de `concluido`:** ligado por padrão, como você definiu. Em retirada ele chega logo depois do "pronto para retirada"; quer ligado mesmo assim?
 7. **Divisão em três blocos** (PED1-a, b, c) com parada entre eles, ou tudo de uma vez?
+
+---
+
+## 11. Decisões do Marco (11/10/2026) — aprovada
+
+1. **Nome de exibição:** **cadastro manual > informado pelo cliente > perfil do WhatsApp > telefone formatado** (muda a ordem da seção 6.1). O nome informado chega pelo campo novo `nome_cliente` no retorno do agente; o gateway aceita e valida: 2–60 caracteres, sem número de telefone, sem emoji; nunca sobrescreve o cadastro manual. O Marco ajusta o Skyone quando o PED1-c for implementado.
+2. **Cliente cancela só em `aguardando_loja`**; depois disso o agente transfere.
+3. **`X-Role`:** o painel envia (`plataforma` | `admin` | `membro`), preenchido no servidor a partir da sessão. Membro alterando textos de aviso → 403. **Sem `X-Role` → tratado como `membro`** (falha fechada). Não há papel só de leitura por enquanto.
+4. **Reenvio manual:** incluído, só para aviso com status de falha; nunca reenvia aviso já entregue; com auditoria.
+5. **Últimos pedidos da conversa para o agente:** os **3** últimos (`numero`, `status`, `unidade`, `total`, `atualizado_em`) em `contexto_modulos.pedidos` e na resposta de `consultar_pedido` quando vier sem número.
+6. **Aviso de `concluido`:** ligado por padrão **só para entrega**; para retirada nasce desligado. O liga/desliga passa a ser por status **e modalidade**.
+7. **Textos padrão** (substituem os da seção 4.3); o trecho opcional `[[ … ]]` está aprovado:
+
+| Status | Ligado | Texto |
+|---|---|---|
+| `confirmado` | sim | `Oba! Seu pedido nº {numero} foi confirmado pela unidade {unidade} ✅[[ Previsão: {previsao}.]]` |
+| `em_preparo` | não | `Seu pedido nº {numero} já está sendo preparado 🍣` |
+| `pronto_retirada` | sim | `Seu pedido nº {numero} está pronto! Já pode retirar na unidade {unidade} 🛍️` |
+| `saiu_entrega` | sim | `Seu pedido nº {numero} saiu para entrega e já está a caminho 🛵` |
+| `concluido` | só entrega | `Pedido nº {numero} entregue. Bom apetite[[, {nome_cliente}]]! 😊` |
+| `recusado` | sim | `Poxa, a unidade {unidade} não conseguiu aceitar o pedido nº {numero}.[[ Motivo: {motivo}.]] Seus itens continuam no carrinho, se quiser ajustar e pedir de novo é só me chamar.` |
+| `cancelado` | sim | `Seu pedido nº {numero} foi cancelado pela unidade {unidade}.[[ Motivo: {motivo}.]] Se precisar, estou por aqui para ajudar.` |
+
+8. **Divisão e ordem** (parada e relatório ao fim de cada um):
+   - **PED1-a:** máquina de status, linha do tempo, rotas de lista/detalhe/transição/contagem, aviso transacional (corrige o aviso descartado com bot pausado) com os textos acima **fixos por enquanto**, `consultar_pedido` com status e linha do tempo, últimos 3 pedidos no pacote.
+   - **PED1-b:** textos editáveis por empresa, liga/desliga por status/modalidade, prévia e reenvio (e o `X-Role`).
+   - **PED1-c:** conversas e contatos (`nome_exibicao`, `nome_origem`, `telefone_e164`, `canal_info`, `unidade_preferida`, `estado`, `ultima`, `pedido_aberto`, `PATCH` do nome de cadastro, `nome_cliente` do agente).
+
+---
+
+## 12. PED1-a — implementado (11/10/2026): contrato final para o painel
+
+Migração 030 (aditiva). Testes em `tests/test_ped1a.py`. Os textos dos avisos são os da seção 11, fixos até o PED1-b.
+
+### 12.1 Rotas
+
+Todas em `/admin/v1`, com a chave do painel; as de escrita exigem `X-Actor`. Valores em dinheiro são números (`102.0`); datas em ISO com fuso (UTC).
+
+| Rota | Uso |
+|---|---|
+| `GET /tenants/{t}/pedidos` | Lista |
+| `GET /tenants/{t}/pedidos/contagem` | Alerta de pedidos novos |
+| `GET /tenants/{t}/pedidos/{numero}` | Detalhe com linha do tempo |
+| `POST /tenants/{t}/pedidos/{numero}/status` | Mudar o status |
+| `POST /tenants/{t}/pedidos/{numero}/confirmar` | Atalho: `{"previsao_min"?}` |
+| `POST /tenants/{t}/pedidos/{numero}/recusar` | Atalho: `{"motivo"?}` |
+
+**Lista** — parâmetros: `status` (um ou vários, por vírgula), `unidade`, `modalidade` (`delivery`\|`retirada`), `desde`, `ate` (data/hora **com fuso**, sobre a criação; `ate` é exclusivo), `busca` (2–100 caracteres: número do pedido, nome ou telefone), `limite` (1–100, padrão 50), `cursor`. Mais recente primeiro. Parâmetro inválido → 400.
+
+```json
+{"itens": [{
+  "id": 41, "numero": "59859", "status": "em_preparo", "modalidade": "retirada",
+  "unidade": "patio_guedala", "unidade_nome": "Pátio Guedala",
+  "cliente": {"nome": "Marco", "telefone": "+5511947281513",
+              "canal": {"id": "can_…", "tipo": "uazapi", "nome": "WhatsApp Loja", "icone": "whatsapp"}},
+  "cliente_nome": "Marco", "cliente_telefone": "5511947281513",
+  "conversation_id": "bykoji:can_…:5511947281513",
+  "itens": [{"codigo": "GUE-0001", "nome": "Edamame", "quantidade": 1, "preco_unitario": 34.0, "subtotal": 34.0, "observacao": null, "alcoolico": false, "item_id": 12, "categoria": "Entradas"}],
+  "numero_itens": 1, "subtotal": 34.0, "taxa_entrega": null, "total": 34.0, "tem_alcoolico": false,
+  "endereco": null, "horario": "20h", "observacao": null, "motivo": null, "previsao_min": 40,
+  "criado_em": "2026-10-11T00:40:12Z", "atualizado_em": "2026-10-11T00:52:03Z",
+  "decidido_em": "2026-10-11T00:42:50Z", "decidido_por": "joana",
+  "aviso": {"status": "desligado"}
+}], "proximo_cursor": 40}
+```
+
+- `cliente_nome`, `cliente_telefone` e `decidido_por` são os campos antigos, mantidos para não quebrar o painel atual. O bloco `cliente` é o novo.
+- `cliente.telefone` vem em E.164; `null` quando o identificador não é telefone (canal API/site).
+- `cliente.nome` é o nome gravado no pedido quando ele foi fechado (o nome de exibição completo chega no PED1-c).
+- `icone`: `uazapi`/`meta` → `whatsapp`; `site` → `globe`; `api` → `code`; `email` → `mail`; `teams` → `teams`; `luxbrain` → `luxbrain`.
+- `aviso` (do status atual): `{"status": "pendente" | "enviado" | "simulado" | "descartado" | "falhou" | "desligado"}`, ou `null` quando o status não tem aviso (pedido recém-criado, cancelado pelo cliente).
+
+**Detalhe** — os campos da lista mais:
+
+```json
+{"status_descricao": "Em preparo",
+ "entrega": {"modalidade": "retirada", "endereco": null, "horario": "20h", "observacao": null},
+ "proximos_status": ["pronto_retirada", "concluido", "cancelado"],
+ "linha_do_tempo": [
+   {"de": null, "para": "aguardando_loja", "por": "agente", "origem": "agente", "em": "2026-10-11T00:40:12Z", "motivo": null, "previsao_min": null, "aviso": null},
+   {"de": "aguardando_loja", "para": "confirmado", "por": "joana", "origem": "painel", "em": "2026-10-11T00:42:50Z", "motivo": null, "previsao_min": 40,
+    "aviso": {"status": "enviado", "em": "2026-10-11T00:42:52Z", "erro": null}},
+   {"de": "confirmado", "para": "em_preparo", "por": "joana", "origem": "painel", "em": "2026-10-11T00:52:03Z", "motivo": null, "previsao_min": null,
+    "aviso": {"status": "desligado", "em": null, "erro": null}}]}
+```
+
+- `origem`: `agente` (pedido criado), `cliente` (cancelou pelo agente), `painel`, `unidade_whatsapp` ("OK 12345"), `sistema`.
+- `proximos_status` já respeita a modalidade e as regras: o painel desenha só esses botões. Lista vazia = status final.
+- `aviso.erro` é o tipo do erro (sem dado do provedor). `aviso.status = "descartado"`: contato fora do piloto, ou empresa/agente/canal inativo.
+- Pedidos anteriores ao PED1 têm a linha do tempo reconstruída (criação e decisão).
+
+**Mudar o status** — corpo `{"status": "...", "motivo": "...", "previsao_min": 40}`.
+
+| Resposta | Quando |
+|---|---|
+| 200 + detalhe completo | Mudou |
+| 400 | `cancelado` sem `motivo` de pelo menos 3 caracteres; `previsao_min` fora de 1–600 ou enviado em status que não seja `confirmado`/`em_preparo`; status desconhecido; sem `X-Actor` |
+| 404 | Pedido não existe nesta empresa |
+| 409 | Mudança não permitida: `{"erro": {"codigo": "CONFLICT", "detalhes": {"campo": "status", "status": "<atual>", "motivo": "<regra>"}}}` |
+
+`motivo` do 409: `status_final`, `mesmo_status`, `nao_pode_voltar`, `modalidade_incompativel` (pronto para retirada em pedido de entrega, ou saiu para entrega em retirada), `recusa_so_aguardando`.
+
+**Contagem**
+
+```json
+{"aguardando_loja": {"total": 3, "mais_antigo_em": "2026-10-11T00:31:00Z",
+   "por_unidade": [{"unidade": "patio_guedala", "nome": "Pátio Guedala", "total": 2, "mais_antigo_em": "2026-10-11T00:31:00Z"}]},
+ "em_andamento": {"confirmado": 1, "em_preparo": 4, "pronto_retirada": 0, "saiu_entrega": 2},
+ "avisos_com_falha": 0}
+```
+
+`avisos_com_falha` conta pedidos cujo aviso do status **atual** falhou.
+
+### 12.2 O que a implementação fixou
+
+- **Aviso transacional:** sai com o bot pausado, com a conversa aguardando atendente e com a conversa encerrada, sem mudar nenhum desses estados. Não sai (fica `descartado`) para contato fora do piloto, conversa anonimizada ou empresa/agente/canal inativo. Em envio de teste, ou em canal sem envio (API/site), fica `simulado` e mesmo assim entra no histórico.
+- **Histórico:** mensagem de saída com `origem: "sistema"` e `meta.aviso_pedido: {"numero", "status"}`. O painel pode mostrá-la com um selo "aviso automático".
+- **Previsão:** aceita em `confirmado` e em `em_preparo`. No aviso: "cerca de 40 minutos", "cerca de 1 hora", "cerca de 1h30". Para o agente, `previsao_ate` conta de quando a unidade assumiu o pedido.
+- **`{nome_cliente}`:** primeiro nome, só quando parece nome (letras; "." ou emoji não contam). Senão o trecho opcional some.
+- **Cancelado pela unidade** não devolve os itens ao carrinho; **recusado** devolve, como antes.
+- **Falha de envio** do aviso: fica `falhou` e não é reenviado (o reenvio manual vem no PED1-b).
+- **WhatsApp da unidade** ("OK"/"NÃO") e a Skill `cancelar_pedido` seguem as mesmas regras de antes e agora gravam na linha do tempo.
+- **Anonimização do contato** apaga também os motivos da linha do tempo dos pedidos dele.
+- Fica para o **PED1-b**: textos e liga/desliga por empresa, prévia, reenvio e `X-Role`. Para o **PED1-c**: conversas e contatos.

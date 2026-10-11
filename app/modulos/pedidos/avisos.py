@@ -40,12 +40,55 @@ def texto_pedido_unidade(p,itens,nome_unidade):
     return '\n'.join(linhas)
 
 
+# Avisos de status ao cliente (PED1). Textos padrão; [[ … ]] é trecho opcional: some quando alguma variável de dentro está vazia.
+TEXTOS={
+    'confirmado':'Oba! Seu pedido nº {numero} foi confirmado pela unidade {unidade} ✅[[ Previsão: {previsao}.]]',
+    'em_preparo':'Seu pedido nº {numero} já está sendo preparado 🍣',
+    'pronto_retirada':'Seu pedido nº {numero} está pronto! Já pode retirar na unidade {unidade} 🛍️',
+    'saiu_entrega':'Seu pedido nº {numero} saiu para entrega e já está a caminho 🛵',
+    'concluido':'Pedido nº {numero} entregue. Bom apetite[[, {nome_cliente}]]! 😊',
+    'recusado':'Poxa, a unidade {unidade} não conseguiu aceitar o pedido nº {numero}.[[ Motivo: {motivo}.]] Seus itens continuam no carrinho, se quiser ajustar e pedir de novo é só me chamar.',
+    'cancelado':'Seu pedido nº {numero} foi cancelado pela unidade {unidade}.[[ Motivo: {motivo}.]] Se precisar, estou por aqui para ajudar.',
+}
+VARIAVEIS=('numero','unidade','previsao','motivo','nome_cliente')
+
+
+def ligado(status,modalidade):
+    """Padrão: tudo ligado, menos "em preparo"; "concluído" só avisa em entrega (na retirada o cliente acabou de buscar)."""
+    if status=='em_preparo': return False
+    if status=='concluido': return modalidade=='delivery'
+    return status in TEXTOS
+
+
+def previsao(minutos):
+    if not minutos: return ''
+    if minutos<60: return f'cerca de {minutos} minuto'+('' if minutos==1 else 's')
+    horas,resto=divmod(minutos,60)
+    if resto: return f'cerca de {horas}h{resto:02d}'
+    return f'cerca de {horas} hora'+('' if horas==1 else 's')
+
+
+def primeiro_nome(nome):
+    """Primeiro nome para o aviso; vazio se o que há não parece nome (ponto, emoji, telefone)."""
+    partes=str(nome or '').split()
+    primeiro=partes[0].strip('.,;:!?') if partes else ''
+    return primeiro[:30] if len(primeiro)>=2 and all(c.isalpha() or c in "-'" for c in primeiro) else ''
+
+
+def renderizar(modelo,valores):
+    """Troca as variáveis; trecho [[ … ]] com variável vazia some inteiro. Variável fora da lista fica como está."""
+    def opcional(m):
+        trecho=m.group(1)
+        usadas=re.findall(r'\{(\w+)\}',trecho)
+        return trecho if all(str(valores.get(v) or '').strip() for v in usadas) else ''
+    texto=re.sub(r'\[\[(.*?)\]\]',opcional,modelo,flags=re.S)
+    return re.sub(r'\{(\w+)\}',lambda m: str(valores.get(m.group(1)) or '') if m.group(1) in VARIAVEIS else m.group(0),texto).strip()
+
+
 def texto_cliente(p,nome_unidade):
-    if p['status']=='confirmado':
-        return f'Seu pedido nº {p["numero"]} foi confirmado pela unidade {nome_unidade}. ✅'
-    base=f'Seu pedido nº {p["numero"]} não pôde ser aceito pela unidade {nome_unidade}.'
-    if p['motivo']: base+=f'\nMotivo: {p["motivo"]}'
-    return base+'\nOs itens voltaram para o seu carrinho, caso queira ajustar e pedir de novo.'
+    motivo=(p['motivo'] or '').strip().rstrip('.')
+    return renderizar(TEXTOS[p['status']],{'numero':p['numero'],'unidade':nome_unidade,'previsao':previsao(p['previsao_min']) if p['status'] in ('confirmado','em_preparo') else '',
+                                           'motivo':motivo,'nome_cliente':primeiro_nome(p['cliente_nome'])})
 
 
 def texto_transbordo(telefone,nome,motivo,detalhe,pedido,painel_url):
@@ -74,8 +117,11 @@ async def avisar_unidade_do_pedido(conn,tenant,p,itens):
 
 
 async def avisar_cliente_do_pedido(conn,tenant,p):
-    return await enfileirar(conn,tenant,'pedido_cliente',f'{p["numero"]}:{p["status"]}',
-                            texto_cliente(p,await nome_da_unidade(conn,tenant,p['unidade'])),None,p['conversation_id'])
+    """Aviso do status atual ao cliente, uma vez por pedido e status. Devolve 'enfileirado' ou 'desligado'."""
+    if not ligado(p['status'],p['modalidade']): return 'desligado'
+    await enfileirar(conn,tenant,'pedido_cliente',f'{p["numero"]}:{p["status"]}',
+                     texto_cliente(p,await nome_da_unidade(conn,tenant,p['unidade'])),None,p['conversation_id'])
+    return 'enfileirado'
 
 
 async def avisar_transbordo(conn,tenant,conversa,motivo,detalhe=None,painel_url=None):
@@ -103,12 +149,9 @@ async def _enviar(pipeline,a):
     """Devolve o status final do aviso."""
     db=pipeline.db;tenant=a['tenant_id']
     if a['tipo']=='pedido_cliente':
-        conv=await db.fetchrow('SELECT agente_id FROM conversas WHERE tenant_id=$1 AND conversation_id=$2',tenant,a['conversation_id'])
-        if not conv: return 'descartado'
-        cfg=await pipeline.cfg.efetiva(tenant,conv['agente_id'])
-        # Mesmo caminho das respostas do bot: respeita piloto, pausa do atendente e envio de teste.
-        if not await pipeline.enviar(tenant,a['conversation_id'],conv['agente_id'],a['texto']): return 'descartado'
-        return 'enviado' if cfg['send_mode']=='live' else 'simulado'
+        # Aviso transacional (PED1): sai mesmo com o bot pausado por atendente; respeita piloto e envio de teste.
+        numero,_,status=a['referencia'].partition(':')
+        return await pipeline.enviar_transacional(tenant,a['conversation_id'],a['texto'],{'numero':numero,'status':status})
     import json
     canal=await _canal_de_envio(db,tenant,a['conversation_id'])
     if not canal: return 'simulado'
