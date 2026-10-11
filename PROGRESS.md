@@ -1172,3 +1172,9 @@ PY
 - Erros meus durante o bloco, corrigidos antes da implantação ou logo depois: nome do banco de produção no script (o contêiner aponta para o de testes), listagem do crontab no instalador, fuso do cron.
 - **Pendente do Marco:** credenciais (B2, chave pública, Telegram) no `.env`; regras de ciclo de vida no bucket; liberar `/gateway/health/ops` no proxy do painel (hoje 404 por fora); primeiro ensaio manual.
 - Conferência: 4 containers `healthy`, fila zerada, `/gateway/health` 200, admin por fora 404, `/api/v1` sem chave 401, zero erros nos logs.
+
+## OPS1: /health/ops liberado por fora — 2026-10-11 19:46 UTC
+
+- Proxy do painel (Caddy) passou a deixar `/gateway/health/ops`, feito como tarefa do painel, com ordem do Marco (registro em `painel_koji/docs/worklog.md`). O gateway não mudou: por fora já sai só `{"ok": false}` com 503 (falta o destino B2 no `.env`); `motivos` só na chamada interna.
+- Conferência por fora: `/gateway/health/ops` 503 `{"ok":false}`, `/gateway/health` 200, admin 404, `/api/v1` sem chave 401.
+- `docs/Caddyfile.painel.example` e a 10 da `docs/ESPEC_OPS1.md` atualizados.

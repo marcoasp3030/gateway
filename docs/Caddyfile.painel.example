@@ -23,7 +23,7 @@
 		route {
 			@inicio path /gateway /gateway/
 			redir @inicio /gateway/health 308
-			@publico path /gateway/health /gateway/webhooks/* /gateway/api/*
+			@publico path /gateway/health /gateway/health/ops /gateway/webhooks/* /gateway/api/*
 			handle @publico {
 				request_body {
 					max_size 2MiB
