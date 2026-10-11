@@ -1132,9 +1132,12 @@ PY
 - **G4**: o que faltava especificar está na seção 11 de `docs/ESPEC_GESTAO.md`, com 8 decisões (11.8). **Nada implementado; aguarda liberação.**
 - Conferência: 4 containers `healthy`, fila zerada, admin por fora 404, `/api/v1` sem chave 401, zero erros nos logs.
 
-## G4-a — cadastro de entrega e pagamento da unidade — 2026-10-11
+## G4-a — cadastro de entrega e pagamento da unidade — 2026-10-11 16:42 UTC
 
-- Status: **pronto para implantar** (suíte travada: **241 passed**). Decisões do Marco na 11.9 de `docs/ESPEC_GESTAO.md`; contrato final na 11.10; contrato de `consultar_entrega` (G4-b) na 11.11.
+- Status: **implantado** por `scripts/implantar.sh g4a` às 16:42 UTC. Código `2b19ef4`, imagem `gateway:2b19ef4`, schema **34**. Volta: `gateway:16c77c0` (roda sobre o schema 34; a 034 só acrescenta). Suíte travada: **241 passed**. Backup `/home/twadmin/backups/gateway/pre-g4a-20261011T164152Z/gateway.dump` (600).
+- O script rodou **duas vezes**: a primeira implantou; a segunda (mesmo comando, iniciada às 16:42) passou a suíte de novo e parou no passo 3 ("o commit 2b19ef4 já é o que está em produção"), sem backup, build nem troca. As duas escreveram no mesmo log em `/tmp`, por isso a saída da primeira ficou incompleta; o estado foi conferido direto (um backup só, contêineres iniciados às 16:42:11, schema 34).
+- Conferência (só leitura): 4 contêineres `healthy` na imagem nova, admin por fora 404, `/api/v1` sem chave 401, zero erros nos logs desde a troca. By Koji: 0 taxas, 0 formas, nenhum campo novo preenchido nas 4 unidades: tudo continua "a unidade confirma".
+- Decisões do Marco na 11.9 de `docs/ESPEC_GESTAO.md`; contrato final na 11.10; contrato de `consultar_entrega` (G4-b) na 11.11.
 - Migração **034** (aditiva): unidade ganha `delivery_ativo`, `taxa_modo`, `frete_gratis_acima`, `tempo_entrega_min`, `tempo_retirada_min`; tabelas `unidade_taxas` (bairro com apelidos ou faixa de CEP) e `unidade_pagamentos`. Colunas de carrinho e pedido ficam para o G4-b (decisão minha, para não surgir nulo novo nas respostas de hoje).
 - `modulos/entrega.py` (regras puras: comparação de bairro sem acento/pontuação, CEP, conflitos, pagamentos) e `admin/entrega.py` (rotas de taxas e pagamentos). Escrita só admin/plataforma; na unidade, os campos de taxa/pagamento só travam quando o valor muda.
 - `info_unidades` ganhou `entrega`, `retirada` e `pagamentos`; `delivery` agora vem do cadastro. Pacote e carrinho **não mudaram** (teste confere).
