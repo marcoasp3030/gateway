@@ -45,6 +45,7 @@ class Comportamento(Estrito):
     refazer_turno: Literal['on','off'] | None = None
     aviso_demora_janela_s: int | None = Field(None,ge=0,le=3600)
     carrinho_expira_h: int | None = Field(None,ge=1,le=720)
+    acoes_recentes_min: int | None = Field(None,ge=0,le=1440)
     skyone_dominios_permitidos: list[str] | None = None
 
 

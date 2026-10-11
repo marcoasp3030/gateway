@@ -174,7 +174,7 @@ Exemplo: `{"item_id": 1027, "quantidade": 2, "observacao": "sem cebola"}`. O mes
 
 ### 6. `esvaziar_carrinho`
 
-**Descrição para o agente:** Remove todos os itens. Use quando o cliente quiser recomeçar ou trocar de unidade. Depois disso a unidade deixa de estar definida.
+**Descrição para o agente:** Remove todos os itens. Use quando o cliente quiser recomeçar ou trocar de unidade. Depois disso o carrinho volta ao estado inicial completo: sem unidade, modalidade, endereço, horário, observação nem maioridade confirmada. **Pergunte tudo de novo**; não presuma entrega ou retirada do pedido anterior.
 
 `DELETE /api/v1/carrinho/{conversation_id}`
 

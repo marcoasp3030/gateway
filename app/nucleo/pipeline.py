@@ -52,6 +52,9 @@ PAINEL_URL=os.getenv('PAINEL_URL','https://painel.luxbrain.com.br').strip() or N
 FIM_DE_FRASE=('?','.','!','…')
 # Segundos de "digitando" pedidos ao canal por vez; o canal cancela sozinho ao enviar.
 DIGITANDO_S=25
+# Refazer o turno (UX2/UX3.1): no máximo dois por turno; o segundo só enquanto o turno original começou há até 30 s.
+MAX_REFAZER=2
+TETO_REFAZER_S=30
 
 
 # Palavras de quem só está encerrando ou agradecendo. Saudações ("oi", "bom dia", "tudo bem") e
@@ -453,16 +456,17 @@ return 1
                 await self.redis.delete(self.prefixo+':first:'+self.chave(tenant,conversa))
                 turno=await self._responder(tenant,conversa,conv,cfg)
                 if turno is None: return 'vazio'
-                # UX2: chegou mensagem do cliente antes de a resposta sair → descarta e refaz com o lote completo (uma vez).
-                if await self._deve_refazer(tenant,conversa,cfg,turno):
+                # UX2: chegou mensagem do cliente antes de a resposta sair → descarta e refaz com o lote completo.
+                # Até MAX_REFAZER vezes (UX3.1); quem decide cada uma é _deve_refazer, que também registra a recusa:
+                # a mensagem que sobrar vira o próximo turno.
+                for _ in range(MAX_REFAZER+1):
+                    if not await self._deve_refazer(tenant,conversa,cfg,turno): break
                     await self._descartar(tenant,conversa,turno)
                     # Mais uma consulta ao agente: a trava da conversa e a vaga ganham validade nova.
                     await self.redis.eval("if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('EXPIRE',KEYS[1],ARGV[2]) else return 0 end",1,lock,token,cfg['timeout_s']+90)
                     if reservada: await vaga.renovar(cfg)
                     turno=await self._responder(tenant,conversa,conv,cfg)
                     if turno is None: return 'vazio'
-                    # Limite de um refazer: se chegou mais mensagem, só fica registrado; ela vira o próximo turno.
-                    await self._deve_refazer(tenant,conversa,cfg,turno)
             await self._concluir(tenant,conversa,cfg,turno,await self._enviar_partes(tenant,conversa,cfg,turno))
             return 'concluido'
         finally:
@@ -494,15 +498,25 @@ return 1
             AND origem='bot' AND tipo<>'reacao' AND criado_em>now()-make_interval(secs=>$3))""",tenant,conversa,float(janela))
 
     async def _deve_refazer(self,tenant,conversa,cfg,turno):
-        """Há mensagem nova do cliente fora do lote e nada da resposta saiu ainda? Só refaz uma vez, e nunca
-        quando o turno já teve efeito para fora (pedido fechado/cancelado, transferência, encerramento)."""
+        """Há mensagem nova do cliente fora do lote e nada da resposta saiu ainda? Nunca refaz quando o turno já teve
+        efeito para fora (pedido fechado/cancelado, transferência, encerramento). O segundo refazer (UX3.1) só acontece
+        se o turno refeito não chamou Skill nem enviou balão, e se o turno original começou há no máximo TETO_REFAZER_S;
+        terceiro, nunca."""
         if cfg.get('refazer_turno')!='on' or turno['origem']!='cliente' or turno['status']!='ok': return False
         if not await self.db.fetchval("""SELECT EXISTS(SELECT 1 FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND processada_em IS NULL
                 AND direcao='entrada' AND origem='cliente' AND NOT (id=ANY($3::bigint[])))""",tenant,conversa,turno['mensagem_ids']): return False
         resultado=json.loads(turno['resposta']) if isinstance(turno['resposta'],str) else (turno['resposta'] or {})
         from modulos.pedidos import servico as pedidos
         motivo=None
-        if turno['refeito_de'] is not None: motivo='ja_refeito'
+        if turno['refeito_de'] is not None:
+            original=await self.db.fetchrow('SELECT refeito_de,agente_inicio FROM turnos WHERE tenant_id=$1 AND id=$2',tenant,turno['refeito_de'])
+            if original is None or original['refeito_de'] is not None: motivo='ja_refeito'
+            elif turno['aviso_demora'] or await self.db.fetchval("""SELECT EXISTS(SELECT 1 FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2
+                    AND direcao='saida' AND criado_em>=$3)""",tenant,conversa,turno['agente_inicio']): motivo='balao_enviado'
+            elif await self.db.fetchval('SELECT EXISTS(SELECT 1 FROM skill_chamadas WHERE tenant_id=$1 AND conversation_id=$2 AND criado_em>=$3)',
+                    tenant,conversa,turno['agente_inicio']): motivo='skill_chamada'
+            elif await self.db.fetchval('SELECT extract(epoch FROM now()-$1::timestamptz)>$2',original['agente_inicio'],float(TETO_REFAZER_S)): motivo='teto_de_espera'
+        if motivo: pass
         elif resultado.get('acao') in ('transferir_humano','encerrar','pedido_fechado'): motivo='acao_com_efeito'
         elif await self.db.fetchval("""SELECT EXISTS(SELECT 1 FROM skill_chamadas WHERE tenant_id=$1 AND conversation_id=$2 AND criado_em>=$3
                 AND resultado='ok' AND skill=ANY($4::text[]))""",tenant,conversa,turno['agente_inicio'],list(pedidos.SKILLS_COM_EFEITO)): motivo='skill_com_efeito'
@@ -531,8 +545,10 @@ return 1
     async def _refeito_de(self,tenant,conversa,ids):
         """Turno descartado cujo lote está (em parte) nestas mensagens pendentes: este turno é o refazer dele.
         Lido do banco a cada vez, então vale também depois de queda do worker no meio."""
-        return await self.db.fetchrow("""SELECT id,agente_inicio,agente_fim,aviso_demora FROM turnos WHERE tenant_id=$1 AND conversation_id=$2
-            AND status='refeito' AND mensagem_ids && $3::bigint[] ORDER BY id DESC LIMIT 1""",tenant,conversa,ids)
+        return await self.db.fetchrow("""SELECT t.id,t.agente_fim,t.aviso_demora,
+                coalesce((SELECT o.agente_inicio FROM turnos o WHERE o.tenant_id=t.tenant_id AND o.id=t.refeito_de AND o.status='refeito'),t.agente_inicio) agente_inicio
+            FROM turnos t WHERE t.tenant_id=$1 AND t.conversation_id=$2
+            AND t.status='refeito' AND t.mensagem_ids && $3::bigint[] ORDER BY t.id DESC LIMIT 1""",tenant,conversa,ids)
 
     async def _responder(self,tenant,conversa,conv,cfg):
         itens=await self._pendentes(self.db,tenant,conversa)

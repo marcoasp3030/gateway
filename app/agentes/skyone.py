@@ -101,6 +101,7 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
     contato = await repo.obter(tenant_id,'contatos',conv['contato_id']) if conv.get('contato_id') else None
     canal = await repo.obter(tenant_id,'tenant_canais',conv['canal_id']) if conv.get('canal_id') else None
     from modulos import contextos
+    from modulos.pedidos.servico import acoes_recentes
     from nucleo.horarios import pacote as unidades
     return {
         'unidades':await unidades(repo.db,tenant_id,tenant['timezone']),
@@ -122,6 +123,8 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
         'ultima_interacao':ultima_interacao,
         # Só em turno refeito (UX2): o que a tentativa descartada já fez nas Skills. Lista vazia nos demais.
         'acoes_ja_executadas':acoes or [],
+        # Sempre presente (UX3.1): chamadas de Skill desta conversa nos últimos minutos, com há quantos segundos foi cada uma.
+        'acoes_recentes':await acoes_recentes(repo.db,tenant_id,conversa_id,cfg.get('acoes_recentes_min')),
         'cliente':{'nome':(contato or {}).get('nome') or conv.get('nome'),'unidade_preferida':conv.get('unidade_preferida'),
                    'resumo_anterior':(contato or {}).get('resumo')},
     }

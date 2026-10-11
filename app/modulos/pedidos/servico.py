@@ -130,12 +130,26 @@ async def acoes_do_turno(db,tenant,conversa,inicio,fim):
     """Chamadas de Skill feitas na conversa dentro da janela de um turno (agente_inicio..agente_fim)."""
     rows=await db.fetch("""SELECT skill,dados,resultado FROM skill_chamadas WHERE tenant_id=$1 AND conversation_id=$2
         AND criado_em>=$3 AND criado_em<=$4 ORDER BY id LIMIT 30""",tenant,conversa,inicio,fim)
-    saida=[]
-    for r in rows:
-        d=json.loads(r['dados']) if isinstance(r['dados'],str) else (r['dados'] or {})
-        saida.append({'skill':r['skill'],'item':d.get('item'),'quantidade':d.get('quantidade'),'resultado':r['resultado'],
-                      **({'detalhe':d['detalhe']} if d.get('detalhe') else {})})
-    return saida
+    return [_acao(r) for r in rows]
+
+
+def _acao(r):
+    d=json.loads(r['dados']) if isinstance(r['dados'],str) else (r['dados'] or {})
+    return {'skill':r['skill'],'item':d.get('item'),'quantidade':d.get('quantidade'),'resultado':r['resultado'],
+            **({'detalhe':d['detalhe']} if d.get('detalhe') else {})}
+
+
+MAX_ACOES_RECENTES=20
+
+
+async def acoes_recentes(db,tenant,conversa,minutos):
+    """Chamadas de Skill desta conversa nos últimos `minutos` (UX3.1): as 20 mais recentes, da mais antiga
+    para a mais nova, com há quantos segundos foi cada uma. Mesmo resumo de acoes_ja_executadas."""
+    if not minutos or minutos<=0: return []
+    rows=await db.fetch("""SELECT skill,dados,resultado,greatest(0,extract(epoch FROM now()-criado_em))::int ha FROM skill_chamadas
+        WHERE tenant_id=$1 AND conversation_id=$2 AND criado_em>now()-make_interval(mins=>$3) ORDER BY id DESC LIMIT $4""",
+        tenant,conversa,int(minutos),MAX_ACOES_RECENTES)
+    return [{**_acao(r),'ha_segundos':r['ha']} for r in reversed(rows)]
 
 
 async def adicionar(conn,tenant,conversa,item_id,quantidade,observacao):
@@ -200,7 +214,9 @@ async def esvaziar(conn,tenant,conversa):
     c=await aberto(conn,tenant,conversa)
     if c:
         await conn.execute('DELETE FROM carrinho_itens WHERE tenant_id=$1 AND carrinho_id=$2',tenant,c['id'])
-        await _unidade_se_vazio(conn,tenant,c)
+        # Volta ao estado inicial completo: nada do pedido anterior (retirada, endereço, horário…) fica para o agente presumir.
+        await conn.execute("""UPDATE carrinhos SET unidade=NULL,modalidade=NULL,endereco=NULL,horario=NULL,observacao=NULL,
+            maioridade_confirmada=false,atualizado_em=now() WHERE tenant_id=$1 AND id=$2""",tenant,c['id'])
 
 
 async def entrega(conn,tenant,conversa,dados):

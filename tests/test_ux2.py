@@ -120,18 +120,19 @@ def test_P2_refazer_o_turno_uma_vez_sem_duplicar_carrinho_nem_resposta(tmp_path)
                 acoes=[r['acao'] for r in await pool.fetch("SELECT acao FROM audit_log WHERE tenant_id=$1 AND alvo=$2 ORDER BY id",T,c1)]
                 assert 'turno.refeito' in acoes and 'resposta.descartada' in acoes
 
-                # 2) No máximo um refazer: outra mensagem durante o turno refeito não refaz de novo.
+                # 2) No máximo dois refazer (UX3.1), o segundo só sem Skill e sem balão; mensagem durante o terceiro turno não refaz de novo.
                 pacotes.clear();c2=await conversa('u2')
                 async def chega(texto):
                     async def f(payload): await chegar(payload['conversation_id'],texto)
                     return f
-                roteiro[:]=[fala('primeira (descartada)',antes=await chega('segunda mensagem')),fala('resposta do lote de duas',antes=await chega('terceira mensagem')),fala('resposta da terceira')]
-                assert await p.processar_duravel(T,c2)=='concluido' and len(pacotes)==2
-                assert [m['conteudo'] for m in await saidas(c2)]==['resposta do lote de duas'] and await pendentes(c2)==1
-                ts=await turnos(c2);assert [(t['status'],t['refazer_recusado']) for t in ts]==[('refeito',None),('ok','ja_refeito')]
-                # A terceira vira o próximo turno, comum (sem ações herdadas).
-                assert await p.processar_duravel(T,c2)=='concluido' and pacotes[2]['acoes_ja_executadas']==[] and [m['texto'] for m in pacotes[2]['mensagens_do_lote']]==['terceira mensagem']
-                assert [m['conteudo'] for m in await saidas(c2)]==['resposta do lote de duas','resposta da terceira'] and await pendentes(c2)==0
+                roteiro[:]=[fala('primeira (descartada)',antes=await chega('segunda mensagem')),fala('segunda (descartada)',antes=await chega('terceira mensagem')),
+                            fala('resposta do lote de três',antes=await chega('quarta mensagem')),fala('resposta da quarta')]
+                assert await p.processar_duravel(T,c2)=='concluido' and len(pacotes)==3
+                assert [m['conteudo'] for m in await saidas(c2)]==['resposta do lote de três'] and await pendentes(c2)==1
+                ts=await turnos(c2);assert [(t['status'],t['refazer_recusado']) for t in ts]==[('refeito',None),('refeito',None),('ok','ja_refeito')]
+                # A quarta vira o próximo turno, comum (sem ações herdadas).
+                assert await p.processar_duravel(T,c2)=='concluido' and pacotes[3]['acoes_ja_executadas']==[] and [m['texto'] for m in pacotes[3]['mensagens_do_lote']]==['quarta mensagem']
+                assert [m['conteudo'] for m in await saidas(c2)]==['resposta do lote de três','resposta da quarta'] and await pendentes(c2)==0
 
                 # 3) Não refaz quando o turno já teve efeito: fechar_pedido/cancelar_pedido com sucesso, ou transferir/encerrar.
                 for n,(skill,acao,motivo) in enumerate((('fechar_pedido','nenhuma','skill_com_efeito'),('cancelar_pedido','nenhuma','skill_com_efeito'),
@@ -153,7 +154,7 @@ def test_P2_refazer_o_turno_uma_vez_sem_duplicar_carrinho_nem_resposta(tmp_path)
                 assert await p.processar_duravel(T,cr)=='concluido' and [m['conteudo'] for m in await saidas(cr)]==['final']
                 assert pacotes[1]['acoes_ja_executadas'][0]['skill']=='fechar_pedido' and pacotes[1]['acoes_ja_executadas'][0]['resultado']!='ok'
 
-                # 4) Worker cai logo depois de descartar: a retomada reconhece o refazer (não refaz de novo e leva as ações).
+                # 4) Worker cai logo depois de descartar: a retomada reconhece o refazer (leva as ações; só cabe mais um refazer).
                 pacotes.clear();c4=await conversa('u4')
                 roteiro[:]=[fala('descartada',antes=adiciona_e_chega)]
                 responder=p._responder;vezes=[]
@@ -165,11 +166,12 @@ def test_P2_refazer_o_turno_uma_vez_sem_duplicar_carrinho_nem_resposta(tmp_path)
                 with pytest.raises(RuntimeError): await p.processar_duravel(T,c4)
                 p._responder=responder
                 assert [m['conteudo'] for m in await saidas(c4)]==[] and await pendentes(c4)==2
-                roteiro[:]=[fala('retomada',antes=await chega('outra ainda'))]
-                assert await p.processar_duravel(T,c4)=='concluido' and len(pacotes)==2
-                assert pacotes[1]['acoes_ja_executadas']==[{'skill':'adicionar_item','item':'Edamame','quantidade':1,'resultado':'ok'}]
+                roteiro[:]=[fala('retomada (descartada)',antes=await chega('outra ainda')),fala('retomada',antes=await chega('e mais uma'))]
+                assert await p.processar_duravel(T,c4)=='concluido' and len(pacotes)==3
+                # O segundo refazer também leva o que o turno ORIGINAL fez.
+                assert pacotes[1]['acoes_ja_executadas']==pacotes[2]['acoes_ja_executadas']==[{'skill':'adicionar_item','item':'Edamame','quantidade':1,'resultado':'ok'}]
                 assert [m['conteudo'] for m in await saidas(c4)]==['retomada']
-                assert [(t['status'],t['refazer_recusado']) for t in await turnos(c4)]==[('refeito',None),('ok','ja_refeito')]
+                assert [(t['status'],t['refazer_recusado']) for t in await turnos(c4)]==[('refeito',None),('refeito',None),('ok','ja_refeito')]
                 # Worker cai depois da resposta do turno refeito: só falta enviar; o agente não é chamado de novo.
                 pacotes.clear();c5=await conversa('u5')
                 roteiro[:]=[fala('descartada',antes=await chega('segunda')),fala('final')]
@@ -182,7 +184,7 @@ def test_P2_refazer_o_turno_uma_vez_sem_duplicar_carrinho_nem_resposta(tmp_path)
 
                 # 5) Métricas.
                 m=(await c.get(f'/admin/v1/tenants/{T}/metricas')).json()['picotadas']
-                assert m['turnos_refeitos']==5 and m['refazer_recusado']=={'ja_refeito':2,'skill_com_efeito':2,'acao_com_efeito':2}
+                assert m['turnos_refeitos']==7 and m['refazer_recusado']=={'ja_refeito':2,'skill_com_efeito':2,'acao_com_efeito':2}
                 assert m['mensagens_por_turno']['dois']>=3 and m['espera_media_ms'] is not None and m['atropelados']>=1
                 # Herança: empresa liga, agente pode desligar.
                 await modo(refazer_turno=None,debounce_incompleta_s=7,debounce_curto_s=2.5)

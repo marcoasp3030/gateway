@@ -326,7 +326,7 @@ Campo sempre presente no pacote. **Lista vazia** em turno comum; preenchido só 
 - **Padrões da plataforma:** `debounce_incompleta_s` nasce **nulo** (mensagem incompleta espera o `debounce_s`, como antes) e `debounce_curto_s` continua 1,5. Os valores aprovados (7 s e 2,5 s) são configurados no agente do By Koji. Única mudança para todos: reticências deixaram de contar como frase completa.
 - **Status do turno descartado:** `status = 'refeito'`, `etapa = 'concluido'`, com a resposta guardada e nunca enviada. O turno seguinte tem `refeito_de` apontando para ele.
 - **Reconhecimento do refazer:** o turno novo é "refeito" quando o lote dele contém mensagens de um turno `refeito`. É lido do banco a cada vez, então vale também depois de queda do worker no meio.
-- **Motivos de não refazer** (`turnos.refazer_recusado`): `ja_refeito`, `acao_com_efeito` (`transferir_humano`, `encerrar` ou `pedido_fechado` na resposta), `skill_com_efeito` (`fechar_pedido`/`cancelar_pedido` com sucesso).
+- **Motivos de não refazer** (`turnos.refazer_recusado`): `ja_refeito`, `acao_com_efeito` (`transferir_humano`, `encerrar` ou `pedido_fechado` na resposta), `skill_com_efeito` (`fechar_pedido`/`cancelar_pedido` com sucesso). Desde o UX3.1 (seção 12): `skill_chamada`, `balao_enviado`, `teto_de_espera`, e `ja_refeito` passou a significar "já foi refeito duas vezes".
 - **Não refaz** também turno com erro do agente (a resposta é o fallback), turno de notificação do sistema e turno ignorado.
 - O turno descartado **conta no consumo** (o agente foi consultado).
 - Antes da segunda consulta, a trava da conversa e a vaga da empresa/agente ganham validade nova.
@@ -494,3 +494,58 @@ Dados de hoje (32 turnos respondidos ou refeitos no WhatsApp do By Koji), mensag
 - A regra nova teria pego **1 caso em 32 turnos** (3%); com 4 s, 2 casos.
 - **Risco:** o cliente já viu o 1º balão (e talvez o 2º, que sai 1 s depois). Refazer a partir dali significa mandar uma segunda resposta que pode contradizer a primeira ou repetir o que já foi dito, e não há como apagar o que saiu. Além disso, a Skill pode já ter sido executada com base no lote antigo, e a resposta nova teria de explicar isso.
 - **Recomendação:** não implementar. O ganho é pequeno e o caso principal de hoje foi outro: mensagem chegando durante o **turno refeito** (turno 790), que o limite de um refazer deixa passar. Se for para mexer, a alavanca com mais retorno é permitir um **segundo** refazer quando o turno refeito ainda não chamou nenhuma Skill — a discutir.
+
+**Decisão do Marco (11/10/2026):** não implementar o refazer depois do 1º balão. Segue o segundo refazer, na seção 12.
+
+---
+
+## 12. UX3.1 — segundo refazer e `acoes_recentes`
+
+**Implementado em 11/10/2026.** Migração 029 (aditiva). Testes em `tests/test_ux31.py`.
+
+### 12.1 Segundo refazer
+
+| Regra | Como ficou |
+|---|---|
+| Quantos | Até **2** refazer por turno (`MAX_REFAZER`). O terceiro nunca acontece (`ja_refeito`) |
+| 1º refazer | Como antes (seção 4 e 8.3), sem teto de tempo |
+| 2º refazer | Só quando o **turno refeito** (a 2ª tentativa) **não chamou nenhuma Skill** (com ou sem sucesso) e **nenhum balão saiu** na conversa desde que ele começou |
+| Teto de espera | Se o turno **original** começou a consultar o agente há mais de **30 s** (`TETO_REFAZER_S`), não há 2º refazer: a resposta sai e a mensagem nova vira o próximo turno |
+| Motivos gravados | `skill_chamada`, `balao_enviado`, `teto_de_espera`, além dos anteriores |
+| Efeito para fora | Continua valendo: turno com `fechar_pedido`/`cancelar_pedido` com sucesso, transferência ou encerramento nunca é refeito |
+
+- `acoes_ja_executadas` do 2º refazer traz as chamadas de Skill desde o início do turno **original** (as do 1º turno descartado continuam valendo).
+- O aviso de demora continua sem sair em turno refeito.
+- **Sobre o teste das 21:09 (seção 11.1):** com esta regra o turno 790 **não** seria refeito de novo, porque ele já tinha chamado `adicionar_item` quando a resposta ficou pronta (`skill_chamada`). O que evita a repetição naquele caso é o `acoes_recentes` abaixo: o turno 791 receberia "adicionar_item Edamame ×1, ok, há ~25 s".
+
+### 12.2 Contrato de `acoes_recentes` (gateway → agente)
+
+Campo **sempre presente** no pacote; lista vazia quando não há nada na janela.
+
+```json
+"acoes_recentes": [
+  {"skill": "adicionar_item", "item": "Edamame", "quantidade": 1, "resultado": "ok", "ha_segundos": 27},
+  {"skill": "definir_entrega", "item": null, "quantidade": null, "resultado": "ok", "detalhe": "modalidade", "ha_segundos": 22}
+]
+```
+
+| Ponto | Regra |
+|---|---|
+| O que entra | Chamadas de Skill **desta conversa** que mudam carrinho ou pedido (as mesmas de `acoes_ja_executadas`), com sucesso ou recusadas, nos últimos `acoes_recentes_min` minutos |
+| Campos | `skill`, `item`, `quantidade`, `resultado`, `detalhe` (só quando existe) — iguais aos de `acoes_ja_executadas` (seção 8.2) — mais `ha_segundos` (inteiro: há quantos segundos a chamada foi feita, contado na montagem do pacote) |
+| Ordem e limite | Da mais antiga para a mais recente; no máximo **20** (as 20 mais recentes) |
+| Nunca traz | Endereço, observação do item ou qualquer dado pessoal |
+| Configuração | `acoes_recentes_min` por agente, com herança (0–1440; padrão **15**; `0` = lista sempre vazia) |
+| Relação com `acoes_ja_executadas` | Em turno refeito, as chamadas da tentativa descartada aparecem nos dois campos |
+| Isolamento | Só a conversa do pacote, só a empresa dona dela |
+
+**Significado para o agente:** "isto foi feito há pouco nesta conversa". Antes de chamar `adicionar_item`, o agente confere se o mesmo item acabou de entrar e se o cliente pediu de novo ou só continuou a conversa. Consultas (`buscar_cardapio`, `ver_carrinho`, `info_unidades`) não entram na lista.
+
+### 12.3 Carrinho esvaziado ou expirado volta ao estado inicial
+
+Pedido do Marco depois do teste de 11/10 (a modalidade "retirada" ficou no carrinho esvaziado e o agente assumiu retirada).
+
+- `esvaziar_carrinho` agora limpa também `unidade`, `modalidade`, `endereco`, `horario`, `observacao` e `maioridade_confirmada`. O carrinho devolvido é igual ao de uma conversa nova (`faltando: ["itens", "modalidade"]`).
+- Expiração: o carrinho expirado é arquivado inteiro e o que o agente passa a ver é um carrinho novo, no estado inicial; nada do arquivado é herdado.
+- Remover o último item (`remover_item`) continua como antes: solta a unidade e a maioridade, mantém modalidade/endereço/horário (o cliente está trocando o item, não recomeçando).
+- Pedido já fechado não é afetado.
