@@ -35,9 +35,9 @@ def test_tabela_3_1_forma_e_motivo():
     p=lambda b,canal='uazapi',ligado=True: B.planejar(b,canal,ligado)
     assert p(None)==(None,None,[]) and p(SIM_NAO)==('botao',None,SIM_NAO['opcoes'])
     assert p(O(('a','Um')))[0]=='botao' and p(O(('a','Um'),('b','Dois'),('c','Três')))[0]=='botao'
-    # 4 a 10 → texto (lista só no B3); título com mais de 20 → texto com o título inteiro.
+    # 4 a 10 → lista (B3); título com mais de 20 → texto com o título inteiro.
     quatro=O(('a','Um'),('b','Dois'),('c','Três'),('d','Quatro'))
-    assert p(quatro)==('texto','acima_do_limite',quatro['opcoes'])
+    assert p(quatro)==('lista',None,quatro['opcoes'])
     assert p(O(('a','x'*20)))[0]=='botao'
     longo=O(('a','Quero falar com um atendente'),('b','Não'))
     assert p(longo)==('texto','titulo_longo',longo['opcoes'])
@@ -50,8 +50,8 @@ def test_tabela_3_1_forma_e_motivo():
     # Desligado ou canal sem botão → texto.
     assert p(SIM_NAO,ligado=False)[:2]==('texto','desligado')
     for canal in ('api','site','email','meta'): assert p(SIM_NAO,canal)[:2]==('texto','canal_sem_botao')
-    # Inválido e limite vêm antes de desligado/canal (o motivo mais específico).
-    assert p(quatro,'api',False)[1]=='acima_do_limite'
+    # Mais de 3 com o recurso desligado ou em canal sem lista: texto numerado.
+    assert p(quatro,'api',False)[:2]==('texto','desligado') and p(quatro,'api')[:2]==('texto','canal_sem_botao')
     assert B.numerado('Posso confirmar?',SIM_NAO['opcoes'])=='Posso confirmar?\n\n1. Confirmar pedido\n2. Alterar' and B.numerado('oi',[])=='oi'
 
 
@@ -136,8 +136,8 @@ def test_envio_botao_texto_numerado_recusa_do_provedor_e_incerto_sem_duplicar(mo
             assert NUMERADO in [h['content'] for h in pac['historico'] if h['role']=='assistant']
 
             # 4) Cada linha da tabela em envio real: tudo vira texto numerado, com o motivo.
-            for escolhas,motivo,texto in ((O(('a','Um'),('b','Dois'),('c','Três'),('d','Quatro')),'acima_do_limite','Qual?\n\n1. Um\n2. Dois\n3. Três\n4. Quatro'),
-                    (O(('a','Quero falar com um atendente'),('b','Não')),'titulo_longo','Qual?\n\n1. Quero falar com um atendente\n2. Não'),
+            # (4 a 10 opções passaram a sair como lista no B3: tests/test_botoes_b3.py.)
+            for escolhas,motivo,texto in ((O(('a','Quero falar com um atendente'),('b','Não')),'titulo_longo','Qual?\n\n1. Quero falar com um atendente\n2. Não'),
                     (O(('Ruim!','Sim'),('b','Não')),'invalido','Qual?\n\n1. Sim\n2. Não'),({'opcoes':[],'invalido':True},'invalido','Qual?')):
                 chamadas.clear();r,m,meta,_=await parte('Qual?',escolhas)
                 assert chamadas==[('/send/text',{'number':'5511900000001','text':texto})] and m['conteudo']==texto and meta['botoes']['motivo']==motivo and r=='enviada',motivo
@@ -186,8 +186,8 @@ def test_envio_botao_texto_numerado_recusa_do_provedor_e_incerto_sem_duplicar(mo
             # 10) Métricas por empresa e por agente; outra empresa não vê nada.
             mt=(await client.get('/admin/v1/tenants/alpha/metricas')).json()['botoes']
             assert mt['enviados']=={'botao':3,'lista':0} and mt['clicados']=={'atual':1,'antigo':0}
-            assert mt['em_texto']['por_motivo']=={'desligado':2,'acima_do_limite':1,'titulo_longo':1,'invalido':2,'provedor_recusou':1,'provedor_incerto':2,'canal_sem_botao':1}
-            assert mt['em_texto']['total']==10 and (await client.get('/admin/v1/tenants/alpha/metricas',params={'agente':a})).json()['botoes']==mt
+            assert mt['em_texto']['por_motivo']=={'desligado':2,'titulo_longo':1,'invalido':2,'provedor_recusou':1,'provedor_incerto':2,'canal_sem_botao':1}
+            assert mt['em_texto']['total']==9 and (await client.get('/admin/v1/tenants/alpha/metricas',params={'agente':a})).json()['botoes']==mt
             vazio={'enviados':{'botao':0,'lista':0},'em_texto':{'total':0,'por_motivo':{}},'clicados':{'atual':0,'antigo':0}}
             assert (await client.get('/admin/v1/tenants/bravo/metricas')).json()['botoes']==vazio
             # Herança: ligado na empresa vale para o agente que não define; o agente pode desligar.

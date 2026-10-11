@@ -126,7 +126,7 @@ async def metricas(request:Request,tenant_id:str,agente:str|None=None):
         FROM mensagens m JOIN conversas c ON c.tenant_id=m.tenant_id AND c.conversation_id=m.conversation_id
         LEFT JOIN mensagens o ON o.tenant_id=m.tenant_id AND o.conversation_id=m.conversation_id AND o.direcao='saida' AND o.origem='bot'
             AND o.message_id=c.canal_id||':'||(m.meta->'interacao'->>'mensagem')
-        WHERE m.tenant_id=$1 AND m.direcao='entrada' AND m.meta->'interacao'->>'tipo'='botao' AND ($2::text IS NULL OR c.agente_id=$2)""",tenant_id,agente)
+        WHERE m.tenant_id=$1 AND m.direcao='entrada' AND m.meta->'interacao'->>'tipo' IN ('botao','lista') AND ($2::text IS NULL OR c.agente_id=$2)""",tenant_id,agente)
     # Com motivo = não saiu como botão (plano B em texto, ou entrega incerta).
     texto={}
     for r in bot:

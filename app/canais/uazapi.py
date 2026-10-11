@@ -12,7 +12,8 @@ MIDIAS={'AudioMessage':('audio','áudio'),'ImageMessage':('imagem','imagem'),'Vi
     'ContactMessage':('contato','contato'),'ContactsArrayMessage':('contato','contatos')}
 TEXTOS={'Conversation','ExtendedTextMessage'}
 # Clique em botão de resposta (payload real de 10/10/2026: tests/fixtures/uazapi/clique_botao.json).
-CLIQUES_DE_BOTAO={'TemplateButtonReplyMessage'}
+# Clique em botão de resposta e escolha em lista (B3): viram texto com o título da opção.
+CLIQUES_DE_BOTAO={'TemplateButtonReplyMessage':'botao','ListResponseMessage':'lista'}
 ID_DE_BOTAO=re.compile(r'[a-z0-9_]{1,40}')
 LOCALIZACOES={'LocationMessage','LiveLocationMessage'}
 
@@ -70,7 +71,7 @@ def _midia(tipo_provedor,conteudo,legenda):
 
 def _titulo_do_botao(msg,conteudo):
     """Título do botão clicado, como o cliente viu (uma linha, até 200 caracteres)."""
-    for valor in (conteudo.get('selectedDisplayText'),msg.get('vote'),msg.get('text')):
+    for valor in (conteudo.get('selectedDisplayText'),msg.get('vote'),msg.get('text'),conteudo.get('title')):
         if isinstance(valor,str) and valor.strip(): return ' '.join(valor.split())[:200]
     return None
 
@@ -115,10 +116,13 @@ def normalizar(payload: dict, agora=None) -> dict | None:
     elif tipo_provedor in CLIQUES_DE_BOTAO and _titulo_do_botao(msg,conteudo):
         # O clique é uma mensagem de texto do cliente: o texto é o título do botão.
         tipo = 'texto'; texto = _titulo_do_botao(msg,conteudo)
-        ident = str(conteudo.get('selectedID') or msg.get('buttonOrListid') or '')
+        # Toque feito no aparelho da própria instância (não é o cliente escolhendo, nem atendente escrevendo): ignora.
+        if msg.get('fromMe'): return None
+        escolha = conteudo.get('singleSelectReply') if isinstance(conteudo.get('singleSelectReply'),dict) else {}
+        ident = str(conteudo.get('selectedID') or msg.get('buttonOrListid') or escolha.get('selectedRowID') or '')
         origem = str(msg.get('quoted') or (conteudo.get('contextInfo') or {}).get('stanzaID') or '')[:200]
         # Sem id válido ou sem a mensagem de origem, fica só o texto.
-        if ID_DE_BOTAO.fullmatch(ident) and origem: meta = {'interacao': {'tipo': 'botao', 'id': ident, 'mensagem': origem}}
+        if ID_DE_BOTAO.fullmatch(ident) and origem: meta = {'interacao': {'tipo': CLIQUES_DE_BOTAO[tipo_provedor], 'id': ident, 'mensagem': origem}}
     elif tipo_provedor in TEXTOS or (not tipo_provedor and texto):
         tipo = 'texto'
         if not texto: return None
@@ -208,11 +212,9 @@ async def enviar(client,cofre,tenant_id,canal,telefone,texto):
     except ValueError: return None
 
 
-async def enviar_menu(client,cofre,tenant_id,canal,telefone,texto,opcoes):
-    """POST /send/menu, type "button", só com botões de resposta ("título|id").
-    Recusa certa do provedor (4xx, menos 408) → MenuRecusado: nada saiu, quem chama envia em texto.
+async def _menu(client,cofre,tenant_id,canal,corpo):
+    """POST /send/menu. Recusa certa do provedor (4xx, menos 408) → MenuRecusado: nada saiu, quem chama envia em texto.
     Qualquer outra falha sobe como entrega incerta (não reenviar). Devolve o messageid do provedor."""
-    corpo={'number':telefone,'type':'button','text':texto,'choices':[f'{o["titulo"]}|{o["id"]}' for o in opcoes]}
     try: response=await _chamar(client,cofre,tenant_id,canal,'POST','/send/menu',corpo)
     except ValueError as erro:
         achado=re.search(r'HTTP (\d{3})',str(erro))
@@ -220,6 +222,17 @@ async def enviar_menu(client,cofre,tenant_id,canal,telefone,texto,opcoes):
         raise ValueError('Envio recusado' if achado else str(erro)) from None
     try: return id_do_envio(response.json())
     except ValueError: return None
+
+
+async def enviar_menu(client,cofre,tenant_id,canal,telefone,texto,opcoes):
+    """Botões de resposta: type "button", choices "título|id"."""
+    return await _menu(client,cofre,tenant_id,canal,{'number':telefone,'type':'button','text':texto,'choices':[f'{o["titulo"]}|{o["id"]}' for o in opcoes]})
+
+
+async def enviar_lista(client,cofre,tenant_id,canal,telefone,texto,opcoes,botao,secao='Opções'):
+    """Lista (B3): type "list", listButton = texto do botão que abre a lista, choices "[Seção]" e "título|id|descrição"."""
+    return await _menu(client,cofre,tenant_id,canal,{'number':telefone,'type':'list','text':texto,'listButton':botao,
+        'choices':[f'[{secao}]']+[f'{o["titulo"]}|{o["id"]}'+(f'|{o["descricao"]}' if o.get('descricao') else '') for o in opcoes]})
 
 
 def marca_do_envio(canal_id,provedor_id):

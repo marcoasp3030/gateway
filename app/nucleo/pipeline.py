@@ -288,8 +288,9 @@ return 1
             if not await self.permitido(tenant,conversa,agente_id,repo,configuracoes): return False
             conv=await repo.obter(tenant,'conversas',conversa)
             canal,empresa,cfg=await self.contexto(tenant,conv['canal_id'],repo,configuracoes)
+            escolhas=await self._com_unidades(conn,tenant,escolhas)
             plano=botoes.planejar(escolhas,canal['tipo'],cfg['botoes_interativos']=='on')
-            marca,plano=await self._despachar(conn,tenant,conversa,canal,cfg,conv['telefone'],texto,plano)
+            marca,plano=await self._despachar(conn,tenant,conversa,canal,cfg,conv['telefone'],texto,plano,botoes.titulo_da_lista(escolhas))
             await conn.execute("""INSERT INTO mensagens(tenant_id,conversation_id,direcao,origem,conteudo,processada_em,message_id,meta)
                 VALUES ($1,$2,'saida','bot',$3,now(),$4,$5::jsonb) ON CONFLICT(tenant_id,message_id) DO NOTHING""",tenant,conversa,
                 botoes.numerado(texto,plano[2]),marca[0],_meta(marca[1],plano if escolhas else None))
@@ -631,14 +632,28 @@ return 1
             tenant,turno['id'],status,erro,json.dumps(resultado) if resultado else None,aviso,
             json.dumps(resultado.get('uso')) if resultado and resultado.get('uso') else None,*campos_do_retorno(resultado))
 
-    async def _despachar(self,conn,tenant,conversa,canal,efetiva,telefone,texto,plano):
+    async def _com_unidades(self,conn,tenant,escolhas):
+        """Lista (B3): opção cujo id é o código de uma unidade da empresa ganha como descrição a situação real
+        da unidade agora. Só quando as opções já iriam como lista; falha aqui não segura a resposta."""
+        if not botoes.candidata_a_lista(escolhas): return escolhas
+        try:
+            from nucleo.horarios import resumos_das_unidades
+            return botoes.com_descricoes(escolhas,await resumos_das_unidades(conn,tenant,[o.get('id') for o in escolhas['opcoes'] if isinstance(o,dict) and o.get('id')]))
+        except Exception:
+            log.warning('Situação das unidades não lida para a lista; segue sem descrição')
+            return escolhas
+
+    async def _despachar(self,conn,tenant,conversa,canal,efetiva,telefone,texto,plano,botao_da_lista=None):
         """Envia um balão pelo canal (se o envio for real) na forma planejada. Devolve (marca, plano final).
         Menu recusado pelo provedor → o mesmo balão em texto numerado, com aviso. A conversa não falha por botão."""
         forma,motivo,opcoes=plano;marca=(None,None)
         if efetiva['send_mode']=='live':
             if canal['tipo']!='uazapi': raise ValueError('Envio live deste canal ainda não implementado')
-            if forma=='botao':
-                try: return uazapi.marca_do_envio(canal['id'],await uazapi.enviar_menu(self.http,self.cofre,tenant,canal,telefone,texto,opcoes)),plano
+            if forma in ('botao','lista'):
+                try:
+                    if forma=='lista': enviado=await uazapi.enviar_lista(self.http,self.cofre,tenant,canal,telefone,texto,opcoes,botao_da_lista or botoes.BOTAO_DA_LISTA)
+                    else: enviado=await uazapi.enviar_menu(self.http,self.cofre,tenant,canal,telefone,texto,opcoes)
+                    return uazapi.marca_do_envio(canal['id'],enviado),plano
                 except uazapi.MenuRecusado:
                     forma,motivo='texto','provedor_recusou'
             marca=uazapi.marca_do_envio(canal['id'],await uazapi.enviar(self.http,self.cofre,tenant,canal,telefone,botoes.numerado(texto,opcoes)))
@@ -665,13 +680,14 @@ return 1
                 if not await self.permitido(tenant,conversa,cfg['id'],repo,configuracoes): return 'ignorada'
                 conv=await repo.obter(tenant,'conversas',conversa)
                 canal,empresa,efetiva=await self.contexto(tenant,conv['canal_id'],repo,configuracoes)
+                escolhas=await self._com_unidades(conn,tenant,escolhas)
                 plano=botoes.planejar(escolhas,canal['tipo'],efetiva['botoes_interativos']=='on')
                 # No histórico o balão fica sempre com as opções numeradas, saiam elas como botão ou como texto.
                 await conn.execute('''INSERT INTO mensagens(tenant_id,conversation_id,direcao,origem,conteudo,processada_em,turno_request_id,parte,entrega,meta)
                     VALUES ($1,$2,'saida','bot',$3,now(),$4,$5,'enviando',$6::jsonb)''',tenant,conversa,botoes.numerado(texto,plano[2]),rid,parte,
                     _meta(None,plano if escolhas else None))
                 try:
-                    marca,plano=await self._despachar(conn,tenant,conversa,canal,efetiva,conv['telefone'],texto,plano)
+                    marca,plano=await self._despachar(conn,tenant,conversa,canal,efetiva,conv['telefone'],texto,plano,botoes.titulo_da_lista(escolhas))
                 except Exception:
                     # Não se sabe se o canal entregou: não reenviar, revisão humana.
                     if escolhas:

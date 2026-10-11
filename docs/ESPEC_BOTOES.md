@@ -281,7 +281,7 @@ Ordem sugerida: B1 → B2 → B4 → B3 → B5. O B1 vem primeiro porque sem ler
 | B1 — Ler o clique | Implementado em 10/10/2026: `uazapi.normalizar()` reconhece `TemplateButtonReplyMessage`; `mensagens.meta.interacao`; `ultima_interacao` no pacote (`skyone.interacao()`); testes em `tests/test_botoes.py` |
 | B2 — Botões de resposta do agente | Implementado em 10/10/2026: `nucleo/botoes.py` (leitura do Retorno e tabela 3.1), `uazapi.enviar_menu()`, plano B em texto, `meta.botoes`, configuração `botoes_interativos` (migração 026, padrão `off`), bloco `botoes` em `GET /metricas`; testes em `tests/test_botoes_b2.py`. **Desligado em todos os agentes** até o Marco pedir |
 | B4 | Aguarda liberação |
-| B3 | Payload real do envio e do clique registrado na seção 10 (11/10/2026). Implementação depois do PED1, com liberação do Marco |
+| B3 — Lista | Implementado em 11/10/2026 (seção 11): `botoes.planejar()` devolve `lista`; `uazapi.enviar_lista()`; descrição das unidades por `horarios.resumo()`; clique `ListResponseMessage` → `interacao.tipo = "lista"`; testes em `tests/test_botoes_b3.py` |
 | B5 | Junto do G3 |
 
 Detalhes do B1 que a implementação fixou:
@@ -360,3 +360,50 @@ Consequências para o B3:
 - `ListResponseMessage` entra em `CLIQUES_DE_BOTAO`, com o título lido de `vote`.
 - Clique de lista com `fromMe: true` (feito no aparelho da instância) **não** deve pausar o bot nem virar mensagem de atendente: é ignorado, com registro.
 - A fixture de teste sai deste payload (anonimizado), nas duas versões: do cliente e da instância.
+
+## 11. B3 — implementado (11/10/2026)
+
+Sem migração: usa a mesma chave `botoes_interativos` do B2 (ligada só no agente do By Koji).
+
+### 11.1 Quando o balão sai como lista
+
+| Caso | Resultado | Motivo |
+|---|---|---|
+| 4 a 10 opções válidas | **Lista** | — |
+| 1 a 3 opções, alguma com `descricao` | **Lista** | — |
+| 1 a 3 opções sem descrição | Botões (como no B2) | — |
+| Título com mais de 24 caracteres | Texto numerado | `titulo_longo` |
+| Descrição com mais de 72 | Texto numerado, com a descrição inteira | `descricao_longa` |
+| Recurso desligado no agente | Texto numerado | `desligado` |
+| Canal sem lista (site, e-mail, API) | Texto numerado | `canal_sem_botao` |
+| `id` inválido ou repetido, título vazio ou repetido | Texto numerado com o que se aproveita | `invalido` |
+| Mais de 10 opções | Campo inteiro inválido: só o balão | `invalido` |
+| Provedor recusa a lista (4xx) | O mesmo balão em texto numerado | `provedor_recusou` |
+| Falha incerta (5xx, tempo esgotado) | Não reenvia; revisão humana | `provedor_incerto` |
+
+O motivo `acima_do_limite` deixou de acontecer: mais de 3 opções agora é lista.
+
+### 11.2 Contrato com o agente
+
+```json
+"botoes": {"titulo_lista": "Ver unidades",
+           "opcoes": [{"id": "morumbi", "titulo": "Morumbi"},
+                      {"id": "patio_guedala", "titulo": "Pátio Guedala"},
+                      {"id": "einstein", "titulo": "Einstein"},
+                      {"id": "vila_nova_conceicao", "titulo": "Vila Nova Conceição"}]}
+```
+
+- `titulo_lista`: texto do botão que abre a lista; opcional, até 20 caracteres; fora disso ou ausente, "Ver opções".
+- `descricao`: opcional, até 72 caracteres.
+- **Unidades:** quando o `id` da opção é o código de uma unidade ativa da empresa, o gateway escreve a descrição com a situação real do momento — "Aberta até 22h30", "Aberta até amanhã 1h", "Fechada · abre amanhã 12h", "Pedidos pausados · volta 22h", "Horário a confirmar". Se o agente mandou descrição para essa opção, ela é substituída. Nas demais opções vale a do agente.
+- Isso só acontece quando o balão já seria lista. Duas ou três unidades sem descrição continuam saindo como botões.
+- Histórico e plano B: `1. Morumbi — Aberta até 22h30`.
+- Clique: chega como mensagem de texto com o título da opção e `ultima_interacao = {"tipo": "lista", "id", "titulo", "atual"}`, com as mesmas regras do botão (só vale se a lista foi enviada pelo gateway nesta conversa e o `id` estava nela).
+
+### 11.3 Envio e clique
+
+- Envio: `POST /send/menu` com `type: "list"`, `listButton`, `choices: ["[Opções]", "título|id|descrição", …]` (uma seção, chamada "Opções").
+- Clique: formato da seção 10. O título vem de `vote` (ou `content.title`), o id de `buttonOrListid` (ou `content.singleSelectReply.selectedRowID`), a origem de `quoted` (ou `contextInfo.stanzaID`).
+- **Toque feito no aparelho da instância** (`fromMe: true`), em lista ou em botão: ignorado. Não vira mensagem de atendente nem pausa o bot (foi o que aconteceu no teste de 11/10).
+- Métricas: `botoes.enviados.lista` e `botoes.clicados` (que agora soma botão e lista).
+- **A conferir no primeiro uso real:** o clique vindo do aparelho do cliente (`fromMe: false`) ainda não foi observado; a leitura foi escrita a partir do clique feito no aparelho da instância.

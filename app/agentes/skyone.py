@@ -53,14 +53,14 @@ def baloes(resposta):
 
 
 async def interacao(db,tenant_id,conversa_id,canal_id,mensagem):
-    """Clique em botão de uma mensagem do lote: {"tipo","id","titulo","atual"} ou None (texto puro).
+    """Clique em botão ou escolha em lista de uma mensagem do lote: {"tipo","id","titulo","atual"} ou None (texto puro).
 
     Só vale se a mensagem dos botões foi enviada pelo gateway nesta conversa e, havendo opções
     gravadas nela, o id é uma delas. `atual` = o bot não enviou mais nada depois daquela mensagem
     (clique em mensagem antiga vem com atual=false; o gateway nunca executa nada pelo clique)."""
     meta=mensagem.get('meta');meta=json.loads(meta) if isinstance(meta,str) else meta
     clique=(meta or {}).get('interacao') if isinstance(meta,dict) else None
-    if not isinstance(clique,dict) or clique.get('tipo')!='botao' or not clique.get('id') or not clique.get('mensagem') or not canal_id: return None
+    if not isinstance(clique,dict) or clique.get('tipo') not in ('botao','lista') or not clique.get('id') or not clique.get('mensagem') or not canal_id: return None
     origem=await db.fetchrow("""SELECT id,meta FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND message_id=$3
         AND direcao='saida' AND origem='bot'""",tenant_id,conversa_id,f'{canal_id}:{clique["mensagem"]}')
     if not origem: return None
@@ -69,7 +69,7 @@ async def interacao(db,tenant_id,conversa_id,canal_id,mensagem):
     if isinstance(opcoes,list) and clique['id'] not in {o.get('id') for o in opcoes if isinstance(o,dict)}: return None
     depois=await db.fetchval("""SELECT EXISTS(SELECT 1 FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND id>$3
         AND direcao='saida')""",tenant_id,conversa_id,origem['id'])
-    return {'tipo':'botao','id':clique['id'],'titulo':mensagem['conteudo'],'atual':not depois}
+    return {'tipo':clique['tipo'],'id':clique['id'],'titulo':mensagem['conteudo'],'atual':not depois}
 
 
 async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None,lote=None,acoes=None):

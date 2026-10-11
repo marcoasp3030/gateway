@@ -137,6 +137,31 @@ def agenda(horarios,fuso,excecoes=None,dias=7,agora=None):
     return saida
 
 
+def resumo(s,fuso,agora=None):
+    """Situação da unidade em poucas palavras, para a descrição de uma opção de lista (B3):
+    "Aberta até 22h30", "Fechada · abre amanhã 12h", "Pedidos pausados"."""
+    z=ZoneInfo(fuso);agora=(agora or datetime.now(z)).astimezone(z)
+    hora=lambda d: f'{d.hour}h' if d.minute==0 else f'{d.hour}h{d.minute:02d}'
+    def quando(iso):
+        d=datetime.fromisoformat(iso).astimezone(z);dias=(d.date()-agora.date()).days
+        return ('' if dias==0 else 'amanhã ' if dias==1 else d.strftime('%d/%m '))+hora(d)
+    if s['motivo']=='inativa': return 'Indisponível'
+    if s['motivo']=='pausa': return 'Pedidos pausados'+(f' · volta {quando(s["proxima_abertura"])}' if s.get('proxima_abertura') else '')
+    if s['aberta_agora'] is True: return 'Aberta até '+quando(s['fecha_as']) if s.get('fecha_as') else 'Aberta'
+    if s['aberta_agora'] is None: return 'Horário a confirmar'
+    return 'Fechada'+(f' · abre {quando(s["proxima_abertura"])}' if s.get('proxima_abertura') else '')
+
+
+async def resumos_das_unidades(db,tenant,codigos):
+    """{codigo: resumo} das unidades ativas da empresa entre os códigos pedidos."""
+    if not codigos: return {}
+    fuso=await db.fetchval('SELECT timezone FROM tenants WHERE id=$1',tenant)
+    saida={}
+    for u in await db.fetch('SELECT * FROM tenant_unidades WHERE tenant_id=$1 AND ativo AND codigo=ANY($2::text[])',tenant,list(codigos)):
+        saida[u['codigo']]=resumo(await situacao_da_unidade(db,tenant,u,fuso),u['fuso'] or fuso)
+    return saida
+
+
 async def excecoes_da_unidade(db,tenant,unidade_id,de=None,ate=None):
     return await db.fetch('''SELECT id,data,fechado,faixas,motivo FROM unidade_excecoes WHERE tenant_id=$1 AND unidade_id=$2
         AND ($3::date IS NULL OR data>=$3) AND ($4::date IS NULL OR data<=$4) ORDER BY data''',tenant,unidade_id,de,ate)

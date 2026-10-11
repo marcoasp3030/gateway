@@ -1,15 +1,20 @@
 """Botões de resposta (docs/ESPEC_BOTOES.md, bloco B2).
 
-O agente devolve só {"opcoes": [{"id","titulo"}]}; aqui se decide a forma (botão ou texto numerado)
-e por quê. Nada aqui monta payload de canal, e nenhum caso vira erro: sempre há plano B em texto."""
+O agente devolve só {"opcoes": [{"id","titulo","descricao"?}], "titulo_lista"?}; aqui se decide a forma
+(botão, lista — bloco B3 — ou texto numerado) e por quê. Nada aqui monta payload de canal, e nenhum caso vira erro: sempre há plano B em texto."""
 import re
 import unicodedata
 
 MAX_BOTOES=3
 MAX_OPCOES=10
 MAX_TITULO=20
+# Lista (B3): 4 a 10 opções, ou qualquer quantidade quando alguma opção tem descrição. Limites da Meta.
+MAX_TITULO_LISTA=24
+MAX_DESCRICAO=72
+MAX_BOTAO_DA_LISTA=20
+BOTAO_DA_LISTA='Ver opções'
 ID=re.compile(r'[a-z0-9_]{1,40}')
-MOTIVOS=('canal_sem_botao','acima_do_limite','titulo_longo','invalido','provedor_recusou','provedor_incerto','desligado')
+MOTIVOS=('canal_sem_botao','acima_do_limite','titulo_longo','descricao_longa','invalido','provedor_recusou','provedor_incerto','desligado')
 # Só com estas ações faz sentido oferecer escolha.
 ACOES_COM_BOTAO=('nenhuma','pedido_fechado')
 
@@ -33,14 +38,40 @@ def do_retorno(valor,acao,textos):
             ruim=True;continue
         ident=(o.get('id') or '').strip()
         if not ident: continue
-        lidas.append({'id':ident[:80],'titulo':o.get('titulo','').strip()[:200]})
+        lida={'id':ident[:80],'titulo':o.get('titulo','').strip()[:200]}
+        descricao=o.get('descricao')
+        if isinstance(descricao,str) and descricao.strip(): lida['descricao']=' '.join(descricao.split())[:200]
+        elif descricao is not None and not isinstance(descricao,str): ruim=True
+        lidas.append(lida)
     if len(lidas)>MAX_OPCOES: return {'opcoes':[],'invalido':True}
     if not lidas and not ruim: return None
-    return {'opcoes':lidas,'invalido':True} if ruim else {'opcoes':lidas}
+    lido={'opcoes':lidas,'invalido':True} if ruim else {'opcoes':lidas}
+    titulo_lista=valor.get('titulo_lista')
+    if isinstance(titulo_lista,str) and titulo_lista.strip(): lido['titulo_lista']=' '.join(titulo_lista.split())[:100]
+    return lido
+
+
+def candidata_a_lista(botoes):
+    """As opções iriam como lista (mais de 3, ou alguma com descrição)? Usado antes de planejar."""
+    opcoes=[o for o in (botoes or {}).get('opcoes') or [] if isinstance(o,dict)]
+    return len(opcoes)>MAX_BOTOES or any(o.get('descricao') for o in opcoes)
+
+
+def com_descricoes(botoes,descricoes):
+    """Cópia das opções com a descrição trocada pela de `descricoes` (id → texto) onde houver.
+    É como o gateway põe a situação real da unidade na lista; o que o agente escreveu para essas opções é substituído."""
+    if not botoes or not descricoes: return botoes
+    return {**botoes,'opcoes':[{**o,'descricao':descricoes[o['id']]} if isinstance(o,dict) and o.get('id') in descricoes else o for o in botoes.get('opcoes') or []]}
+
+
+def titulo_da_lista(botoes):
+    """Texto do botão que abre a lista: o do agente, se couber; senão o padrão."""
+    titulo=(botoes or {}).get('titulo_lista') or ''
+    return titulo if 0<len(titulo)<=MAX_BOTAO_DA_LISTA and '|' not in titulo else BOTAO_DA_LISTA
 
 
 def planejar(botoes,canal_tipo,ligado):
-    """(forma, motivo, opcoes): forma 'botao' | 'texto' | None (só o balão); opcoes = as que serão mostradas."""
+    """(forma, motivo, opcoes): forma 'botao' | 'lista' | 'texto' | None (só o balão); opcoes = as que serão mostradas."""
     if not botoes: return None,None,[]
     opcoes=[o for o in botoes.get('opcoes') or [] if isinstance(o,dict)]
     aproveitaveis=[];titulos=set();ids=set();invalido=bool(botoes.get('invalido'))
@@ -50,10 +81,19 @@ def planejar(botoes,canal_tipo,ligado):
         ids.add(ident)
         if not titulo or _chave(titulo) in titulos:
             invalido=True;continue
-        titulos.add(_chave(titulo));aproveitaveis.append({'id':ident,'titulo':titulo.replace('|','/')})
+        titulos.add(_chave(titulo));boa={'id':ident,'titulo':titulo.replace('|','/')}
+        descricao=' '.join(str(o.get('descricao') or '').split()).replace('|','/')
+        if descricao: boa['descricao']=descricao
+        aproveitaveis.append(boa)
     if invalido: return ('texto' if aproveitaveis else None),'invalido',aproveitaveis
     if not aproveitaveis: return None,None,[]
-    if len(aproveitaveis)>MAX_BOTOES: return 'texto','acima_do_limite',aproveitaveis
+    if len(aproveitaveis)>MAX_BOTOES or any(o.get('descricao') for o in aproveitaveis):
+        # Lista (B3). Mesmos planos B dos botões, mais a descrição comprida demais.
+        if any(len(o['titulo'])>MAX_TITULO_LISTA for o in aproveitaveis): return 'texto','titulo_longo',aproveitaveis
+        if any(len(o.get('descricao') or '')>MAX_DESCRICAO for o in aproveitaveis): return 'texto','descricao_longa',aproveitaveis
+        if not ligado: return 'texto','desligado',aproveitaveis
+        if canal_tipo!='uazapi': return 'texto','canal_sem_botao',aproveitaveis
+        return 'lista',None,aproveitaveis
     if any(len(o['titulo'])>MAX_TITULO for o in aproveitaveis): return 'texto','titulo_longo',aproveitaveis
     if not ligado: return 'texto','desligado',aproveitaveis
     if canal_tipo!='uazapi': return 'texto','canal_sem_botao',aproveitaveis
@@ -63,7 +103,7 @@ def planejar(botoes,canal_tipo,ligado):
 def numerado(texto,opcoes):
     """Plano B e histórico: o balão, uma linha em branco e as opções numeradas."""
     if not opcoes: return texto
-    return texto+'\n\n'+'\n'.join(f'{i}. {o["titulo"]}' for i,o in enumerate(opcoes,start=1))
+    return texto+'\n\n'+'\n'.join(f'{i}. {o["titulo"]}'+(f' — {o["descricao"]}' if o.get('descricao') else '') for i,o in enumerate(opcoes,start=1))
 
 
 def registro(forma,motivo,opcoes):
