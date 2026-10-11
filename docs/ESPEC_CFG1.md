@@ -591,6 +591,8 @@ Dois campos novos na raiz, **sempre presentes**:
 ```json
 "perfil_versao": "e0",
 "perfil_atendimento": {
+  "nome_empresa": "By Koji",
+  "descricao_negocio": "",
   "nome_atendente": null,
   "apresentacao_inicial": true,
   "tom": "equilibrado",
@@ -607,7 +609,7 @@ Dois campos novos na raiz, **sempre presentes**:
 }
 ```
 
-- Os 13 campos vêm sempre, nesta ordem, já resolvidos pela herança. Nunca falta campo.
+- Os 15 campos (13 do CFG1-a + `nome_empresa` e `descricao_negocio` do CFG1-a.1, seção 14) vêm sempre, nesta ordem, já resolvidos pela herança. Nunca falta campo.
 - `nome_atendente`, `mensagem_boas_vindas`, `mensagem_despedida`: texto ou `null`. `regras_da_casa`: texto, `""` quando vazio. `assuntos_proibidos`: `[{"assunto", "acao": "recusar" | "transferir"}]`.
 - `motivos_transferencia` sempre contém `pediu_humano` e `reclamacao`.
 - `perfil_versao`: `"e7"` = versão 7 da empresa; `"e7.a2"` quando o agente tem versão própria; `"e0"` = nada publicado (padrões). Fica gravado em cada turno.
@@ -624,3 +626,41 @@ Dois campos novos na raiz, **sempre presentes**:
 - **Segmento do agente × da empresa:** o agente herda do modelo em que está (com a versão fixada, como já era); a empresa, do `segmento` dela (versão mais recente). Mudança no padrão de um segmento chega aos agentes quando a plataforma publica a nova versão do modelo e move o agente para ela.
 - **Novos comportamentos guardados e versionados, ainda sem efeito:** `reacoes`, `reacoes_emojis`, `reacoes_max_dia`, `fora_do_horario`, `fora_do_horario_mensagem`, `fora_do_horario_aceita_agendado`, `transbordo_alerta`, `transbordo_horario_equipe`, `transbordo_fora_do_horario`. O alerta de transbordo de hoje (`whatsapp_alerta_transbordo`) continua funcionando como antes.
 - **Segmento `delivery_restaurante`:** módulos e comportamentos do `atendente_delivery`, mais botões/listas ligados, refazer turno ligado, espera de incompleta 7 s, espera curta 2,5 s e fora do horário `so_avisar`. Perfil: equilibrado, emojis moderados, respostas curtas, você, apresentação ligada, sem pedir nome, sugestões leves.
+
+---
+
+## 14. CFG1-a.1 e decisões depois do CFG1-a (11/10/2026)
+
+### 14.1 Decisões do Marco
+
+- **Segmento:** fica como está — mudança no padrão chega ao agente só quando a plataforma move o agente para a nova versão do modelo (procedimento na seção 14.3).
+- **Primeira versão do perfil do By Koji:** o Marco publica pelo painel; o gateway não publicou nada.
+- **Rotas antigas gerando versão automática ("alteração direta"):** aprovado.
+
+### 14.2 Dois campos novos no perfil
+
+| Campo | Tipo | Limite | Padrão |
+|---|---|---|---|
+| `nome_empresa` | texto, uma linha | 2–60 caracteres | **o nome cadastrado da empresa** |
+| `descricao_negocio` | texto | até 300 caracteres, até 3 quebras de linha | vazio |
+
+- Versionados e com a mesma herança dos demais (segmento → empresa → agente). São os dois primeiros campos do bloco no pacote.
+- `nome_empresa`: enquanto nenhum escopo definir, vale o nome da empresa (`tenants.nome`), e a origem do campo vem como **`cadastro`**. Enviar `null` (ou vazio) volta a esse padrão. O `esquema` traz esse nome em `padrao`.
+- `descricao_negocio`: passa pela mesma análise das regras da casa — instrução de sistema **bloqueia** a publicação; trecho duvidoso pede confirmação. Exemplo: "restaurante de culinária japonesa com delivery e catering em São Paulo".
+- Sem migração: o perfil é guardado em JSON.
+
+### 14.3 Procedimento: promover a versão de um segmento (só plataforma)
+
+O agente usa uma versão **fixa** do modelo (`modelo_id` + `modelo_versao`). Mudar o padrão de um segmento não atinge ninguém até o agente ser movido.
+
+1. **Criar a versão nova do segmento:** `PATCH /admin/v1/modelos-agente/{segmento}` com o que muda (`comportamento_padrao`, e o `perfil_padrao` quando a rota passar a aceitá-lo; até lá, o perfil padrão é alterado por migração). A rota nunca edita a versão existente: cria `versao + 1`.
+2. **Conferir o efeito num agente antes de mover:** `GET /admin/v1/tenants/{t}/agentes/{a}` e guardar a `configuracao_efetiva`.
+3. **Mover o agente:** `PATCH /admin/v1/tenants/{t}/agentes/{a}` com `{"modelo_versao": N}`.
+4. **Comparar** a `configuracao_efetiva` de antes e de depois. Só podem mudar os campos que o agente e a empresa **não** personalizaram (origem `modelo`/`segmento`). Campo personalizado nunca muda.
+5. **Voltar**, se preciso: o mesmo `PATCH` com a versão anterior. As versões antigas do modelo nunca são apagadas.
+
+A empresa (escopo sem agente) segue sempre a versão mais recente do `segmento` dela; isso só afeta o que o painel mostra como padrão na tela da empresa, não o que os agentes executam.
+
+### 14.4 Trava de implantação
+
+Depois da implantação do CFG1-a com 1 teste falhando, a implantação passou a ser feita só por `scripts/implantar.sh`, que depende de `scripts/suite_travada.sh` (regra 16 do `PLANO_CURSOR.md`).

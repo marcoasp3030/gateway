@@ -106,6 +106,16 @@ Encontre a causa raiz antes de mudar o código. Me explique a causa em 2-3 linha
 proponha a correção e rode de novo a validação. Não desative nem enfraqueça testes.
 ```
 
+### Implantar (regra 16 do plano)
+
+Sempre pelo script, nunca por comandos soltos:
+
+```
+sh scripts/implantar.sh <rotulo-do-bloco>
+```
+
+Ele para, com a mensagem `IMPLANTAÇÃO BLOQUEADA: …`, se houver arquivo fora do commit, se a suíte completa não passar inteira (`TRAVA DA SUÍTE: BLOQUEADO — …` diz o motivo), se a imagem em uso não tiver a tag do commit, se o backup não puder ser lido de volta, se o build ou a migração falharem, ou se os contêineres não ficarem saudáveis na imagem nova. Para só rodar a trava: `sh scripts/suite_travada.sh`.
+
 ### Fechar a fase
 
 ```

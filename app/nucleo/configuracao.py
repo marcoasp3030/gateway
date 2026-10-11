@@ -76,7 +76,9 @@ class Configuracoes:
         cfg['origem_config'] = origem
         # Perfil de atendimento (CFG1-a): mesma herança, sempre a versão publicada de cada escopo.
         from nucleo.atendimento import resolver_perfil,bloco_do_pacote,versao_texto
-        perfil,origem_perfil = resolver_perfil(('segmento',modelo.get('perfil_padrao')),('empresa',tenant.get('perfil')),('agente',agente.get('perfil')))
+        empresa = await self.repo.tenant(tenant_id) or {}
+        perfil,origem_perfil = resolver_perfil(('segmento',modelo.get('perfil_padrao')),('empresa',tenant.get('perfil')),('agente',agente.get('perfil')),
+                                               nome_da_empresa=empresa.get('nome'))
         cfg['perfil_atendimento'] = bloco_do_pacote(perfil); cfg['origem_perfil'] = origem_perfil
         cfg['perfil_versao'] = versao_texto(tenant.get('perfil_versao'),agente.get('perfil_versao'))
         if geracao == self._geracao:
@@ -96,5 +98,5 @@ class Configuracoes:
             for campo in COMPORTAMENTO:
                 if dados.get(campo) is not None:
                     cfg[campo] = copy.deepcopy(dados[campo]); origem[campo] = nome
-        perfil,origem_perfil = resolver_perfil(('segmento',(modelo or {}).get('perfil_padrao')),('empresa',tenant.get('perfil')))
+        perfil,origem_perfil = resolver_perfil(('segmento',(modelo or {}).get('perfil_padrao')),('empresa',tenant.get('perfil')),nome_da_empresa=empresa.get('nome'))
         return cfg,origem,bloco_do_pacote(perfil),origem_perfil,versao_texto(tenant.get('perfil_versao'))

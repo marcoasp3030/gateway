@@ -12,6 +12,9 @@ NOME=re.compile(r"[^\W\d_](?:[^\W\d_]|[ '\-]){1,29}")
 
 # Perfil: tipo, limites e padrão da plataforma. Nulo num escopo = herda do de cima.
 PERFIL={
+    # Quem é a empresa (CFG1-a.1). nome_empresa sem valor em nenhum nível = o nome cadastrado da empresa.
+    'nome_empresa':{'tipo':'texto','min':2,'max':60,'padrao':None,'opcional':True,'linhas':0},
+    'descricao_negocio':{'tipo':'texto','max':300,'padrao':'','linhas':3},
     'nome_atendente':{'tipo':'texto','min':2,'max':30,'padrao':None,'opcional':True},
     'apresentacao_inicial':{'tipo':'booleano','padrao':True},
     'tom':{'tipo':'escolha','opcoes':['formal','equilibrado','descontraido'],'padrao':'equilibrado'},
@@ -27,7 +30,7 @@ PERFIL={
     'mensagem_despedida':{'tipo':'texto','max':300,'padrao':None,'opcional':True},
 }
 PERFIL_PADRAO={k:v['padrao'] for k,v in PERFIL.items()}
-TEXTOS_LIVRES=('regras_da_casa','mensagem_boas_vindas','mensagem_despedida')
+TEXTOS_LIVRES=('descricao_negocio','regras_da_casa','mensagem_boas_vindas','mensagem_despedida')
 
 EMOJIS_DE_REACAO=('👍','❤️','🙏','😊','😂','👏','🎉','✅')
 # Comportamentos que a empresa ajusta e que entram na versão. (grupo, tipo, mínimo, máximo, opções, disponível)
@@ -121,6 +124,8 @@ def validar_perfil(dados):
         elif regra['tipo']=='escolha':
             if valor not in regra['opcoes']: erro='opcao'
         elif regra['tipo']=='texto':
+            # Campo opcional enviado vazio = sem valor próprio (herda).
+            if regra.get('opcional') and isinstance(valor,str) and not valor.strip(): limpo[campo]=None;continue
             valor,erro=_texto(valor,regra)
             if not erro and campo=='nome_atendente' and not NOME.fullmatch(valor): erro='caractere'
             if not erro and campo in ('mensagem_boas_vindas','mensagem_despedida') and re.search(r'(https?://|www\.|\S+@\S+\.\S+|\d[\d ()\-]{7,}\d)',valor): erro='contato_ou_link'
@@ -155,10 +160,12 @@ def analisar_perfil(perfil):
     return bloqueios,avisos
 
 
-def resolver_perfil(*camadas):
+def resolver_perfil(*camadas,nome_da_empresa=None):
     """Herança campo a campo. camadas: [(origem, {campo: valor})] da mais geral para a mais específica.
-    Devolve (perfil completo, origem de cada campo). Lista do nível mais específico substitui a de cima."""
+    Devolve (perfil completo, origem de cada campo). Lista do nível mais específico substitui a de cima.
+    nome_da_empresa: nome cadastrado da empresa, que vale como nome_empresa enquanto ninguém definir outro."""
     perfil=dict(PERFIL_PADRAO);origem={k:'plataforma' for k in PERFIL}
+    if nome_da_empresa: perfil['nome_empresa']=' '.join(str(nome_da_empresa).split())[:60];origem['nome_empresa']='cadastro'
     for nome,dados in camadas:
         for campo in PERFIL:
             if isinstance(dados,dict) and dados.get(campo) is not None:

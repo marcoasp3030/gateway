@@ -166,6 +166,8 @@ async def _visao(request,tenant,agente,avisos=None):
            'versao_publicada':versao,'publicado_em':ultima['publicado_em'] if ultima else None,'publicado_por':ultima['publicado_por'] if ultima else None,
            'perfil_versao':texto,'publicado':definicao,'rascunho':None,'efetivo':efetivo,
            'esquema':A.esquema(PADROES,quem),'pode_editar':quem in ('admin','plataforma')}
+    # O padrão de nome_empresa é o nome cadastrado desta empresa.
+    saida['esquema']['perfil']['nome_empresa']['padrao']=' '.join(str(empresa.get('nome') or '').split())[:60] or None
     # Personalizado = definido neste escopo; o resto vem de cima (segmento, plataforma ou, no agente, da empresa).
     aqui='agente' if agente is not None else 'empresa'
     saida['personalizado']={'perfil':sorted(c for c,o in efetivo['origem']['perfil'].items() if o==aqui),
