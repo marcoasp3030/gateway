@@ -1052,3 +1052,14 @@ PY
 
 - `docs/ESPEC_PED1.md` escrita (levantamento + proposta + 7 decisões na seção 10). **Nada implementado; aguardando aprovação do Marco.** Entra antes do B3.
 - Achado do levantamento: o aviso ao cliente de pedido confirmado/recusado não sai quando o bot está pausado por atendente (fica `descartado`); o PED1 corrige. Nome do contato só é gravado na primeira mensagem (5 de 103 conversas do By Koji têm nome).
+
+## PED1-a — ciclo de status do pedido e aviso transacional — 2026-10-11 01:22 UTC
+
+- Status: **implantado**. Código `e5cfc03`, imagem `gateway:e5cfc03`, schema **30**. Volta: `gateway:dd6f93b` (roda sobre o schema 30; não sobe do zero nele).
+- `docs/ESPEC_PED1.md` aprovada (decisões na seção 11); contrato final do PED1-a para o painel na seção 12.
+- Máquina de status em `modulos/pedidos/servico.py` (`conferir`, `proximos`, `transicionar`), linha do tempo em `pedido_eventos` (reconstruída para os 4 pedidos existentes), `previsao_min`.
+- Aviso ao cliente: `avisos.TEXTOS` (textos do Marco, fixos até o PED1-b), trecho opcional `[[ ]]`, `Pipeline.enviar_transacional()` — sai com o bot pausado, respeita piloto e envio de teste, grava no histórico como `sistema`. Corrige o aviso que ficava `descartado` com atendente na conversa.
+- Rotas do painel: lista com filtros/busca, detalhe com `proximos_status` e `linha_do_tempo`, `POST .../status`, `GET .../contagem`; `confirmar`/`recusar` mantidos. Skill `consultar_pedido` com situação e linha do tempo; `GET /api/v1/pedidos?conversation_id=` (3 últimos); `ultimos_pedidos` no pacote.
+- Testes: **217 passed** (4 novos em `tests/test_ped1a.py`; `tests/test_fase4_avisos.py` ajustado às regras novas), só bancos `_test`. Backup `/home/twadmin/backups/gateway/pre-ped1a-20261011T012110Z/gateway.dump` (28 tabelas, 600). Migração 030 aplicada com a imagem antiga no ar (health 200).
+- Conferência: 4 containers `healthy`, fila zerada, admin por fora 404, `/api/v1` sem chave 401, envio real em 1 de 5 agentes, zero erros nos logs, nenhum aviso pendente. Nenhum pedido de produção foi alterado.
+- Próximos: PED1-b (textos por empresa, liga/desliga, prévia, reenvio, `X-Role`) e PED1-c (conversas e contatos), cada um com liberação do Marco. B3 aguarda o toque na lista pelo aparelho do final 1513.
