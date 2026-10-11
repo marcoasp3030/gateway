@@ -1075,3 +1075,15 @@ PY
 - Conferência: 4 containers `healthy`, fila zerada, admin por fora 404, `/api/v1` sem chave 401, envio real em 1 de 5 agentes, zero erros nos logs. Nenhuma configuração de aviso gravada em produção (tudo no padrão).
 - Diagnóstico (só leitura): transferência da conversa do final 1513 às 01:24 UTC = agente respondeu `transferir_humano` / `pedido_para_confirmar` porque a unidade Vila Nova Conceição não tem preço no catálogo (só o Pátio Guedala tem: 193 de 205 itens).
 - Próximos: B3 (lista) liberado pelo Marco para depois do PED1-b; PED1-c aguarda liberação.
+
+## UX1 B3 — lista no WhatsApp — 2026-10-11 02:03 UTC
+
+- Status: **implantado**. Código `ca22728`, imagem `gateway:ca22728`, schema **31** (sem migração). Volta: `gateway:84fccaa`.
+- 4 a 10 opções (ou opções com `descricao`) saem como lista (`/send/menu`, `type: list`); 1 a 3 sem descrição continuam botões. `titulo_lista` e `descricao` no campo `botoes` do agente. Opção com `id` de unidade da empresa recebe a situação real como descrição (`horarios.resumo`). Plano B em texto numerado com a descrição; motivo novo `descricao_longa`; `acima_do_limite` deixou de ocorrer.
+- Clique `ListResponseMessage` → texto com o título e `interacao.tipo = "lista"`; toque feito no aparelho da instância (`fromMe`), em lista ou botão, é ignorado (não pausa o bot).
+- Vale onde `botoes_interativos=on`: só `bykoji/bykoji_atendimento`.
+- Testes: **225 passed** (5 novos em `tests/test_botoes_b3.py`, fixture `clique_lista.json` montada com os campos do payload real), só bancos `_test`. Backup `/home/twadmin/backups/gateway/pre-b3-20261011T020217Z/gateway.dump` (30 tabelas, 600).
+- Conferência: 4 containers `healthy`, fila zerada, admin por fora 404, `/api/v1` sem chave 401, envio real em 1 de 5 agentes, zero erros nos logs. O clique real de 11/10 (registro 184) relido pelo código novo é ignorado (era da instância); o mesmo payload vindo do cliente vira "Pátio Guedala" com `tipo: lista`.
+- **A conferir no primeiro uso real:** clique em lista vindo do aparelho do cliente.
+- Cadastro (não alterado): `einstein` segue com sábado `19:00–17:00`; na lista aparece "Aberta até amanhã 17h".
+- Próximos: PED1-c (aguarda liberação) → C1 → R1 → B4 → carrossel → G4.
