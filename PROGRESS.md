@@ -1026,3 +1026,14 @@ PY
 - **Campanha manual:** especificação na seção 10 de `docs/ESPEC_UX2.md` (bloco C1). Nada implementado.
 - **B3, teste real autorizado:** UMA lista (`/send/menu`, `type: list`, `listButton: "Ver unidades"`, seção "Unidades", 4 opções `título|id|descrição`) ao piloto final 7046 às 00:07:51 → HTTP 200, `messageType: ListMessage`, id devolvido; gravada como envio do bot; webhook próprio com `wasSentByApi: true`, ignorado. **Pendente: o clique**, para ver o payload.
 - Achado de cadastro (não alterado): unidade `einstein`, sábado com segundo turno `19:00–17:00` (cruza a meia-noite até domingo 17h) — provável erro de digitação; por isso a descrição saiu "Aberta até amanhã 17h".
+
+## UX3 — janela do aviso de demora, expiração de carrinho e data do carrinho — 2026-10-11 00:31 UTC
+
+- Status: **implantado**. Código `23e6225`, imagem `gateway:23e6225`, schema **28**. Volta: `gateway:2297054` (roda sobre o schema 28; não sobe do zero nele).
+- Aviso de demora: não sai se o bot enviou algo na conversa dentro de `aviso_demora_janela_s` (padrão 120 s; 0 desliga a trava) nem em turno refeito.
+- Carrinho: aberto e sem alteração há mais de `carrinho_expira_h` (padrão 6 h) vira `expirado` na próxima mensagem do cliente, antes do pacote, com auditoria `carrinho.expirado`. Pacote: `contexto_modulos.pedidos.carrinho_expirado`, `itens_expirados` (nome e quantidade, por até 24 h ou até novo carrinho) e `carrinho.atualizado_em` (ISO com fuso da empresa). Pedido fechado não é afetado.
+- Migração 028 (aditiva; `carrinhos.status` passa a aceitar `expirado`, `carrinhos.expirado_em`), aplicada com a imagem antiga no ar.
+- Testes: **210 passed** (2 novos em `tests/test_ux3.py`), só bancos `_test`. Backup `/home/twadmin/backups/gateway/pre-ux3-20261011T002942Z/gateway.dump` (28 tabelas, 600).
+- Conferência: 4 containers `healthy` na imagem nova, fila zerada, admin por fora 404, `/api/v1` sem chave 401, envio real em 1 de 5 agentes (piloto com 2 contatos), zero erros nos logs. Os dois campos novos valem 120 s / 6 h em todos os agentes, herdados da plataforma.
+- Na mesma rodada (antes do UX3): diagnóstico do teste de mensagens picotadas (seção 11.1 da `docs/ESPEC_UX2.md`); carrinho aberto da conversa do contato final 1513 esvaziado (`carrinho.esvaziado`, ator `marco`); nenhum clique da lista de teste chegou ao `webhook_raw`; decisões do C1 registradas (seção 10.6); P3 suspenso.
+- Ordem: B3 lista (aguarda liberação do Marco e o clique) → C1 → R1 → B4 → carrossel (estudo) → G4.
