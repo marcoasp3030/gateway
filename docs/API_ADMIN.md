@@ -320,6 +320,19 @@ POST exige `nome`; aceita `telefone_whatsapp` (8–16 dígitos), `ativo` (padrã
 
 O pacote ao agente inclui só unidades ativas do tenant, com `id`, `nome`, `aberta_agora` e `proxima_abertura` (ISO no fuso do tenant; nulo se aberta ou sem próxima faixa). O instante de fechamento já conta como fechado. Nenhum horário comercial real foi cadastrado.
 
+### 10.1 Entrega e pagamento da unidade (G4-a) ✅
+
+Contrato completo: `docs/ESPEC_GESTAO.md` 11.2, 11.3 e 11.10. Escrita só com `X-Role: admin` ou `plataforma` (senão 403 `FORBIDDEN`); leitura para qualquer papel.
+
+| Métodos | Rota | Observação |
+|---|---|---|
+| GET, PUT | `/tenants/{tenant}/unidades/{unidade}/taxas` | PUT `{"itens":[...]}` substitui todas, tudo ou nada; resposta = GET |
+| POST | `/tenants/{tenant}/unidades/{unidade}/taxas` | 201 + a linha |
+| PATCH, DELETE | `/tenants/{tenant}/unidades/{unidade}/taxas/{id}` | PATCH não muda o `tipo`; DELETE → `{"ok":true}` |
+| GET, PUT | `/tenants/{tenant}/unidades/{unidade}/pagamentos` | PUT substitui a lista; ordem do corpo = ordem ao cliente |
+
+Campos novos no `PATCH`/`POST` da unidade: `delivery_ativo` (bool), `taxa_modo` (`fixa`/`bairro`/`cep`), `frete_gratis_acima` (> 0), `tempo_entrega_min` e `tempo_retirada_min` (1–600). Mudar `taxa_entrega`, `taxa_modo`, `frete_gratis_acima`, `delivery_ativo` ou `formas_pagamento` exige admin/plataforma; reenviar o mesmo valor passa. Toda escrita entra em `gestao/alteracoes` (entidades `taxa` e `pagamento`) e na auditoria.
+
 ## 11. Conversas, histórico e atendimento humano
 
 | Métodos | Rota | Status |

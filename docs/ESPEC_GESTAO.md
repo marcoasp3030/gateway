@@ -461,7 +461,7 @@ Alinhar com E.164: só dígitos, **10 a 15**, com DDI, sem `+`. Hoje a rota e o 
 
 ## 11. G4 — entrega e pagamento: o que faltava especificar (11/10/2026)
 
-**Situação:** para aprovação. **Nada implementado.** Fecha as pendências da seção 10.4 e junta o G4 com o que mudou desde então (PED1, CFG1). As regras das seções 3.1–3.3, 4.3, 4.4 e 4.6 continuam valendo; aqui está só o que faltava.
+**Situação:** aprovada pelo Marco em 11/10/2026 (decisões na 11.9). **G4-a implantado** (contrato final na 11.10); G4-b a fazer (inclui `consultar_entrega`, 11.11). Fecha as pendências da seção 10.4 e junta o G4 com o que mudou desde então (PED1, CFG1). As regras das seções 3.1–3.3, 4.3, 4.4 e 4.6 continuam valendo; aqui está só o que faltava.
 
 ### 11.1 Onde estamos
 
@@ -639,3 +639,72 @@ Parada e relatório entre os dois. Toda escrita de taxa e de pagamento entra no 
 6. **Formas de pagamento:** os códigos sugeridos (`pix`, `cartao_entrega`, `dinheiro`, `vale_refeicao`, `pagamento_online`) servem? Código livre além deles é permitido (proposta) ou a lista é fechada?
 7. **Troca de `abaixo_do_minimo` por `abaixo_minimo`:** sem período com os dois nomes (proposta: troca seca, junto com o ajuste do prompt), ou manter os dois por um tempo?
 8. **Divisão:** G4-a (cadastro) e G4-b (regras) com parada entre eles, como proposto?
+
+### 11.9 Decisões do Marco (11/10/2026)
+
+1. **Taxas e formas de pagamento:** só `admin` e `plataforma` alteram (`X-Role`); `membro` só lê. No `PATCH`/`POST` da unidade, a trava vale para `taxa_entrega`, `taxa_modo`, `frete_gratis_acima`, `delivery_ativo` e `formas_pagamento`, e **só quando o valor muda** (reenviar o mesmo valor, como o formulário faz, passa). Tempos, `pedido_minimo` e os demais campos da unidade seguem a regra de hoje.
+2. **Skill nova `consultar_entrega`** (contrato na 11.11), escopo `ferramentas:catalogo`, sem efeito no carrinho. Entra no G4-b.
+3. **Unidade fechada:** chave por agente `pedido_com_unidade_fechada`, padrão `recusar`; no agente do By Koji, `permitir` até o Marco mandar mudar. Entra no G4-b.
+4. **Previsão no aviso de confirmado:** se a unidade confirmar sem `previsao_min`, usa o tempo cadastrado da unidade (`tempo_entrega_min` em entrega, `tempo_retirada_min` em retirada). Sem tempo cadastrado, o aviso vai sem previsão.
+5. **Bairro não reconhecido sem faixa de CEP:** o agente confirma a grafia uma vez; mantida, o pedido segue com taxa "a confirmar" (`taxa_origem = a_confirmar`).
+6. **Formas de pagamento:** códigos sugeridos (`pix`, `cartao_entrega`, `dinheiro`, `vale_refeicao`, `pagamento_online`) mais código livre (`[a-z0-9_]`, rótulo obrigatório).
+7. **`abaixo_do_minimo` → `abaixo_minimo`:** troca direta no G4-b (o prompt já aceita os dois).
+8. **Divisão G4-a / G4-b** com parada entre eles.
+
+### 11.10 G4-a como implantado (ajustes ao contrato da 11.2 e 11.3)
+
+O contrato da 11.2/11.3 vale, com estes acréscimos (nada foi tirado):
+
+- **Migração 034** só com o cadastro: colunas da unidade e tabelas `unidade_taxas` e `unidade_pagamentos`. As colunas de carrinho e pedido da 11.7 (`bairro`, `cep`, `pagamento`, `troco_para`, `agendado_para`, `frete_gratis`, `tempo_estimado_min`, `taxa_origem`, `pagamento_rotulo`) ficam para a migração do G4-b, para não aparecer nulo novo nas respostas de hoje.
+- **Escrita** (`POST`/`PATCH`/`DELETE`/`PUT …/taxas`, `PUT …/pagamentos`) sem `X-Role` admin ou plataforma → 403 `FORBIDDEN`, nada gravado. Leitura (`GET`) para qualquer papel.
+- **400 de taxas** traz sempre `erros` e `conflitos` (listas, podem vir vazias). `erros[]` = `{linha, campo, motivo}`; cada conflito traz o seu `motivo`. O `motivo` principal é o do primeiro erro; sem erro, o do primeiro conflito. Linha com erro não entra na conferência de conflitos.
+- **Lado do conflito:** no `PUT`, `{"linha": n, …}`; no `POST`, a linha nova vem como `{"nova": true, …}`; no `PATCH`, `{"id": tid, …}`; linhas já gravadas, `{"id": x, …}`. No `POST`/`PATCH` só aparecem conflitos que envolvem a linha enviada, e `erros[].linha` é `null`.
+- **Motivos de taxa:** `tipo_invalido` (inclusive tentar mudar o `tipo` no `PATCH`), `campo_desconhecido`, `tipo` (valor do tipo errado, ex.: texto em `taxa`), `tamanho`, `caractere`, `quantidade` (mais de 10 apelidos), `cep_invalido` (inclusive `inicio > fim`), `taxa_obrigatoria`, `taxa_invalida` (fora de 0–999,99), **`taxa_em_nao_atendido`** (taxa em bairro com `atendido: false`), `limite_de_linhas`, `faixas_sobrepostas`, `bairro_duplicado`.
+- `PUT …/taxas` igual ao que está gravado (sem contar os `id`) não grava nem entra no histórico. O `PUT` recria as linhas: os `id` mudam.
+- `avisos` (`["modo_sem_linhas"]` ou `[]`) vem no `GET` e no `PUT …/taxas`; não vem no `POST`/`PATCH` de linha.
+- `POST …/taxas` → 201 + a linha; `PATCH` → 200 + a linha; `DELETE` → 200 `{"ok": true}`; linha de outra unidade → 404.
+- **Pagamentos:** `sugestoes` são objetos `{"codigo", "rotulo"}` (o rótulo é o padrão usado quando o código sugerido vem sem rótulo). 400 traz `erros` (`{linha, campo, motivo}`; `codigo_duplicado` traz também `repete_linha`) e `bloqueios` (`{linha, campo, motivo, trecho}`). Só bloqueio → `motivo: "texto_bloqueado"`. Outros motivos: `codigo_invalido`, `rotulo_obrigatorio`, `tamanho`, `caractere`, `troco_so_em_dinheiro`, `campo_desconhecido`, `tipo`, `limite_de_linhas`.
+- **Histórico de gestão:** entidade `taxa` (`entidade_id` = `{unidade}` no `PUT`, ação `substituido`; `{unidade}:{linha}` no `POST`/`PATCH`/`DELETE`, ações `criado`/`alterado`/`removido`) e entidade `pagamento` (`entidade_id` = `{unidade}`, ação `alterado`, `antes`/`depois` = `{"itens": [...]}`). O filtro `unidade_id` de `gestao/alteracoes` inclui as duas. Auditoria: `unidade.taxas`, `unidade.pagamentos`.
+- **`info_unidades`:** blocos `entrega`, `retirada` e `pagamentos` como na 11.6; `taxa_fixa` só sai com modo `fixa` ou sem modo; `bairros_atendidos` conta linhas de bairro ativas e atendidas. O carrinho e o fechamento **não** leem nada disso no G4-a.
+
+### 11.11 Skill `consultar_entrega` — contrato (G4-b)
+
+**Descrição para o agente:** Consulta se uma unidade entrega num bairro ou CEP e quanto custa, antes de montar o carrinho. Não altera o carrinho. Use quando o cliente perguntar "vocês entregam em …? quanto é a taxa?". Para saber o que pedir ao cliente, veja `entrega.precisa_de` em `info_unidades`.
+
+`GET /api/v1/entrega` — escopo `ferramentas:catalogo` (a chave atual serve).
+
+| Parâmetro | Obrigatório | Descrição |
+|---|---|---|
+| `conversation_id` | sim | Conversa atual (da empresa e do agente da chave) |
+| `unidade` | sim | Código da unidade |
+| `bairro` | não | Bairro como o cliente escreveu |
+| `cep` | não | Com ou sem hífen |
+| `bairro_confirmado` | não | `true` depois que o cliente manteve a grafia (decisão 5). **Acréscimo meu** ao que foi pedido |
+
+Retorno (200):
+
+```json
+{"unidade": "morumbi", "atende": true, "motivo": null, "taxa": 12.0,
+ "frete_gratis_acima": 200.0, "pedido_minimo": 60.0, "tempo_estimado_min": 45, "origem_taxa": "bairro",
+ "pedir": null}
+```
+
+| Situação da unidade / dado enviado | `atende` | `motivo` | `taxa` | `origem_taxa` | `pedir` |
+|---|---|---|---|---|---|
+| `delivery_ativo = false` | `false` | `delivery_indisponivel` | `null` | `null` | `null` |
+| Modo `fixa` (ou sem modo) | `true` | `null` | `taxa_entrega` (pode ser `null`) | `fixa`; `a_confirmar` se a taxa é nula | `null` |
+| Bairro reconhecido e atendido | `true` | `null` | a da linha | `bairro` | `null` |
+| Bairro reconhecido e não atendido | `false` | `fora_area` | `null` | `null` | `null` |
+| CEP dentro de uma faixa ativa | `true` | `null` | a da faixa | `cep` | `null` |
+| CEP fora de todas as faixas | `false` | `fora_area` | `null` | `null` | `null` |
+| Modo `bairro`, bairro não reconhecido, sem CEP, **com** faixas de CEP | `false` | `bairro_nao_reconhecido` | `null` | `null` | `"cep"` |
+| Idem, **sem** faixas de CEP | `false` | `bairro_nao_reconhecido` | `null` | `null` | `"confirmar_bairro"` |
+| Idem, com `bairro_confirmado=true` | `true` | `null` | `null` | `a_confirmar` | `null` |
+| Falta o dado que o modo exige (`cep` no modo `cep`; `bairro` ou `cep` no modo `bairro`) | — | 400 `VALIDATION_ERROR`, `campo` = o que falta, `motivo: "obrigatorio"` | | | |
+
+- **`pedir`** (`"cep"` | `"confirmar_bairro"` | `null`) é **acréscimo meu**, igual ao `pedir` do motivo `bairro_nao_reconhecido` da 11.4: sem ele o agente não sabe se pede o CEP ou confirma a grafia. Se preferir só os campos que você listou, tiro.
+- Modo `bairro` com faixas de CEP também cadastradas: primeiro o bairro; não reconhecido e com CEP, o CEP decide (como no carrinho).
+- `delivery_ativo` nulo (não informado) é tratado como a regra de hoje: responde pelo modo cadastrado; sem nenhum cadastro → `atende: true`, `origem_taxa: "a_confirmar"`, taxa nula ("a unidade confirma").
+- `frete_gratis_acima`, `pedido_minimo` e `tempo_estimado_min` (= `tempo_entrega_min`) vêm sempre, nulos quando não cadastrados. `origem_taxa` nunca é `frete_gratis`: sem carrinho não há subtotal; o agente diz "grátis acima de R$ X".
+- Não confere se a unidade está aberta (isso é a `situacao` de `info_unidades`) nem grava nada.
+- Erros: 401 chave, 403 escopo, 404 conversa ou `unidade_inexistente`, 400 `conversation_id`/`unidade` ausente ou `cep` inválido (`motivo: "cep_invalido"`).

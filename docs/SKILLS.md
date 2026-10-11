@@ -292,7 +292,11 @@ Retorno:
      {"data": "2026-10-12", "dia": "seg", "origem": "excecao", "fechado": true, "faixas": [], "motivo": "feriado"}
    ],
    "aceita_retirada": true, "delivery": null, "taxa_entrega": 12.0, "pedido_minimo": 80.0,
-   "formas_pagamento": "Pix, crédito e débito", "area_entrega": null, "regras": null}
+   "formas_pagamento": "Pix, crédito e débito", "area_entrega": null, "regras": null,
+   "entrega": {"taxa_modo": "bairro", "taxa_fixa": null, "frete_gratis_acima": 200.0, "tempo_min": 45,
+               "bairros_atendidos": 38, "precisa_de": "bairro"},
+   "retirada": {"aceita": true, "tempo_min": 20},
+   "pagamentos": [{"codigo": "pix", "rotulo": "Pix", "aceita_troco": false, "instrucoes": "Chave: …"}]}
 ]}
 ```
 
@@ -305,13 +309,21 @@ Retorno:
 | `situacao.fecha_as`, `proxima_abertura`, `pausada_ate` | Data e hora no fuso da unidade, ou `null`. Pausa sem prazo não tem `proxima_abertura` |
 | `agenda` | Hoje e os 6 dias seguintes, já com feriados e datas especiais (`origem`: `grade` ou `excecao`). Faixa com fim menor que o início cruza a meia-noite |
 | `aceita_retirada` | `true`, `false` ou `null` |
-| `delivery` | Se a unidade faz entrega. Hoje sempre `null` (ainda não há esse cadastro): a unidade confirma |
+| `delivery` | Se a unidade faz entrega: `true`, `false` ou `null` (não informado: a unidade confirma) |
 | `taxa_entrega`, `pedido_minimo` | Valor em reais ou `null` |
+| `entrega.taxa_modo` | `fixa`, `bairro`, `cep` ou `null` (não cadastrado). `taxa_fixa` só vem no modo `fixa` ou sem modo |
+| `entrega.precisa_de` | `bairro`, `cep` ou `null`: o que perguntar ao cliente para saber a taxa. A lista de bairros não vem (pode ter centenas); `bairros_atendidos` é só a contagem |
+| `entrega.frete_gratis_acima` | Subtotal a partir do qual a entrega é grátis, ou `null` |
+| `entrega.tempo_min`, `retirada.tempo_min` | Tempo estimado em minutos cadastrado pela unidade, ou `null` (não prometa prazo) |
+| `retirada.aceita` | Igual a `aceita_retirada` |
+| `pagamentos` | Formas aceitas, na ordem da unidade. Lista vazia = não cadastradas: use `formas_pagamento` (texto) ou diga que a unidade confirma. Só `dinheiro` pode ter `aceita_troco: true`; `instrucoes` pode ser informada ao cliente |
 | `formas_pagamento`, `area_entrega`, `regras` | Texto livre cadastrado pela unidade, devolvido como está, ou `null` |
 
 Erros (mesmo envelope das outras Skills): sem chave ou chave inválida 401; chave sem o escopo 403; conversa inexistente, de outra empresa ou de outro agente 404; `unidade` com código que não existe na empresa 404; sem `conversation_id` 400.
 
 A resposta não traz identificador interno, WhatsApp de pedidos nem dados de auditoria. O pacote de cada turno continua trazendo o bloco `unidades` resumido; esta Skill serve para o detalhe (agenda dos próximos dias e situação na hora da pergunta).
+
+Os blocos `entrega`, `retirada` e `pagamentos` existem desde o G4-a (11/10/2026), só informativos: o carrinho ainda não calcula taxa por bairro/CEP nem confere pagamento (isso é o G4-b, junto com a Skill nova `consultar_entrega`, contrato em `docs/ESPEC_GESTAO.md` 11.11, e a troca de `abaixo_do_minimo` por `abaixo_minimo`).
 
 ---
 

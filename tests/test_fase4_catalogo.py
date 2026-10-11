@@ -188,7 +188,7 @@ def test_configuracao_por_unidade_e_pacote_ao_agente():
             u=r.json();uid=u['id']
             # Campo não informado fica nulo (nunca 0, nunca texto vazio).
             assert (u['codigo'],u['telefone'],u['whatsapp_pedidos'],u['taxa_entrega'],u['pedido_minimo'],u['aceita_retirada'],u['formas_pagamento'])==('patio_guedala',None,None,None,None,None,None)
-            r=await client.patch(f'/admin/v1/tenants/alpha/unidades/{uid}',json={'whatsapp_pedidos':'5511900000010','taxa_entrega':12.5,'aceita_retirada':True,'formas_pagamento':'  '})
+            r=await client.patch(f'/admin/v1/tenants/alpha/unidades/{uid}',json={'whatsapp_pedidos':'5511900000010','taxa_entrega':12.5,'aceita_retirada':True,'formas_pagamento':'  '},headers={'X-Role':'admin'})
             u=r.json();assert (u['whatsapp_pedidos'],u['taxa_entrega'],u['aceita_retirada'],u['formas_pagamento'],u['endereco'])==('5511900000010',12.5,True,None,'Av. Comendador Adibo Ares, 9')
             # codigo é único na empresa; o mesmo WhatsApp de pedidos pode atender mais de uma unidade.
             assert (await client.post('/admin/v1/tenants/alpha/unidades',json={'nome':'Outra','codigo':'patio_guedala'})).status_code==409

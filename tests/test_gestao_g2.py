@@ -8,7 +8,8 @@ from test_pipeline_multi import RedisFila,ativo
 
 pytestmark=pytest.mark.skipif(not DSN,reason='Postgres de teste obrigatório')
 SEMANA={d:[['00:00','23:59']] for d in ('seg','ter','qua','qui','sex','sab','dom')}
-CAMPOS={'codigo','nome','ativa','endereco','telefone','situacao','agenda','aceita_retirada','delivery','taxa_entrega','pedido_minimo','formas_pagamento','area_entrega','regras'}
+CAMPOS={'codigo','nome','ativa','endereco','telefone','situacao','agenda','aceita_retirada','delivery','taxa_entrega','pedido_minimo','formas_pagamento','area_entrega','regras',
+        'entrega','retirada','pagamentos'}
 
 
 async def chave(client,tenant,escopos=('ferramentas:catalogo',)):
@@ -33,7 +34,7 @@ def test_info_unidades_contrato_nulos_filtro_e_isolamento():
             base='/admin/v1/tenants/alpha/unidades'
             cheia=(await client.post(base,json={'nome':'Centro','codigo':'centro','horarios':SEMANA,'endereco':'Rua A, 1','telefone':'(11) 3000-0000',
                 'whatsapp_pedidos':'5511900000010','formas_pagamento':'Pix e cartão','taxa_entrega':12.5,'pedido_minimo':80,'area_entrega':'Centro e Bela Vista',
-                'aceita_retirada':True,'regras':'Sem troco para 200'})).json()
+                'aceita_retirada':True,'regras':'Sem troco para 200'},headers={'X-Role':'admin'})).json()
             vazia=(await client.post(base,json={'nome':'Zona Sul','codigo':'zona_sul'})).json()
             fora=(await client.post(base,json={'nome':'Antiga','codigo':'antiga','ativo':False})).json()
             assert (await client.post('/admin/v1/tenants/bravo/unidades',json={'nome':'Do Bravo','codigo':'centro','whatsapp_pedidos':'5511900000099'})).status_code==201

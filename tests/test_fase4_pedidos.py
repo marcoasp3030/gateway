@@ -123,7 +123,7 @@ def test_fechar_pedido_exigencias_alcool_minimo_e_preco_do_banco():
             await client.patch(f'/admin/v1/tenants/bykoji/unidades/{uid}',json={'pedido_minimo':300,'aceita_retirada':False})
             r=await fechar();assert (r.status_code,motivo(r))==(422,'abaixo_do_minimo')
             r=await api('PUT',base+'/entrega',json={'modalidade':'retirada'});assert (r.status_code,motivo(r))==(422,'retirada_indisponivel')
-            await client.patch(f'/admin/v1/tenants/bykoji/unidades/{uid}',json={'pedido_minimo':None,'taxa_entrega':15})
+            await client.patch(f'/admin/v1/tenants/bykoji/unidades/{uid}',json={'pedido_minimo':None,'taxa_entrega':15},headers={'X-Role':'admin'})
             assert (await api('GET',base)).json()['carrinho']['total']==275.0     # subtotal 260 + taxa 15
             # Preço sempre do banco: mudou no catálogo → carrinho atualizado volta para confirmar; depois fecha com o preço novo.
             await conn.execute("UPDATE catalogo_itens SET preco=160 WHERE tenant_id='bykoji' AND codigo='GUE-0002'")

@@ -1131,3 +1131,13 @@ PY
 - Decisões do Marco registradas na seção 14 de `docs/ESPEC_CFG1.md` (segmento fica como está, com o procedimento de promover versão; ele publica o perfil do By Koji pelo painel).
 - **G4**: o que faltava especificar está na seção 11 de `docs/ESPEC_GESTAO.md`, com 8 decisões (11.8). **Nada implementado; aguarda liberação.**
 - Conferência: 4 containers `healthy`, fila zerada, admin por fora 404, `/api/v1` sem chave 401, zero erros nos logs.
+
+## G4-a — cadastro de entrega e pagamento da unidade — 2026-10-11
+
+- Status: **pronto para implantar** (suíte travada: **241 passed**). Decisões do Marco na 11.9 de `docs/ESPEC_GESTAO.md`; contrato final na 11.10; contrato de `consultar_entrega` (G4-b) na 11.11.
+- Migração **034** (aditiva): unidade ganha `delivery_ativo`, `taxa_modo`, `frete_gratis_acima`, `tempo_entrega_min`, `tempo_retirada_min`; tabelas `unidade_taxas` (bairro com apelidos ou faixa de CEP) e `unidade_pagamentos`. Colunas de carrinho e pedido ficam para o G4-b (decisão minha, para não surgir nulo novo nas respostas de hoje).
+- `modulos/entrega.py` (regras puras: comparação de bairro sem acento/pontuação, CEP, conflitos, pagamentos) e `admin/entrega.py` (rotas de taxas e pagamentos). Escrita só admin/plataforma; na unidade, os campos de taxa/pagamento só travam quando o valor muda.
+- `info_unidades` ganhou `entrega`, `retirada` e `pagamentos`; `delivery` agora vem do cadastro. Pacote e carrinho **não mudaram** (teste confere).
+- Testes: `tests/test_g4a.py` (7, inclui isolamento entre unidades e empresas); três testes antigos passaram a mandar `X-Role: admin` ao gravar taxa/formas de pagamento.
+- Duas expectativas erradas no teste novo, corrigidas lendo o log: código livre `pix_2` sem rótulo (o servidor recusa com razão) e apelidos "Jd. Morumbi"/"Jd Morumbi" na mesma linha (são o mesmo nome; o servidor acusa `bairro_duplicado`, como especificado).
+- Próximo: G4-b, depois da conferência do Marco.

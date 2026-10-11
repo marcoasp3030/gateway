@@ -4,7 +4,8 @@ from pydantic import Field
 from .modelos import Estrito
 from .capacidades import empresa
 from .servico import validar,auditar
-from nucleo.autenticacao import painel
+from typing import Literal
+from nucleo.autenticacao import painel,papel
 from datetime import date,datetime,timedelta,timezone
 from zoneinfo import ZoneInfo
 from pydantic import AwareDatetime
@@ -32,14 +33,23 @@ class Unidade(Estrito):
     regras:str|None=Field(None,max_length=2000)
     # Gestão G1: fuso próprio da unidade (nulo herda o da empresa).
     fuso:str|None=Field(None,max_length=64)
+    # Gestão G4-a: entrega. Nulo = não informado ("a unidade confirma"). Só cadastro até o G4-b.
+    delivery_ativo:bool|None=None
+    taxa_modo:Literal['fixa','bairro','cep']|None=None
+    frete_gratis_acima:float|None=Field(None,gt=0,le=99999)
+    tempo_entrega_min:int|None=Field(None,ge=1,le=600)
+    tempo_retirada_min:int|None=Field(None,ge=1,le=600)
 
-EXTRAS=('codigo','endereco','telefone','whatsapp_pedidos','formas_pagamento','taxa_entrega','pedido_minimo','area_entrega','aceita_retirada','regras','fuso')
+EXTRAS=('codigo','endereco','telefone','whatsapp_pedidos','formas_pagamento','taxa_entrega','pedido_minimo','area_entrega','aceita_retirada','regras','fuso',
+        'delivery_ativo','taxa_modo','frete_gratis_acima','tempo_entrega_min','tempo_retirada_min')
+# Taxas e formas de pagamento: só admin e plataforma alteram (decisão 1 do G4). Vale quando o valor muda.
+SO_ADMIN=('taxa_entrega','taxa_modo','frete_gratis_acima','delivery_ativo','formas_pagamento')
 
 CAMPOS_HISTORICO=('nome','ativo','horarios')+EXTRAS
 
 def formato(row):
     d=dict(row);d['horarios']=json.loads(d['horarios']) if isinstance(d['horarios'],str) else d['horarios']
-    for campo in ('taxa_entrega','pedido_minimo'):
+    for campo in ('taxa_entrega','pedido_minimo','frete_gratis_acima'):
         if d.get(campo) is not None: d[campo]=float(d[campo])
     return d
 
@@ -88,14 +98,14 @@ async def salvar(request,t,dados,actor,uid=None):
         # Texto só com espaços vale como vazio.
         for k in EXTRAS:
             if isinstance(final[k],str) and not final[k].strip(): final[k]=None
+        if papel(request) not in ('plataforma','admin') and any(final[k]!=old.get(k) for k in SO_ADMIN): raise HTTPException(403,'FORBIDDEN')
         if final['codigo'] and await c.fetchval('SELECT EXISTS(SELECT 1 FROM tenant_unidades WHERE tenant_id=$1 AND codigo=$2 AND id<>$3)',t,final['codigo'],uid):
             raise HTTPException(409,{'campo':'codigo'})
         if novo:
             await c.execute('INSERT INTO tenant_unidades(id,tenant_id,nome,telefone_whatsapp,horarios,ativo) VALUES ($1,$2,$3,$4,$5::jsonb,$6)',uid,t,final['nome'],final['telefone_whatsapp'],json.dumps(final['horarios']),final['ativo'])
         else:
             await c.execute('UPDATE tenant_unidades SET nome=$3,telefone_whatsapp=$4,horarios=$5::jsonb,ativo=$6 WHERE tenant_id=$1 AND id=$2',t,uid,final['nome'],final['telefone_whatsapp'],json.dumps(final['horarios']),final['ativo'])
-        await c.execute('''UPDATE tenant_unidades SET codigo=$3,endereco=$4,telefone=$5,whatsapp_pedidos=$6,formas_pagamento=$7,
-            taxa_entrega=$8,pedido_minimo=$9,area_entrega=$10,aceita_retirada=$11,regras=$12,fuso=$13 WHERE tenant_id=$1 AND id=$2''',t,uid,*(final[k] for k in EXTRAS))
+        await c.execute('UPDATE tenant_unidades SET '+','.join(f'{k}=${i}' for i,k in enumerate(EXTRAS,3))+' WHERE tenant_id=$1 AND id=$2',t,uid,*(final[k] for k in EXTRAS))
         await auditar(c,t,actor,'unidade.salva',uid)
         row=await linha(c,t,uid)
         await registrar(c,t,actor,'unidade',uid,'criado' if novo else 'alterado',None if novo else {k:old.get(k) for k in CAMPOS_HISTORICO},{k:formato(row).get(k) for k in CAMPOS_HISTORICO})
