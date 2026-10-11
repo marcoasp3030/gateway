@@ -1178,3 +1178,14 @@ PY
 - Proxy do painel (Caddy) passou a deixar `/gateway/health/ops`, feito como tarefa do painel, com ordem do Marco (registro em `painel_koji/docs/worklog.md`). O gateway não mudou: por fora já sai só `{"ok": false}` com 503 (falta o destino B2 no `.env`); `motivos` só na chamada interna.
 - Conferência por fora: `/gateway/health/ops` 503 `{"ok":false}`, `/gateway/health` 200, admin 404, `/api/v1` sem chave 401.
 - `docs/Caddyfile.painel.example` e a 10 da `docs/ESPEC_OPS1.md` atualizados.
+
+## SOL1 — avisar a equipe sem parar o atendimento; toques contraditórios — 2026-10-11 21:05 UTC
+
+- Status: **implantado** por `SUITE_MINIMO=252 scripts/implantar.sh sol1`. Código `85b5481`, imagem `gateway:85b5481`, schema **36**. Volta: `gateway:31fe5b0`. Trava: **252 passed** (0 falhas, 0 pulados). Backup `/home/twadmin/backups/gateway/pre-sol1-20261011T210445Z/gateway.dump` (35 tabelas).
+- Ação `notificar_equipe` (motivo + `solicitacao` opcional), tabela `solicitacoes`, alerta ao destino de transbordo, proteção (transferência por evento/encomenda/catering com carrinho com itens ou pedido ativo vira aviso; `turnos.acao_original`), toques contraditórios (`interacao.substituiu`), rotas do painel, métricas. Contrato exato na seção 10 de `docs/ESPEC_SOL1.md`.
+- `catering` no catálogo de motivos. Configurações novas: `notificar_equipe` (off na plataforma) e `transbordo_destino_externo` (falso).
+- Segmento `delivery_restaurante` versão 2 criado pela migração. Agente `bykoji_atendimento` movido da versão 1 para a 2 às 21:05 UTC (ator "gateway (ordem do Marco)"). Comparação de 49 campos: mudaram só `modelo_versao` (1 → 2) e `notificar_equipe` (off/plataforma → on/modelo); no perfil, só `catering` acrescentado aos motivos. `perfil_versao` do By Koji: `e1` (publicado pelo Marco no painel).
+- Trava: primeira rodada do bloco (sem implantar) bloqueou por 1 falha — o teste de migrações contava modelos de agente. Agora o teste confere os modelos esperados por nome e versão, há um teste novo das versões do segmento, e a trava aceita `SUITE_MINIMO`.
+- Conferência (só leitura): 4 containers `healthy` na imagem nova, fila zerada, `/gateway/health` 200, `/gateway/health/ops` 503 por fora sem motivos (destino de backup ainda não configurado), admin por fora 404, zero erros nos logs.
+- **Pendente:** conferir uma resposta normal do Skyone atual depois da troca. Nenhuma mensagem real do piloto chegou entre 21:05 e 21:15 UTC.
+- Próximo: R1 → G4-b → G5/G6 → G3 → B4 → C1 → CFG1-b → carrossel.
