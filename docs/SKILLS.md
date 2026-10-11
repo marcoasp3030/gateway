@@ -27,7 +27,9 @@ A cada turno o gateway envia, sem o agente pedir:
 "contexto_modulos": {
   "catalogo": {"itens_ativos": 808},
   "pedidos": {
-    "carrinho": { "...": "igual ao campo carrinho das respostas abaixo" },
+    "carrinho": { "...": "igual ao campo carrinho das respostas abaixo", "atualizado_em": "2026-10-10T21:10:48-03:00" },
+    "carrinho_expirado": false,
+    "itens_expirados": [],
     "ultimo_pedido": {"numero": "48213", "status": "aguardando_loja", "total": 327.0, "criado_em": "2026-10-10T13:29:00+00:00"}
   }
 },
@@ -39,6 +41,8 @@ A cada turno o gateway envia, sem o agente pedir:
 ]
 ```
 
+- `carrinho.atualizado_em`: data e hora da última alteração do carrinho (item ou entrega), no fuso da empresa; `null` quando não há carrinho aberto. Serve para o agente saber se o carrinho é desta conversa ou sobrou de outro dia. Nas respostas das Skills o mesmo campo vem em UTC (`+00:00`).
+- `carrinho_expirado`: `true` quando o carrinho anterior ficou parado mais tempo que o prazo do agente (padrão 6 horas) e foi arquivado quando o cliente voltou a escrever. `itens_expirados` traz o que havia: `[{"nome": "Edamame", "quantidade": 2}]`. O `carrinho` já vem vazio. O agente deve **perguntar se o cliente quer refazer o pedido**, e só então adicionar os itens de novo (com `adicionar_item`). O aviso continua nos turnos seguintes até o cliente montar outro carrinho, por no máximo 24 horas. Pedido já fechado nunca expira por esta regra.
 - `ultimo_pedido` é nulo se a conversa nunca fechou um pedido.
 - Em `unidades`, **nulo significa "não informado"**: o agente não afirma nada sobre o campo e diz que a unidade confirma no retorno do pré-pedido.
 - Por isso o agente não precisa chamar `ver_carrinho` no início de cada turno: o carrinho já vem no pacote.

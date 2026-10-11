@@ -66,7 +66,7 @@ async def retrato(conn,tenant,conversa):
     if c is None:
         return {'conversation_id':conversa,'unidade':None,'modalidade':None,'endereco':None,'horario':None,'observacao':None,
                 'maioridade_confirmada':False,'itens':[],'numero_itens':0,'subtotal':None,'taxa_entrega':None,'total':None,
-                'pedido_minimo':None,'tem_alcoolico':False,'faltando':['itens','modalidade'],'pode_fechar':False}
+                'pedido_minimo':None,'tem_alcoolico':False,'faltando':['itens','modalidade'],'pode_fechar':False,'atualizado_em':None}
     ls=await linhas(conn,tenant,c['id'])
     itens=[{'id':l['id'],'item_id':l['item_id'],'codigo':l['codigo'],'nome':l['nome'],'categoria':l['categoria'],
             'quantidade':l['quantidade'],'preco_unitario':dinheiro(l['preco_unitario']),
@@ -86,7 +86,9 @@ async def retrato(conn,tenant,conversa):
             'numero_itens':sum(l['quantidade'] for l in ls),'subtotal':dinheiro(subtotal),'taxa_entrega':dinheiro(taxa),
             'total':dinheiro(subtotal+(taxa or 0)) if subtotal is not None else None,
             'pedido_minimo':dinheiro(u['pedido_minimo']) if u else None,'tem_alcoolico':tem_alcool,
-            'faltando':faltando,'pode_fechar':not faltando}
+            'faltando':faltando,'pode_fechar':not faltando,
+            # Última alteração do carrinho (item ou entrega): diz se ele é desta conversa ou antigo.
+            'atualizado_em':c['atualizado_em'].isoformat(timespec='seconds')}
 
 
 def vendavel(item):
@@ -342,10 +344,41 @@ async def numero_interno(conn,tenant,telefone):
     return [] if await conn.fetchval('SELECT whatsapp_alerta_transbordo=$2 FROM tenants WHERE id=$1',tenant,telefone) else None
 
 
+# Por quanto tempo o pacote continua avisando que o carrinho expirou (até o cliente montar outro).
+AVISO_DE_EXPIRADO_H=24
+
+
+async def expirar(conn,tenant,conversa,horas):
+    """Arquiva o carrinho aberto da conversa se está sem alteração há mais de `horas`. Devolve o id arquivado ou None.
+    Os itens ficam guardados (o pacote os informa em itens_expirados). Pedido já fechado não é carrinho aberto: não é afetado."""
+    if not horas: return None
+    await travar(conn,tenant,conversa)
+    return await conn.fetchval("""UPDATE carrinhos SET status='expirado',expirado_em=now() WHERE tenant_id=$1 AND conversation_id=$2
+        AND status='aberto' AND atualizado_em<now()-make_interval(hours=>$3) RETURNING id""",tenant,conversa,int(horas))
+
+
+async def expirado(conn,tenant,conversa):
+    """Itens do carrinho que expirou, enquanto ele for o carrinho mais recente da conversa (nada novo montado) e o aviso valer."""
+    c=await conn.fetchrow("SELECT id,status,expirado_em FROM carrinhos WHERE tenant_id=$1 AND conversation_id=$2 ORDER BY id DESC LIMIT 1",tenant,conversa)
+    if not c or c['status']!='expirado' or not c['expirado_em']: return None
+    if await conn.fetchval("SELECT $1::timestamptz<now()-make_interval(hours=>$2)",c['expirado_em'],AVISO_DE_EXPIRADO_H): return None
+    return [{'nome':l['nome'],'quantidade':l['quantidade']} for l in await linhas(conn,tenant,c['id'])]
+
+
 async def contexto(repo,tenant,conversa):
-    """Bloco contexto_modulos.pedidos do pacote ao agente: carrinho aberto e o último pedido da conversa."""
+    """Bloco contexto_modulos.pedidos do pacote ao agente: carrinho aberto, carrinho que expirou e o último pedido da conversa."""
     conn=repo.db   # só leituras: serve conexão ou pool
     carrinho=await retrato(conn,tenant,conversa)
+    if carrinho['atualizado_em']:
+        # No fuso da empresa, como as demais datas do pacote.
+        from zoneinfo import ZoneInfo
+        from datetime import datetime
+        fuso=await conn.fetchval('SELECT timezone FROM tenants WHERE id=$1',tenant)
+        carrinho['atualizado_em']=datetime.fromisoformat(carrinho['atualizado_em']).astimezone(ZoneInfo(fuso)).isoformat(timespec='seconds')
+    antigos=await expirado(conn,tenant,conversa)
     p=await conn.fetchrow('SELECT numero,status,total,criado_em FROM pedidos WHERE tenant_id=$1 AND conversation_id=$2 ORDER BY id DESC LIMIT 1',tenant,conversa)
-    return {'carrinho':carrinho,'ultimo_pedido':{'numero':p['numero'],'status':p['status'],'total':dinheiro(p['total']),
+    return {'carrinho':carrinho,
+            # true = o carrinho antigo foi arquivado por tempo; itens_expirados diz o que havia, para o agente oferecer refazer.
+            'carrinho_expirado':antigos is not None,'itens_expirados':antigos or [],
+            'ultimo_pedido':{'numero':p['numero'],'status':p['status'],'total':dinheiro(p['total']),
             'criado_em':p['criado_em'].isoformat()} if p else None}

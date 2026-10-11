@@ -248,16 +248,19 @@ Não foi enviado nenhum teste de carrossel.
 
 ---
 
-## 6. Ordem proposta
+## 6. Ordem (atualizada em 11/10/2026)
 
-1. **B2** — concluído e ligado no By Koji (10/10/2026).
-2. **P1 + P2** — espera adaptativa e refazer o turno. **P3** se o teste de presença mostrar o evento.
-3. **B3** — lista (começa pelo teste real).
-4. **R1** — reações.
-5. **B4** — botões da unidade.
-6. **Carrossel** — só estudo, depois de existir imagem no cadastro.
+1. **B2** — concluído e ligado no By Koji.
+2. **P1 + P2** — concluídos; `refazer_turno` ligado no By Koji. **P3 suspenso.**
+3. **UX3** — aviso de demora, carrinho que expira, data do carrinho (seção 11).
+4. **B3** — lista (descrição preenchida pelo gateway quando o `id` é código de unidade; nas demais, vem do agente).
+5. **C1** — campanha manual não pausa o bot (seção 10).
+6. **R1** — reações.
+7. **B4** — botões da unidade.
+8. **Carrossel** — só estudo.
+9. **G4** — entrega e pagamento.
 
-G4 (entrega e pagamento) e B5 (botões de ação, junto do G3) seguem como estavam.
+Cada bloco termina com parada e relatório.
 
 ---
 
@@ -282,7 +285,9 @@ G4 (entrega e pagamento) e B5 (botões de ação, junto do G3) seguem como estav
 | P1 — Espera adaptativa | Implementado em 10/10/2026: `pipeline.forma_da_mensagem()` e `debounce_da_mensagem()`; configuração `debounce_incompleta_s` (migração 027) |
 | P2 — Refazer o turno | Implementado em 10/10/2026: `Pipeline._deve_refazer()`, `_descartar()`, `_refeito_de()`; tabela `skill_chamadas`; `acoes_ja_executadas` no pacote; `refazer_turno` (padrão `off`); bloco `picotadas` em `GET /metricas`. Testes em `tests/test_ux2.py` |
 | Amostra de presença | Implementado: evento `presence` é descartado na entrada do webhook, guardando só os 20 primeiros |
-| P3, B3, R1, B4 | Aguardam |
+| P3 | **Suspenso** (decisão do Marco em 11/10/2026): a uazapi não entregou o evento no teste; não investigar agora |
+| UX3 | Implementado em 11/10/2026 (seção 11) |
+| B3, C1, R1, B4 | Aguardam, nesta ordem |
 
 ### 8.1 Como as chamadas de Skill são ligadas ao turno
 
@@ -433,9 +438,59 @@ Limite conhecido: frase pronta enviada a 3 clientes que estavam calados há mais
 
 Ordem sugerida: logo depois do B3 (é pequeno e evita pausas indevidas no piloto).
 
-### 10.6 Pontos para o Marco decidir
+### 10.6 Decisões do Marco (11/10/2026) — C1 aprovado
 
-1. **Silêncio do cliente (30 min)** como critério para separar frase pronta de campanha, mais as travas de "aguardando atendente" e "pedido em aberto". Concorda?
-2. **Texto mínimo de 20 caracteres** para ser campanha?
-3. **Mídia sem legenda** (só a imagem da oferta) continua pausando. Aceita, ou quer que imagem igual enviada a 3 conversas também conte (exige comparar o arquivo)?
-4. A campanha aparece para o agente no histórico como `[divulgação enviada pela loja] …`. Concorda?
+1. Critério dos 30 minutos de silêncio do cliente, mais as duas travas (conversa aguardando atendente ou com pedido em aberto nunca conta): **aprovado**.
+2. Texto com menos de 20 caracteres nunca é campanha: **aprovado**.
+3. **Mídia:** se o payload trouxer identificador do arquivo, a mesma mídia para 3 ou mais conversas na janela também conta como campanha; legenda igual também conta. Sem identificador, continua pausando.
+   - Conferido em `webhook_raw` (imagem enviada pelo celular da instância em 11/10/2026, registro 160, `ImageMessage`, `fromMe`, sem `wasSentByApi`): o `content` traz **`fileSHA256`** (e também `fileEncSHA256`, `fileLength`, `mimetype`). O identificador a usar é `fileSHA256`: é do arquivo original e se repete quando a mesma mídia é enviada a outra conversa (`fileEncSHA256` muda a cada envio, porque depende da chave de cifragem). Vídeo e documento serão conferidos com payload real no início do bloco.
+   - Chave da série = `fileSHA256` quando houver; senão, o texto normalizado da legenda (com o mínimo de 20 caracteres). Mídia com legenda diferente mas mesmo arquivo conta como a mesma campanha.
+4. Histórico ao agente como `[divulgação enviada pela loja] …`: **aprovado** (mídia sem legenda: `[divulgação enviada pela loja: imagem]`).
+
+Implementar depois do B3, com os 19 casos da seção 10.5 mais os de mídia: mesma imagem para 3 conversas (com e sem legenda); mesma imagem com legendas diferentes; imagens diferentes com a mesma legenda longa; mídia sem `fileSHA256` e sem legenda (pausa); mesma mídia para 2 conversas (pausa).
+
+---
+
+## 11. UX3 — aviso de demora, carrinho que expira e data do carrinho
+
+Situação: **implementado em 11/10/2026.** Pedido do Marco depois do teste de picotadas das 21:09 (seção 11.1).
+
+### 11.1 O que o teste mostrou (conversa do contato final 1513, 21:09–21:11)
+
+| Turno | Lote | Espera | Refazer | Skills chamadas | Aviso | Balões |
+|---|---|---|---|---|---|---|
+| 789 | "Oi" | 4,5 s | **Refeito**: "Quero 1 edamame" e "Só guedala" chegaram com o agente pensando; resposta descartada | nenhuma | não | nenhum (descartados) |
+| 790 (refeito do 789) | "Oi", "Quero 1 edamame", "Só guedala" | 0,8 s | **Não** (`ja_refeito`): "Pra retirar" chegou 4,5 s depois de o turno começar, 15 s **antes** do 1º balão, mas o limite é de um refazer | `adicionar_item` Edamame ×1 → ok (carrinho 1 → 2) | não (19,4 s) | 2, com botões |
+| 791 | "Pra retirar" | 16,8 s (presa atrás do 790) | não havia mensagem nova | `definir_entrega` → ok; `adicionar_item` Edamame ×1 → ok (carrinho 2 → 3) | **sim** (21,4 s) | 2, com botões |
+
+- O carrinho já tinha 1 Edamame de um teste das 20:25. O turno 790 somou 1 (certo, foi o pedido). O turno 791 somou **mais 1 por conta do agente**: o lote dele era só "Pra retirar", `acoes_ja_executadas` veio vazio (não era turno refeito) e, mesmo com a própria resposta "Adicionei mais um Edamame" no histórico, o modelo chamou `adicionar_item` de novo.
+- O gateway não repetiu nenhuma Skill; as três chamadas registradas são do agente.
+- Correção de leitura: o "Pra retirar" **não** chegou depois do 1º balão; chegou durante o turno refeito, com o agente ainda pensando. Não refez por causa do limite de um refazer.
+
+### 11.2 O que foi implementado
+
+| Item | Regra |
+|---|---|
+| **Aviso de demora** | Não sai se o bot enviou qualquer mensagem nessa conversa nos últimos `aviso_demora_janela_s` segundos (padrão **120**; 0 = sempre sai), **nem em turno refeito**. As demais regras continuam (não sai para lote de fechamento; uma vez por turno) |
+| **Carrinho que expira** | Na chegada da próxima mensagem do cliente, **antes de montar o pacote**: carrinho aberto sem alteração há mais de `carrinho_expira_h` horas (padrão **6**) é arquivado (`status = expirado`, itens guardados). O pacote traz `contexto_modulos.pedidos.carrinho_expirado: true` e `itens_expirados: [{"nome","quantidade"}]`; o `carrinho` vem vazio. O aviso continua até o cliente montar outro carrinho (no máximo 24 h). Pedido fechado não é afetado. Auditoria: `carrinho.expirado` |
+| **Data do carrinho** | `contexto_modulos.pedidos.carrinho.atualizado_em`: última alteração, ISO no fuso da empresa; `null` sem carrinho aberto |
+
+- Configuração por agente, com herança: `aviso_demora_janela_s` (0–3600) e `carrinho_expira_h` (1–720). Migração 028 (aditiva).
+- "Sem alteração" = `carrinhos.atualizado_em`, que muda a cada item adicionado, alterado ou removido e a cada `definir_entrega`.
+- Falha ao conferir a expiração nunca impede a resposta ao cliente.
+- Testes: `tests/test_ux3.py`.
+
+### 11.3 Refazer também até 3 s depois do 1º balão (não implementado; só análise)
+
+Dados de hoje (32 turnos respondidos ou refeitos no WhatsApp do By Koji), mensagens do cliente que chegaram com um turno em andamento:
+
+| Momento da chegada | Mensagens | Coberto por |
+|---|---|---|
+| Agente ainda pensando | 8 | P2 (refazer), quando ligado e dentro do limite de 1 |
+| Depois da resposta do agente, antes do 1º balão | 1 | P2 |
+| **Até 3 s depois do 1º balão** | **1** ("13h", 1,4 s depois) | só a proposta nova |
+| Entre 3 s e 10 s depois | 7 (uma delas a 3,6 s) | nada |
+
+- A regra nova teria pego **1 caso em 32 turnos** (3%); com 4 s, 2 casos.
+- **Risco:** o cliente já viu o 1º balão (e talvez o 2º, que sai 1 s depois). Refazer a partir dali significa mandar uma segunda resposta que pode contradizer a primeira ou repetir o que já foi dito, e não há como apagar o que saiu. Além disso, a Skill pode já ter sido executada com base no lote antigo, e a resposta nova teria de explicar isso.
+- **Recomendação:** não implementar. O ganho é pequeno e o caso principal de hoje foi outro: mensagem chegando durante o **turno refeito** (turno 790), que o limite de um refazer deixa passar. Se for para mexer, a alavanca com mais retorno é permitir um **segundo** refazer quando o turno refeito ainda não chamou nenhuma Skill — a discutir.

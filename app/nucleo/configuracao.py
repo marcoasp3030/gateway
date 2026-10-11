@@ -10,7 +10,7 @@ COMPORTAMENTO = {
     'aviso_demora','fallback','alerta_telefone','send_mode','agente_mode','modo_piloto',
     'contatos_permitidos','encerrar_vazia_min','max_lotes_simultaneos','max_concorrencia',
     'skyone_dominios_permitidos','debounce_curto_s','debounce_palavras','max_msgs_por_minuto_contato',
-    'botoes_interativos','debounce_incompleta_s','refazer_turno',
+    'botoes_interativos','debounce_incompleta_s','refazer_turno','aviso_demora_janela_s','carrinho_expira_h',
 }
 # debounce_curto_s vale quando a mensagem parece completa (pontuação final ou mais de
 # debounce_palavras palavras); mensagem curta/picada espera debounce_s.
@@ -23,7 +23,10 @@ PADROES = dict(debounce_s=4,debounce_curto_s=1.5,debounce_palavras=6,max_wait_s=
     botoes_interativos='off',
     # UX2. debounce_incompleta_s nulo = mensagem incompleta espera o debounce normal (como antes).
     # refazer_turno: chegou mensagem antes de a resposta sair → descarta a resposta e refaz com o lote completo.
-    debounce_incompleta_s=None,refazer_turno='off')
+    debounce_incompleta_s=None,refazer_turno='off',
+    # UX3. Aviso de demora não sai se o bot falou na conversa há menos de aviso_demora_janela_s (0 = sempre sai).
+    # Carrinho sem alteração há mais de carrinho_expira_h horas é arquivado na próxima mensagem do cliente.
+    aviso_demora_janela_s=120,carrinho_expira_h=6)
 
 
 class Configuracoes:

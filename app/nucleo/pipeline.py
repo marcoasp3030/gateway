@@ -322,6 +322,7 @@ return 1
                 status='ignorado'
             else:
                 try:
+                    if origem=='cliente': await self._expirar_carrinho(tenant,conversa,cfg)
                     payload=await skyone.pacote(self.repo,tenant,conversa,min(ids),'\n'.join(i['conteudo'] for i in itens),cfg,rid,lote=itens)
                     if origem=='sistema':
                         payload.update(tarefa='notificar',evento=json.loads(itens[0]['evento']) if isinstance(itens[0]['evento'],str) else itens[0]['evento'])
@@ -474,6 +475,24 @@ return 1
             if not sem_vaga and await self.db.fetchval("SELECT EXISTS(SELECT 1 FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND processada_em IS NULL AND direcao='entrada' AND origem IN ('cliente','sistema'))",tenant,conversa):
                 await insistir(lambda: self.enfileirar(tenant,conversa,cfg),self.insistir_s)
 
+    async def _expirar_carrinho(self,tenant,conversa,cfg):
+        """Antes de montar o pacote: carrinho parado há mais de carrinho_expira_h é arquivado (UX3).
+        Falha aqui não pode impedir a resposta ao cliente."""
+        try:
+            from modulos.pedidos import servico as pedidos
+            async with self.db.acquire() as conn,conn.transaction():
+                if await pedidos.expirar(conn,tenant,conversa,cfg.get('carrinho_expira_h')):
+                    await auditar(conn,tenant,'sistema','carrinho.expirado',conversa)
+        except Exception:
+            log.warning('Carrinho não conferido para expiração; segue o turno')
+
+    async def _bot_falou_ha_pouco(self,tenant,conversa,cfg):
+        """O bot enviou alguma mensagem nesta conversa dentro da janela do aviso de demora?"""
+        janela=cfg.get('aviso_demora_janela_s') or 0
+        if janela<=0: return False
+        return await self.db.fetchval("""SELECT EXISTS(SELECT 1 FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND direcao='saida'
+            AND origem='bot' AND tipo<>'reacao' AND criado_em>now()-make_interval(secs=>$3))""",tenant,conversa,float(janela))
+
     async def _deve_refazer(self,tenant,conversa,cfg,turno):
         """Há mensagem nova do cliente fora do lote e nada da resposta saiu ainda? Só refaz uma vez, e nunca
         quando o turno já teve efeito para fora (pedido fechado/cancelado, transferência, encerramento)."""
@@ -527,6 +546,7 @@ return 1
             cfg['agente_mode'],origem,ids,descartado['id'] if descartado else None)
         resultado=None;erro=None;status='ok';aviso=False;presenca=None
         acoes=None
+        if origem=='cliente': await self._expirar_carrinho(tenant,conversa,cfg)
         if descartado:
             from modulos.pedidos import servico as pedidos
             acoes=await pedidos.acoes_do_turno(self.db,tenant,conversa,descartado['agente_inicio'],descartado['agente_fim'] or datetime.now(timezone.utc))
@@ -542,8 +562,8 @@ return 1
                 try:
                     feito,_=await asyncio.wait({tarefa},timeout=cfg['slow_notice_s'])
                     # Lote que parece só fechamento não recebe aviso: se a resposta for silêncio, nada é enviado.
-                    # No turno refeito o aviso de demora não sai de novo se a tentativa descartada já avisou.
-                    if not feito and cfg['aviso_demora'] and not parece_fechamento(itens) and not (descartado and descartado['aviso_demora']):
+                    # Aviso de demora não sai em turno refeito nem se o bot falou há pouco nesta conversa (UX3).
+                    if not feito and cfg['aviso_demora'] and not parece_fechamento(itens) and not descartado and not await self._bot_falou_ha_pouco(tenant,conversa,cfg):
                         # Aviso de demora é a parte 0 do turno: nunca sai duas vezes no mesmo turno.
                         aviso=await self._enviar_parte(tenant,conversa,cfg,rid,0,cfg['aviso_demora'])=='enviada'
                         # Enviar mensagem cancela o "digitando" no canal: pede de novo.
