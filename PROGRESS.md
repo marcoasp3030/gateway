@@ -1122,3 +1122,12 @@ PY
 - Conferência: 4 containers `healthy`, fila zerada, admin por fora 404, `/api/v1` sem chave 401, envio real em 1 de 5 agentes, `reacoes` off em todos, zero erros nos logs.
 - Não entrou: bloco `recursos` do pacote (fica para o R1).
 - Próximos (ordem do Marco): G4 → G5/G6 → G3 → B4 → R1 → C1 → CFG1-b → carrossel.
+
+## CFG1-a.1, trava de implantação e especificação do G4 — 2026-10-11 16:07 UTC
+
+- **Trava de implantação** (regra 16 do `PLANO_CURSOR.md`; uso em `GUIA_CURSOR.md`): `scripts/suite_travada.sh` bloqueia em teste falhando, erro de coleta, teste pulado, zero testes, caminho inexistente ou saída diferente de zero; `scripts/implantar.sh <rotulo>` só constrói depois dela e ainda confere árvore limpa, imagem de volta, backup relido, migração com a imagem antiga no ar e contêineres saudáveis. Provada com arquivos temporários (5 casos bloqueados, 1 liberado), depois removidos.
+- **CFG1-a.1 implantado pelo script novo**: código `16c77c0`, imagem `gateway:16c77c0`, schema 33 (sem migração). Volta: `gateway:8b921cb`. Suíte: **234 passed** (trava liberou). Backup `/home/twadmin/backups/gateway/pre-cfg1a1-20261011T155549Z/gateway.dump` (32 tabelas).
+- Perfil ganhou `nome_empresa` (padrão: nome cadastrado da empresa; origem `cadastro`) e `descricao_negocio` (até 300, com a análise de texto bloqueado/duvidoso). By Koji: `nome_empresa` = "By Koji", `descricao_negocio` vazio, `perfil_versao` `e0`; nenhum comportamento mudou.
+- Decisões do Marco registradas na seção 14 de `docs/ESPEC_CFG1.md` (segmento fica como está, com o procedimento de promover versão; ele publica o perfil do By Koji pelo painel).
+- **G4**: o que faltava especificar está na seção 11 de `docs/ESPEC_GESTAO.md`, com 8 decisões (11.8). **Nada implementado; aguarda liberação.**
+- Conferência: 4 containers `healthy`, fila zerada, admin por fora 404, `/api/v1` sem chave 401, zero erros nos logs.

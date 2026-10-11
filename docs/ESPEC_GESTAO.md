@@ -456,3 +456,186 @@ Alinhar com E.164: só dígitos, **10 a 15**, com DDI, sem `+`. Hoje a rota e o 
 
 - **Desfazer só a importação mais recente.** As 20 últimas continuam guardadas, mas apenas para consulta (ajusta a decisão 7 da seção 9; a seção 5.4 já dizia "só a mais recente"). Desfazer outra → 409.
 - **Confirmação de `substituir`:** a aplicação envia a contagem de desativações que a simulação informou; se a contagem atual for diferente (o catálogo mudou entre a simulação e a aplicação), **409** e nada é gravado. Contagem ausente → 400.
+
+---
+
+## 11. G4 — entrega e pagamento: o que faltava especificar (11/10/2026)
+
+**Situação:** para aprovação. **Nada implementado.** Fecha as pendências da seção 10.4 e junta o G4 com o que mudou desde então (PED1, CFG1). As regras das seções 3.1–3.3, 4.3, 4.4 e 4.6 continuam valendo; aqui está só o que faltava.
+
+### 11.1 Onde estamos
+
+- A unidade já tem `taxa_entrega`, `pedido_minimo`, `aceita_retirada`, `area_entrega`, `formas_pagamento` (texto) e `regras`. **Não existem ainda:** `delivery_ativo`, `taxa_modo`, `frete_gratis_acima`, tempos, as tabelas de taxas e de formas de pagamento, nem bairro/CEP/pagamento/troco no carrinho e no pedido.
+- **No By Koji nada disso está preenchido** (as 4 unidades têm taxa, mínimo e retirada nulos). Hoje todo pedido sai com "a unidade confirma". O G4 não muda isso até o cadastro ser feito: unidade sem nada configurado continua exatamente como hoje.
+- O carrinho não confere horário, área nem pagamento. O motivo do mínimo ainda se chama `abaixo_do_minimo`.
+
+### 11.2 Taxas de entrega — contrato
+
+`GET /tenants/{t}/unidades/{id}/taxas`
+
+```json
+{"modo": "bairro", "taxa_fixa": null, "frete_gratis_acima": 200.0, "delivery_ativo": true,
+ "itens": [
+   {"id": 12, "tipo": "bairro", "bairro": "Jardim Morumbi", "apelidos": ["Jd. Morumbi", "Jd Morumbi"], "atendido": true, "taxa": 12.0, "ativo": true},
+   {"id": 13, "tipo": "bairro", "bairro": "Paraisópolis", "apelidos": [], "atendido": false, "taxa": null, "ativo": true},
+   {"id": 14, "tipo": "cep", "cep_inicio": "05650000", "cep_fim": "05659999", "taxa": 15.0, "ativo": true}],
+ "resumo": {"bairros": 2, "faixas_cep": 1, "inativos": 0}}
+```
+
+| Rota | Corpo | Resposta |
+|---|---|---|
+| `POST …/taxas` | uma linha (sem `id`) | 201 + a linha |
+| `PATCH …/taxas/{tid}` | só os campos enviados | 200 + a linha |
+| `DELETE …/taxas/{tid}` | — | 200 `{"ok": true}` |
+| `PUT …/taxas` | `{"itens": [linhas]}` — **substitui todas**, tudo ou nada | 200 + o `GET` |
+
+`modo`, `taxa_fixa`, `frete_gratis_acima`, `delivery_ativo` e os tempos mudam por `PATCH …/unidades/{id}` (campos `taxa_modo`, `taxa_entrega`, `frete_gratis_acima`, `delivery_ativo`, `tempo_entrega_min`, `tempo_retirada_min`).
+
+| Regra | Limite |
+|---|---|
+| `bairro` | 2–80 caracteres |
+| `apelidos` | até 10 por bairro, cada um 2–80 |
+| `cep_inicio`, `cep_fim` | aceitos com ou sem hífen; guardados com 8 dígitos; `inicio ≤ fim` |
+| `taxa` | 0 a 999,99; obrigatória em linha atendida; nula em bairro não atendido |
+| Linhas por unidade | até 500 |
+| `frete_gratis_acima` | maior que zero |
+| `tempo_entrega_min`, `tempo_retirada_min` | 1 a 600 |
+
+**Erros de validação (400)**, sempre com tudo o que está errado numa resposta só:
+
+```json
+{"erro": {"codigo": "VALIDATION_ERROR", "detalhes": {"campo": "itens", "motivo": "faixas_sobrepostas",
+  "conflitos": [{"a": {"linha": 0, "cep_inicio": "05650000", "cep_fim": "05659999"},
+                 "b": {"linha": 2, "cep_inicio": "05655000", "cep_fim": "05660000"}}]}}}
+```
+
+```json
+{"erro": {"codigo": "VALIDATION_ERROR", "detalhes": {"campo": "itens", "motivo": "bairro_duplicado",
+  "conflitos": [{"nome": "jd morumbi", "a": {"linha": 0, "bairro": "Jardim Morumbi"}, "b": {"linha": 3, "bairro": "Morumbi"}}]}}}
+```
+
+- **Faixas de CEP sobrepostas** na mesma unidade → 400 `faixas_sobrepostas`. Faixas vizinhas (uma termina em …999 e a outra começa em …000) não são sobreposição.
+- **Bairro ou apelido duplicado** na mesma unidade → 400 `bairro_duplicado`. Comparação sem acento, sem maiúsculas, sem pontuação e com espaços repetidos reduzidos a um ("Jd. Morumbi" = "jd morumbi"). Vale entre nomes, entre apelidos e entre nome e apelido, inclusive dentro da mesma linha.
+- Só linhas **ativas** entram na conferência e no cálculo. `linha` é a posição no corpo enviado (no `POST`/`PATCH`, o conflito aponta a linha existente pelo `id`).
+- Outros motivos: `cep_invalido`, `taxa_obrigatoria`, `limite_de_linhas`, `tipo_invalido`.
+- Modo `bairro` ou `cep` sem nenhuma linha ativa: aceito, com `avisos: ["modo_sem_linhas"]` na resposta (na prática fica "a unidade confirma").
+
+### 11.3 Formas de pagamento — contrato
+
+`GET /tenants/{t}/unidades/{id}/pagamentos`
+
+```json
+{"itens": [
+  {"codigo": "pix", "rotulo": "Pix", "aceita_troco": false, "instrucoes": "Chave: 11.222.333/0001-44", "ativo": true},
+  {"codigo": "cartao_entrega", "rotulo": "Cartão na entrega", "aceita_troco": false, "instrucoes": null, "ativo": true},
+  {"codigo": "dinheiro", "rotulo": "Dinheiro", "aceita_troco": true, "instrucoes": null, "ativo": true}],
+ "sugestoes": ["pix", "cartao_entrega", "dinheiro", "vale_refeicao", "pagamento_online"]}
+```
+
+`PUT …/pagamentos` com `{"itens": [...]}` substitui a lista inteira; a ordem do corpo é a ordem mostrada ao cliente. Resposta: o `GET`.
+
+| Regra | Limite |
+|---|---|
+| `codigo` | `[a-z0-9_]`, 2–30; único na unidade (repetido → 400 `codigo_duplicado`) |
+| `rotulo` | 2–40 |
+| `aceita_troco` | só pode ser verdadeiro em `dinheiro` (senão 400 `troco_so_em_dinheiro`) |
+| `instrucoes` | até 300; vai ao agente. Passa pela mesma análise das regras da casa (CFG1): instrução de sistema → 400 `texto_bloqueado`, com o trecho |
+| Quantidade | até 12 |
+
+Lista vazia = nenhuma forma cadastrada → o campo `pagamento` do pedido é opcional e "a unidade confirma", como hoje.
+
+### 11.4 Carrinho, fechamento e motivos de recusa (decididos no servidor)
+
+Todos 422, em `erro.detalhes.motivo`, com dados calculados pelo gateway:
+
+| Motivo | Onde | Quando | `detalhes` |
+|---|---|---|---|
+| `fora_area` | `definir_entrega`, `fechar_pedido` | CEP fora de todas as faixas (modo `cep`, ou modo `bairro` com faixas cadastradas e bairro não reconhecido), ou bairro marcado como não atendido | `modo`, `aceita_retirada` |
+| `bairro_nao_reconhecido` | `definir_entrega`, `fechar_pedido` | Modo `bairro`, bairro não bate com nenhum nome nem apelido, e não veio CEP | `pedir`: `"cep"` se a unidade tem faixas de CEP; senão `"confirmar_bairro"` |
+| `abaixo_minimo` | `fechar_pedido` | Subtotal menor que o mínimo | `pedido_minimo`, `subtotal`, `falta` |
+| `pagamento_invalido` | `definir_entrega`, `fechar_pedido` | Código que não é forma ativa da unidade; ou unidade com formas e nenhuma escolhida ao fechar | `aceitos: [{"codigo", "rotulo"}]` |
+| `troco_invalido` | `definir_entrega`, `fechar_pedido` | Troco com forma que não aceita, ou menor que o total | `total`, `aceita_troco` |
+| `delivery_indisponivel` | `definir_entrega`, `fechar_pedido` | `delivery_ativo = false` | `aceita_retirada` |
+| `unidade_fechada` | `adicionar_item`, `fechar_pedido` | Unidade do carrinho fechada agora (grade, exceção ou pausa) | `proxima_abertura`, `motivo_fechada` |
+
+- **`abaixo_do_minimo` deixa de existir**: passa a ser `abaixo_minimo` (decisão 9.3). O prompt do Skyone precisa trocar o nome no mesmo dia.
+- **Bairro não reconhecido sem faixa de CEP** (`pedir: "confirmar_bairro"`): o agente confirma a grafia uma vez; se o cliente mantiver, o agente reenvia com `bairro_confirmado: true`, a taxa fica "a confirmar" e o pedido segue, marcado `taxa_a_confirmar: true` para a unidade.
+- **Modo `bairro` com faixas de CEP também cadastradas:** primeiro o bairro; não reconhecido e com CEP → o CEP decide.
+- `faltando` no carrinho pode trazer `bairro`, `cep` e `pagamento` (além dos atuais).
+- **Unidade fechada:** no G4 só existe a recusa. O pedido agendado (`agendado_para`) depende do modo da empresa, que é do G3; a coluna já entra agora, vazia.
+- **`unidade_fechada` muda o piloto:** com o By Koji configurado para recusar (decisão 9.2), não será mais possível montar pedido de teste com a unidade fechada. Ver decisão 3 abaixo.
+- Ordem das conferências em `fechar_pedido`: carrinho vazio → itens vendáveis → preço alterado → **unidade fechada** → modalidade → **delivery indisponível** / retirada indisponível → endereço → **bairro/CEP e área** → maioridade → **mínimo** → **pagamento** → **troco**.
+
+### 11.5 Campos novos nos pedidos (`GET pedidos`, `GET pedidos/{numero}`) e no carrinho
+
+| Campo | Tipo | Nulo significa |
+|---|---|---|
+| `bairro` | texto | não informado, ou retirada |
+| `cep` | 8 dígitos | não informado |
+| `taxa_entrega` | número (já existe) | a unidade confirma (ver `taxa_origem`) |
+| `taxa_origem` | `fixa`, `bairro`, `cep`, `frete_gratis`, `a_confirmar`; nulo em retirada | — |
+| `frete_gratis` | booleano | sempre presente |
+| `pagamento` | `{"codigo", "rotulo"}` | não escolhido (unidade sem formas cadastradas) |
+| `troco_para` | número | sem troco |
+| `tempo_estimado_min` | inteiro | a unidade não cadastrou tempo |
+| `agendado_para` | data/hora com fuso | pedido para agora |
+
+- No detalhe, esses campos ficam também dentro de `entrega` (junto de `modalidade`, `endereco`, `horario`, `observacao`). Os campos antigos não mudam.
+- `tempo_estimado_min` é a estimativa da unidade copiada no fechamento; `previsao_min` (PED1) é o que a unidade informa ao confirmar. O aviso de confirmado usa `previsao_min`; se a unidade não informar, ver decisão 4.
+- O aviso de novo pedido à unidade (WhatsApp) ganha bairro/CEP, forma de pagamento, troco e a marca "taxa a confirmar".
+- Anonimização do contato apaga também `bairro` e `cep`.
+
+### 11.6 `info_unidades` (Skill) e pacote
+
+Cada unidade ganha:
+
+```json
+{"delivery": true,
+ "entrega": {"taxa_modo": "bairro", "taxa_fixa": null, "frete_gratis_acima": 200.0, "tempo_min": 45,
+             "bairros_atendidos": 38, "precisa_de": "bairro"},
+ "retirada": {"aceita": true, "tempo_min": 20},
+ "pedido_minimo": 60.0,
+ "pagamentos": [{"codigo": "pix", "rotulo": "Pix", "aceita_troco": false, "instrucoes": "Chave: …"}]}
+```
+
+- `delivery` deixa de vir sempre nulo: verdadeiro, falso, ou nulo quando a unidade não informou.
+- `precisa_de`: `bairro`, `cep` ou nulo — o que o agente deve pedir ao cliente para calcular a taxa.
+- A lista de bairros **não** vai inteira (pode ter centenas). Para "vocês entregam no Morumbi? quanto é?", ver decisão 2.
+- Os campos atuais (`taxa_entrega`, `aceita_retirada`, `formas_pagamento`, `area_entrega`) continuam, para não quebrar o prompt de hoje.
+- O bloco `unidades` do pacote não cresce; o agente usa a Skill.
+
+### 11.7 Banco e blocos
+
+Migração aditiva (próximo número livre): colunas da unidade (`delivery_ativo`, `taxa_modo`, `frete_gratis_acima`, `tempo_entrega_min`, `tempo_retirada_min`), tabelas `unidade_taxas` e `unidade_pagamentos`, colunas de carrinho e pedido (`bairro`, `cep`, `pagamento`, `troco_para`, `agendado_para`; no pedido também `frete_gratis`, `tempo_estimado_min`, `taxa_origem`, `pagamento_rotulo`). A imagem anterior segue funcionando.
+
+| Bloco | Conteúdo | O que muda para o cliente |
+|---|---|---|
+| **G4-a — cadastro** | Campos da unidade, taxas, formas de pagamento (rotas e validações da 11.2 e 11.3), `info_unidades`, histórico de alterações | Nada. O agente passa a poder informar taxa e pagamento |
+| **G4-b — regras** | `definir_entrega` com bairro/CEP/pagamento/troco, cálculo da taxa, frete grátis, motivos da 11.4, campos da 11.5, aviso à unidade | Recusas novas; total com taxa calculada |
+
+Parada e relatório entre os dois. Toda escrita de taxa e de pagamento entra no histórico de gestão (`gestao_alteracoes`) e na auditoria.
+
+**Testes (além dos da seção 8):**
+- Taxas: sobreposição total, parcial, faixa dentro de outra, vizinhas (aceitas), linha inativa não conflita; conflito no `POST` e no `PATCH` contra linha existente; `PUT` é tudo ou nada (um erro não grava nenhuma linha).
+- Bairros: duplicado por acento, maiúscula, pontuação e espaço; apelido igual ao nome de outro bairro; apelido repetido na mesma linha.
+- CEP com hífen e sem; no primeiro e no último número da faixa; um abaixo e um acima.
+- Pagamentos: código repetido; troco fora de dinheiro; instrução bloqueada; ordem preservada; lista vazia volta ao "a unidade confirma".
+- Cada motivo da 11.4 com seus `detalhes`; ordem das conferências; `abaixo_do_minimo` não aparece mais.
+- Frete grátis exatamente no valor e um centavo abaixo; total = subtotal + taxa em todos os modos; taxa "a confirmar" não soma.
+- Unidade sem nada configurado: carrinho, fechamento e respostas idênticos aos de hoje (regressão).
+- `unidade_fechada` em adicionar e em fechar, com `proxima_abertura`; pausa e exceção contam.
+- Campos novos no `GET pedidos`, no detalhe e no carrinho, com os nulos da tabela 11.5.
+- `info_unidades` nos três estados de `delivery` e de `precisa_de`.
+- Isolamento: taxas, pagamentos e conflitos nunca cruzam unidades nem empresas.
+- Anonimização limpa bairro e CEP.
+
+### 11.8 Decisões que preciso de você
+
+1. **Quem pode alterar taxas e formas de pagamento?** Hoje a gestão de unidade aceita qualquer papel com `X-Actor`. Proposta: só `admin` e `plataforma` (`membro` lê), como nos textos de aviso.
+2. **Consulta de entrega antes do carrinho:** incluir uma Skill nova `consultar_entrega` (unidade + bairro ou CEP → atende ou não, taxa, tempo, frete grátis a partir de quanto)? Sem ela, o agente só descobre a taxa depois de montar o carrinho.
+3. **`unidade_fechada` e o piloto:** com a recusa ligada, não dá para testar pedido com a unidade fechada. Opções: (a) valer para todos, inclusive o piloto; (b) uma chave por agente, `pedido_com_unidade_fechada: recusar | permitir`, nascendo `recusar` e ficando `permitir` no By Koji até você mandar virar. Proponho (b).
+4. **Previsão no aviso de confirmado:** quando a unidade confirma sem informar `previsao_min`, usar o `tempo_estimado_min` cadastrado da unidade no aviso ("Previsão: cerca de 45 minutos"), ou só mostrar previsão quando alguém a informar?
+5. **Bairro não reconhecido sem faixa de CEP:** o fluxo de confirmar a grafia uma vez e seguir com "taxa a confirmar" está bom, ou prefere recusar o delivery nesse caso?
+6. **Formas de pagamento:** os códigos sugeridos (`pix`, `cartao_entrega`, `dinheiro`, `vale_refeicao`, `pagamento_online`) servem? Código livre além deles é permitido (proposta) ou a lista é fechada?
+7. **Troca de `abaixo_do_minimo` por `abaixo_minimo`:** sem período com os dois nomes (proposta: troca seca, junto com o ajuste do prompt), ou manter os dois por um tempo?
+8. **Divisão:** G4-a (cadastro) e G4-b (regras) com parada entre eles, como proposto?
