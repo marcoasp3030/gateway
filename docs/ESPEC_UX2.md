@@ -326,3 +326,116 @@ Campo sempre presente no pacote. **Lista vazia** em turno comum; preenchido só 
 - O turno descartado **conta no consumo** (o agente foi consultado).
 - Antes da segunda consulta, a trava da conversa e a vaga da empresa/agente ganham validade nova.
 - O aviso de demora não sai de novo no turno refeito se a tentativa descartada já avisou.
+
+---
+
+## 9. Presença ("digitando" do cliente) — resultado do teste
+
+- 11/10/2026, 00:01 UTC: `presence` acrescentado aos eventos do webhook da instância (mesma URL, mesmo `excludeMessages`).
+- A documentação (`/webhook/presence`) descreve o evento: `EventType: "presence"`, `event.State` = `composing` ou `paused`, `event.Chat`/`event.Sender`/`event.chatid`, `event.Media` (pode indicar áudio), `event.IsFromMe`, `event.IsGroup`. Não cita nenhuma condição para o evento ser entregue.
+- **Teste real:** o piloto digitou cerca de 5 s sem enviar, na conversa com a instância. **Nenhum evento chegou** (zero chamadas ao webhook entre 00:01:47 e 00:06:45 UTC; zero registros de presença em `webhook_raw`).
+- Conclusão: **não serve para o P3 como está.** A assinatura voltou para `messages` e `connection` às 00:07 UTC. O P3 fica suspenso.
+- Hipótese, não confirmada: o WhatsApp só entrega "digitando" a quem pediu a presença daquele contato e está "online"; a uazapi não documenta como pedir isso. Se um dia houver esse recurso, o desenho da seção 2.2 continua valendo.
+- O código que descarta eventos de presença na entrada (guardando só 20) permanece, inofensivo.
+
+---
+
+## 10. Campanha manual não pausa o bot
+
+Situação: **proposta. Nada implementado.** Pedido do Marco em 11/10/2026.
+
+### 10.1 O problema
+
+Mensagem enviada pelo número da instância fora da API (celular ou WhatsApp Web) conta como atendente assumindo a conversa e pausa o bot por `pause_minutes` (INV03). Isso é certo para atendimento, mas errado para **divulgação**: em 10/10/2026, três mensagens de ofertas enviadas pelo celular da instância pausaram a conversa do piloto por 60 minutos.
+
+### 10.2 Regra
+
+Uma mensagem enviada pelo número da instância fora da API é **campanha** quando as duas condições valem:
+
+1. **Mesmo texto para várias conversas:** o mesmo texto normalizado foi enviado para `campanha_conversas` conversas **diferentes** (padrão **3**) do mesmo canal dentro de `campanha_janela_min` minutos (padrão **10**).
+2. **Não é resposta a cliente:** em cada uma dessas conversas, o cliente **não mandou mensagem nos últimos `campanha_silencio_min` minutos** (padrão **30**) antes do envio. Ver 10.4.
+
+Efeitos:
+
+| Momento | O que acontece |
+|---|---|
+| 1ª e 2ª conversas da série | Como hoje: grava como `humano`, pausa o bot (ainda não dá para saber que é campanha) |
+| Conversa que completa o limite (a 3ª) | A série vira campanha. Esta mensagem é gravada com origem `campanha`, **não pausa** e **não marca** aguardando atendente |
+| 1ª e 2ª, retroativamente | A mensagem é remarcada como `campanha` e a **pausa é desfeita**, desde que: a pausa em vigor seja a criada por aquela mensagem; nenhum atendente tenha escrito **outra coisa** na conversa depois dela; e a conversa não esteja aguardando atendente por outro motivo |
+| Da 4ª em diante, dentro da janela | Campanha direto: não pausa |
+| Mensagem manual única (texto diferente, ou para 1–2 conversas) | Continua pausando como hoje |
+
+- **Texto normalizado:** sem maiúsculas/minúsculas, sem acentos, espaços e quebras de linha reduzidos a um espaço, sem emojis e sem formatação do WhatsApp (`*`, `_`, `~`, crase). Comparação por igualdade (hash); textos com menos de 20 caracteres **nunca** são campanha ("ok", "bom dia", "já vou ver").
+- **Mídia com legenda:** vale a legenda. Mídia sem legenda não entra na regra (continua pausando), porque não há texto para comparar.
+- **Janela:** conta a partir da hora do provedor de cada mensagem, não da hora de chegada (a varredura pode entregar atrasado).
+- **Origem `campanha`** é um valor novo de `mensagens.origem`. No histórico enviado ao agente, entra como fala do assistente marcada: `[divulgação enviada pela loja] <texto>`, para o agente saber que o cliente recebeu aquilo e não estranhar um "quero essa oferta".
+- A mensagem de campanha **não abre turno** e não reabre conversa encerrada.
+- **Cliente que responde à campanha:** é mensagem normal; o bot responde (não está pausado).
+- Vale igual para o webhook e para a varredura (o mesmo caminho de entrada), e é idempotente pelo id do provedor.
+
+### 10.3 Configuração e métricas
+
+Por agente, com a herança de sempre:
+
+| Campo | Faixa | Padrão |
+|---|---|---|
+| `campanha_deteccao` | `on` / `off` | **`on`** |
+| `campanha_conversas` | 2 a 50 | 3 |
+| `campanha_janela_min` | 1 a 120 | 10 |
+| `campanha_silencio_min` | 0 a 1440 (0 desliga a condição 2) | 30 |
+
+Métricas (`GET /metricas`, bloco `campanhas`): `detectadas` (séries), `mensagens` (mensagens marcadas como campanha), `pausas_desfeitas`, `pausas_mantidas` por motivo (`atendente_escreveu`, `aguardando_atendente`, `pausa_mais_nova`).
+
+Auditoria: `campanha.detectada` (uma vez por série, com a quantidade de conversas; sem o texto) e `conversa.pausa_desfeita` em cada conversa liberada.
+
+### 10.4 Frase pronta do atendente × campanha
+
+O caso difícil: o atendente responde a mesma frase pronta ("Seu pedido saiu para entrega") para 3 clientes em 10 minutos. Pelo texto, é igual a uma campanha; pelo sentido, é atendimento, e o bot **deve** ficar pausado.
+
+Diferença proposta — **quem falou por último**:
+
+- Frase pronta é **resposta**: o cliente escreveu há pouco (ou há pedido em andamento) naquela conversa.
+- Campanha é **mensagem fria**: chega a conversas em que o cliente estava calado.
+
+Por isso a condição 2: a conversa só conta para a série se o cliente não escreveu nos últimos `campanha_silencio_min` minutos. Reforços:
+
+- Conversa **aguardando atendente** nunca conta (ali a mensagem do número é atendimento por definição).
+- Conversa com **pedido em aberto** (`aguardando_loja` ou confirmado há menos de 3 horas) nunca conta.
+- Basta **uma** conversa da série não contar para ela não contar; as outras ainda podem formar campanha entre si se chegarem ao limite.
+
+Limite conhecido: frase pronta enviada a 3 clientes que estavam calados há mais de 30 minutos e sem pedido ("Oi, tudo bem? Posso ajudar?") será tratada como campanha e não pausará. É aceitável: se o cliente responder, o bot atende; se o atendente quiser assumir, escreve outra mensagem (que pausa) ou assume pelo painel.
+
+### 10.5 Bloco e testes
+
+**C1 — Campanha manual** (migração aditiva: valor novo de origem, configuração, índice por canal + hash + hora).
+
+| Caso | Esperado |
+|---|---|
+| Mesmo texto para 3 conversas caladas em 10 min | 3ª não pausa; 1ª e 2ª têm a pausa desfeita; as três ficam com origem `campanha`; uma série detectada |
+| 4ª e 5ª conversas dentro da janela | Não pausam |
+| Mesmo texto para 2 conversas | As duas pausam, como hoje |
+| 3 conversas, mas a 3ª depois da janela | Todas pausam |
+| Textos diferentes para 3 conversas | Todas pausam |
+| Mesmo texto com emoji, negrito ou espaços diferentes | Conta como o mesmo |
+| Texto com menos de 20 caracteres para 3 conversas | Todas pausam |
+| "Seu pedido saiu para entrega" para 3 clientes que escreveram há 5 min | Todas pausam (frase pronta) |
+| Idem, com pedido em aberto e cliente calado há 2 h | Todas pausam |
+| 2 conversas caladas + 1 em que o cliente acabou de escrever, e depois uma 4ª calada | A que tem cliente ativo pausa e fica fora; a 4ª completa a série das três caladas |
+| Na 1ª conversa o atendente escreveu outra coisa depois da oferta | A pausa dessa conversa **não** é desfeita |
+| 1ª conversa já estava aguardando atendente | Continua aguardando; pausa mantida |
+| Conversa pausada por outro motivo mais recente (assumida pelo painel) | Pausa mantida |
+| Cliente responde à campanha | Bot responde normalmente |
+| Mesma mensagem chega pelo webhook e pela varredura | Conta uma vez |
+| Mensagem enviada pela API (bot, painel) com o mesmo texto para 3 conversas | Não entra na regra (não é manual) |
+| `campanha_deteccao: off` | Tudo como hoje |
+| Outra empresa ou outro canal com o mesmo texto | Não soma (isolamento por empresa e canal) |
+| Histórico ao agente | A campanha aparece marcada como divulgação da loja |
+
+Ordem sugerida: logo depois do B3 (é pequeno e evita pausas indevidas no piloto).
+
+### 10.6 Pontos para o Marco decidir
+
+1. **Silêncio do cliente (30 min)** como critério para separar frase pronta de campanha, mais as travas de "aguardando atendente" e "pedido em aberto". Concorda?
+2. **Texto mínimo de 20 caracteres** para ser campanha?
+3. **Mídia sem legenda** (só a imagem da oferta) continua pausando. Aceita, ou quer que imagem igual enviada a 3 conversas também conte (exige comparar o arquivo)?
+4. A campanha aparece para o agente no histórico como `[divulgação enviada pela loja] …`. Concorda?

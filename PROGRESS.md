@@ -1017,3 +1017,12 @@ PY
 - Assinatura do webhook da instância (autorizada): eventos `messages, connection` → `messages, connection, presence`, às 00:01:47 UTC; mesma URL (129 caracteres), mesmo `excludeMessages`. Nenhum evento de presença recebido até 00:02. **Pendente:** olhar a amostra e decidir o P3; se não servir, voltar a assinatura (`presenca.py voltar`).
 - Botões em produção (contato final 1513, 23:55–00:00 UTC): 2 mensagens saíram como botão ("Entrega / Retirada" e "Adicionar mais / Finalizar pedido"), nenhum plano B; 1 clique recebido ("Adicionar mais", `atual: true`).
 - Observado: conversa uazapi do piloto final 7046 pausada até 00:47 UTC por 3 mensagens enviadas pelo celular da instância (23:45–23:47, `fromMe`, origem `android`). Não retomei.
+
+## Presença, retomada do piloto, refazer_turno ligado, campanha (espec.) e teste da lista — 2026-10-11 00:08 UTC
+
+- **Presença:** o piloto digitou ~5 s sem enviar; **nenhum evento chegou** (zero chamadas ao webhook entre 00:01:47 e 00:06:45). Não serve para o P3 como está. Assinatura da instância **voltou** para `messages, connection` às 00:07 (mesma URL). P3 suspenso. Registro na seção 9 de `docs/ESPEC_UX2.md`.
+- **Conversa do piloto final 7046:** pausa (até 00:47, criada pelas ofertas enviadas pelo celular da instância) removida por `POST /conversas/{conv}/devolver`, `X-Actor: marco`, 00:07:18 (`conversa.devolvida`).
+- **`refazer_turno`:** `on` SÓ em `bykoji/bykoji_atendimento` (`X-Actor: marco`, 00:07:19); os outros 4 agentes seguem `off` (plataforma).
+- **Campanha manual:** especificação na seção 10 de `docs/ESPEC_UX2.md` (bloco C1). Nada implementado.
+- **B3, teste real autorizado:** UMA lista (`/send/menu`, `type: list`, `listButton: "Ver unidades"`, seção "Unidades", 4 opções `título|id|descrição`) ao piloto final 7046 às 00:07:51 → HTTP 200, `messageType: ListMessage`, id devolvido; gravada como envio do bot; webhook próprio com `wasSentByApi: true`, ignorado. **Pendente: o clique**, para ver o payload.
+- Achado de cadastro (não alterado): unidade `einstein`, sábado com segundo turno `19:00–17:00` (cruza a meia-noite até domingo 17h) — provável erro de digitação; por isso a descrição saiu "Aberta até amanhã 17h".
