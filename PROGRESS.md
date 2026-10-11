@@ -1144,3 +1144,12 @@ PY
 - Testes: `tests/test_g4a.py` (7, inclui isolamento entre unidades e empresas); três testes antigos passaram a mandar `X-Role: admin` ao gravar taxa/formas de pagamento.
 - Duas expectativas erradas no teste novo, corrigidas lendo o log: código livre `pix_2` sem rótulo (o servidor recusa com razão) e apelidos "Jd. Morumbi"/"Jd Morumbi" na mesma linha (são o mesmo nome; o servidor acusa `bairro_duplicado`, como especificado).
 - Próximo: G4-b, depois da conferência do Marco.
+
+## Diagnóstico do teste do piloto 7046 e especificação do SOL1 — 2026-10-11 18:35 UTC
+
+- Teste das 15:13–15:20 (local): no turno 823 o agente devolveu `transferir_humano` / `evento_ou_encomenda` logo depois de o cliente tocar em "Finalizar pedido"; o gateway pausou o bot por 60 min e o "Ok" seguinte foi ignorado (turno 824). Nenhuma Skill de fechamento foi chamada; carrinho 6 segue aberto (1 Edamame, Pátio Guedala, retirada). Dois refazer seguidos (821, 822) funcionaram.
+- Os toques "Entrega" (15:14:41) e "Retirada" (15:14:42) chegaram no mesmo lote, nessa ordem; o agente seguiu o primeiro.
+- Primeiro clique em lista vindo do aparelho do cliente (final 7046, "Pátio Guedala"): lido como `interacao.tipo = lista`. Fecha a conferência pendente do B3.
+- Conversa devolvida ao bot por ordem do Marco (`conversa.devolvida`, ator `marco`, 18:28 UTC).
+- `docs/ESPEC_SOL1.md` escrita (ação `notificar_equipe`, tabela de solicitações, proteção, rotas), com 6 decisões. **Nada implementado.**
+- Ordem nova do Marco: G4-a (feito) → OPS1 → R1 → SOL1 → G4-b → G5/G6 → G3 → B4 → C1 → CFG1-b → carrossel.
