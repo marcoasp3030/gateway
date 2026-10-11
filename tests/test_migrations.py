@@ -1,3 +1,4 @@
+import json
 import asyncio
 import importlib.util
 import os
@@ -30,6 +31,20 @@ def banco(cenario):
     asyncio.run(run())
 
 
+def test_segmento_delivery_restaurante_versoes_e_padroes():
+    async def cenario(conn):
+        await migrar.aplicar(conn)
+        linhas = {r['versao']:r for r in await conn.fetch("SELECT * FROM modelos_agente WHERE id='delivery_restaurante' AND tenant_id IS NULL")}
+        c1,c2 = (json.loads(linhas[v]['comportamento_padrao']) for v in (1,2))
+        # A versão 2 é a 1 com notificar_equipe ligado (SOL1): nada mais muda, e a 1 continua sem a chave.
+        assert 'notificar_equipe' not in c1 and c2 == {**c1,'notificar_equipe':'on'}
+        assert linhas[1]['modulos'] == linhas[2]['modulos'] == ['catalogo','pedidos'] and linhas[1]['perfil_padrao'] == linhas[2]['perfil_padrao']
+        # Cada modelo tem versões seguidas a partir da 1 (nenhuma versão pulada).
+        for r in await conn.fetch('SELECT id,array_agg(versao ORDER BY versao) v FROM modelos_agente WHERE tenant_id IS NULL GROUP BY id'):
+            assert list(r['v']) == list(range(1,len(r['v'])+1)),r['id']
+    banco(cenario)
+
+
 def test_migracoes_seed_e_reaplicacao():
     async def cenario(conn):
         assert await migrar.aplicar(conn) == [a.name for a in sorted(migrar.PASTA.glob('*.sql'))]
@@ -37,7 +52,9 @@ def test_migracoes_seed_e_reaplicacao():
         assert await conn.fetchval('SELECT count(*) FROM schema_migrations') == len(migrar.arquivos())
         agente = await conn.fetchrow("SELECT * FROM agentes WHERE id='bykoji_atendimento'")
         assert (agente['timeout_s'],agente['provedor'],agente['send_mode'],agente['status']) == (60,'mock','dry','rascunho')
-        assert await conn.fetchval('SELECT count(*) FROM modelos_agente') == 4   # atendente_delivery, assistente_generico e as versões 1 (CFG1-a) e 2 (SOL1) do segmento delivery_restaurante
+        # Os modelos esperados existem, por nome e versão (uma versão nova de segmento não quebra este teste).
+        modelos = {(r['id'],r['versao']) for r in await conn.fetch('SELECT id,versao FROM modelos_agente WHERE tenant_id IS NULL')}
+        assert modelos >= {('atendente_delivery',1),('assistente_generico',1),('delivery_restaurante',1),('delivery_restaurante',2)}
         assert await conn.fetchval('SELECT count(*) FROM tenant_canais') == 0
     banco(cenario)
 
