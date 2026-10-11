@@ -154,6 +154,18 @@ def criar_app(infra,db=None,redis=None):
         except Exception: fila={'ligada':infra.fila_duravel,'indisponivel':True}
         return {'ok':True,'fila':fila}
 
+    @app.get('/health/ops')
+    async def health_ops(request:Request):
+        """Operação em ordem? (OPS1) Público: só ok, com 200 ou 503, sem dizer por quê.
+        Fica 503 se não há backup recente, se o backup não foi para o destino externo, se o último teste de
+        restauração falhou ou se o agendador está sem sinal. Chamada interna recebe os motivos."""
+        from nucleo.alertas import situacao_ops
+        try: motivos=await situacao_ops(app.state.db,app.state.redis,app.state.pipeline.prefixo)
+        except Exception: motivos=['indisponivel']
+        corpo={'ok':not motivos}
+        if seguranca.chamada_interna(request.client.host if request.client else None,request.headers): corpo['motivos']=motivos
+        return JSONResponse(corpo,status_code=200 if not motivos else 503,headers={'Cache-Control':'no-store'})
+
     from admin.capacidades import router as capacidades
     from modulos.catalogo.rotas import router as catalogo,admin as catalogo_admin
     from modulos.pedidos.rotas import router as pedidos,admin as pedidos_admin

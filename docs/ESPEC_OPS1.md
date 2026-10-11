@@ -1,6 +1,6 @@
 # OPS1 — Backup, teste de restauração, alertas e disponibilidade
 
-**Situação:** especificação para aprovação. **Nada implementado.** O código só começa depois de o Marco confirmar que a outra sessão do gateway foi encerrada e de aprovar este documento.
+**Situação:** **aprovada em 11/10/2026** (decisões na seção 9, que valem sobre o texto anterior onde houver diferença) e **implementada** (seção 10). O teste de carga do Skyone (seção 6) continua só especificado.
 **Data:** 11/10/2026. Produção: `gateway:2b19ef4`, schema 34.
 
 ---
@@ -210,3 +210,108 @@ Nenhum teste escreve no banco de produção.
 9. **Limites** da seção 4.2 (fila 60 s ou 50 conversas; Skyone 20% em 10 min; disco 80%): servem como ponto de partida?
 10. **Horários:** backup às 04:30 e teste de restauração aos domingos às 05:00 (Brasília)?
 11. **Destino:** R2 ou B2? Recomendo o B2 se a credencial sem permissão de apagar for importante para você; o R2 se preferir ficar na Cloudflare.
+
+---
+
+## 9. Decisões do Marco (11/10/2026) — aprovada
+
+1. **`.env`:** cifrado com a mesma chave pública e enviado dentro de cada backup (o manifesto traz o tamanho e a soma dele). O Marco também guarda uma cópia fora da VPS.
+2. **Criptografia:** `gpg`. Chave pública num arquivo que o Marco coloca na VPS; caminho em `BACKUP_CHAVE_PUBLICA`.
+3. **Envio:** `rclone` autorizado, instalado pelo pacote oficial. Envio conferido por tamanho e soma.
+4. **Cópias locais sem cifrar:** as 3 últimas, permissão 600, do usuário do gateway.
+5. **Backups de implantação:** apagar os de mais de 30 dias, mantendo sempre os 5 mais recentes.
+6. **Ensaio manual trimestral:** sim, com roteiro em `docs/RESTAURACAO_MANUAL.md`. O primeiro logo depois do OPS1.
+7. **Alertas extras:** WhatsApp desconectado (uazapi) e memória baixa (disponível abaixo de 10% por 5 min).
+8. **`/health/ops` público:** incluído, só `ok` com 200 ou 503, sem dados.
+9. **Limites:** fila com espera acima de 60 s ou mais de 50 conversas; Skyone acima de 20% de erro em 10 min **com mínimo de 5 chamadas**; disco com aviso em 80% e crítico em 90%. Todos configuráveis.
+10. **Horários:** backup 04:30; teste de restauração domingo 05:00 (America/Sao_Paulo).
+11. **Destino:** Backblaze B2, retenção por regras de ciclo de vida por pasta, chave da VPS sem permissão de apagar.
+12. **Inerte até as credenciais existirem:** backup local e teste de restauração funcionam; envio e alertas ficam desligados, com aviso no registro e `/health/ops` em 503.
+
+## 10. OPS1 — implementado (11/10/2026)
+
+### 10.1 O que existe
+
+| Peça | Onde | Faz |
+|---|---|---|
+| `scripts/backup.sh` | cron, 04:30 | Backup do banco, snapshot do Redis, manifesto; cifra e envia quando o destino está configurado; limpa as cópias locais antigas |
+| `scripts/teste_restauracao.sh` | cron, domingo 05:00 | Restaura o backup local mais recente em `gateway_restauracao_test`, compara com o manifesto, apaga o banco e confere o arquivo no destino |
+| `scripts/vigia.sh` | cron, a cada 2 min | Contêineres, disco, memória e atraso do backup |
+| `scripts/alerta.sh` | chamado pelos três | Telegram, com repetição de 30 min e "normalizado"; `teste` envia uma mensagem de teste |
+| `scripts/ops/instalar_cron.sh` | manual | Instala ou remove as três tarefas no crontab do usuário, sem tocar nas outras linhas |
+| `app/nucleo/alertas.py` | agendador, a cada 30 s | Worker parado, fila, erro do Skyone, WhatsApp desconectado |
+| `GET /health/ops` | gateway | Situação da operação |
+| `ops_execucoes` (migração 035) | banco | Histórico de backups e testes de restauração |
+
+- **rclone:** versão 1.75.2, em `/home/twadmin/.local/bin/rclone`, baixado de `downloads.rclone.org` com a soma oficial conferida. Foi instalado na pasta do usuário porque a conta não tem `sudo` sem senha; a versão do `apt` do Ubuntu 22.04 (1.53.3) é de 2020.
+- As credenciais do destino vão ao `rclone` só por variáveis de ambiente no momento do envio: não há arquivo de configuração do `rclone` com segredo, e nada aparece na linha de comando.
+- O token do Telegram vai ao `curl` pela entrada padrão, não pela linha de comando; nenhum script imprime valor de variável.
+
+### 10.2 Conteúdo do backup
+
+Pasta local `/home/twadmin/backups/gateway/diario/<data>/` (700, arquivos 600): `gateway.dump`, `redis.rdb`, `manifesto.json` e, depois do envio, `envio.json` (nome, tamanho e soma do arquivo cifrado).
+Arquivo enviado: `gateway-backup-<data>.tar.gpg`, com os três arquivos **mais o `.env`**, cifrado com a chave pública.
+
+O manifesto traz: data, commit, versão do esquema, número de tabelas, contagem de `tenants`, `agentes`, `tenant_canais`, `conversas`, `mensagens`, `turnos`, `pedidos`, `contatos`, e tamanho e soma de cada arquivo. A contagem é lida antes e depois do `pg_dump`; se mudar no meio, o backup é refeito (até 3 vezes), para o manifesto descrever exatamente o arquivo.
+
+### 10.3 Estados do backup
+
+| Resultado | Significa | `/health/ops` |
+|---|---|---|
+| `ok` | Feito, cifrado, enviado e conferido no destino | 200 |
+| `local` | Feito só na VPS: falta configurar o destino (o registro diz o que falta) | **503** (`destino_nao_configurado`) |
+| `falha` | Não concluiu; o registro diz o passo. Falha ao cifrar ou enviar mantém a cópia local | **503** e alerta |
+
+`/health/ops` também fica 503 com: nenhum backup ainda, último backup concluído há mais de 26 h, último teste de restauração com falha, ou agendador sem sinal. Para fora só `{"ok": true}` ou `{"ok": false}`; a chamada interna (`http://127.0.0.1:8100/health/ops`) traz `motivos`.
+
+### 10.4 Variáveis de ambiente (só nomes; os valores ficam no `.env` da VPS)
+
+| Variável | Para quê | Obrigatória para |
+|---|---|---|
+| `BACKUP_CHAVE_PUBLICA` | Caminho do arquivo da chave pública gpg | enviar |
+| `BACKUP_S3_ENDPOINT` | `https://s3.<região>.backblazeb2.com` | enviar |
+| `BACKUP_S3_REGIAO` | Região do bucket (ex.: `us-west-004`) | enviar (B2) |
+| `BACKUP_S3_BUCKET` | Nome do bucket | enviar |
+| `BACKUP_S3_PREFIXO` | Pasta dentro do bucket (opcional) | — |
+| `BACKUP_S3_ACCESS_KEY`, `BACKUP_S3_SECRET_KEY` | keyID e applicationKey da chave sem permissão de apagar | enviar |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Bot e chat dos alertas | alertar |
+| `ALERTA_*` | Limites (padrões na seção 9) | — |
+
+Depois de cadastrar as do Telegram ou mudar algum `ALERTA_*`, o agendador precisa reler o `.env`: `cd /home/twadmin/gateway && docker compose up -d --no-deps agendador`. Os scripts da VPS leem o `.env` a cada execução.
+
+### 10.5 Regras de ciclo de vida no bucket do B2
+
+No bucket (privado), em *Lifecycle Settings* → *Use custom lifecycle rules*, três regras. Se usar `BACKUP_S3_PREFIXO`, ponha-o na frente (ex.: `gateway/diario/`).
+
+| Prefixo do nome do arquivo | Dias até ocultar (`daysFromUploadingToHiding`) | Dias até apagar depois de oculto (`daysFromHidingToDeleting`) | Resultado |
+|---|---|---|---|
+| `diario/` | 7 | 1 | 7 diários |
+| `semanal/` | 28 | 1 | 4 semanais |
+| `mensal/` | 180 | 1 | 6 mensais |
+
+**Chave de aplicação da VPS:** restrita a esse bucket, com as permissões `listBuckets`, `listFiles`, `readFiles` e `writeFiles` — **sem `deleteFiles`**. A tela do B2 só oferece "Read and Write", que inclui apagar; a chave sem apagar é criada pelo programa de linha de comando do B2, no seu computador:
+
+```
+b2 key create --bucket <nome-do-bucket> gateway-vps listBuckets,listFiles,readFiles,writeFiles
+```
+
+Ele mostra o `keyID` (vai em `BACKUP_S3_ACCESS_KEY`) e a `applicationKey` (vai em `BACKUP_S3_SECRET_KEY`), uma vez só. O endereço S3 e a região aparecem na página do bucket.
+
+### 10.6 Comandos
+
+| Para | Comando |
+|---|---|
+| Testar o alerta do Telegram | `sh /home/twadmin/gateway/scripts/alerta.sh teste` |
+| Fazer um backup agora (e o primeiro envio) | `sh /home/twadmin/gateway/scripts/backup.sh` |
+| Testar a restauração agora | `sh /home/twadmin/gateway/scripts/teste_restauracao.sh` |
+| Ver a situação com os motivos | `curl -s http://127.0.0.1:8100/health/ops` |
+| Ver o que aconteceu | `tail -n 30 /home/twadmin/backups/gateway/estado/ops.log` |
+| Reinstalar ou remover as tarefas agendadas | `sh scripts/ops/instalar_cron.sh` / `sh scripts/ops/instalar_cron.sh remover` |
+
+### 10.7 Limites conhecidos
+
+- O teste automático de restauração usa a cópia local; o arquivo cifrado do destino só é conferido por existência e tamanho. A prova completa é o ensaio manual (`docs/RESTAURACAO_MANUAL.md`).
+- O `.env` só é protegido pelo backup **externo** (cifrado). Na VPS ele continua sendo o arquivo de sempre.
+- O alerta de erro do Skyone conta turnos reais que terminaram com erro do agente; conversa em modo simulado não entra.
+- "WhatsApp desconectado" depende do estado que a uazapi informa (evento de conexão ou varredura a cada 90 s).
+- Se a VPS inteira cair, quem avisa é o UptimeRobot; os alertas daqui dependem de a máquina estar no ar.

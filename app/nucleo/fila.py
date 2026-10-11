@@ -127,6 +127,10 @@ class FilaDuravel:
         self.varredura = Varredura(pipeline)
         self.varredura_s = float(os.getenv('VARREDURA_UAZAPI_S', '90') or 90)
         self.varredura_task = None
+        # OPS1: alertas pelo Telegram (worker, fila, Skyone, WhatsApp), conferidos pelo agendador.
+        from nucleo.alertas import Alertas, limites
+        self.limites_ops = limites()
+        self.ops = Alertas(self.redis, pipeline.http, self.db, self.prefixo, repetir_s=self.limites_ops['repetir_s'])
 
     # ---------------- chaves ----------------
     def stream(self, tenant): return f'{self.prefixo}:fila:{tenant}'
@@ -208,13 +212,23 @@ class FilaDuravel:
         proxima_varredura = 0
         proximas_vazias = 0
         proximos_avisos = 0
+        proximos_ops = 0
         while not (parar and parar.is_set()):
             try:
                 if await self.manter_lideranca():
                     agora = time.monotonic()
                     if agora >= proximos_indicadores:
-                        await self.alertas(await self.indicadores())
+                        ind = await self.indicadores()
+                        await self.alertas(ind)
                         proximos_indicadores = agora + 15
+                        if agora >= proximos_ops:
+                            # Falha aqui nunca pode parar o agendamento das conversas.
+                            proximos_ops = agora + 30
+                            try:
+                                from nucleo.alertas import conferir
+                                await conferir(self.ops, self.db, ind, self.limites_ops)
+                            except Exception as erro:
+                                log.warning('Conferência de alertas falhou (%s)', type(erro).__name__)
                     if self.varredura_s > 0 and agora >= proxima_varredura and (
                             self.varredura_task is None or self.varredura_task.done()):
                         # Em tarefa própria: chamada lenta ao provedor não atrasa o agendamento.
