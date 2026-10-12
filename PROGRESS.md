@@ -1205,3 +1205,11 @@ PY
 - Entre a troca dos serviços e a mudança do agente (~35 s) o `so_avisar` do segmento antigo esteve ativo; nenhum turno ocorreu nesse intervalo. O primeiro comando de mudança falhou por erro meu na montagem do script e foi refeito em seguida.
 - Conferência (só leitura): 4 containers `healthy`, fila zerada, `/gateway/health` 200, admin por fora 404, zero erros nos logs. Esquema do painel: só `fora_do_horario_aceita_agendado` continua "em breve".
 - **Pendente:** o número da própria instância ainda não é conhecido (chega no primeiro evento da uazapi); até lá o alerta de transbordo do By Koji continua indo para a instância e a pendência não aparece. O Marco cadastra o telefone da equipe pelo painel. Nenhuma mensagem real do piloto desde o SOL1.
+
+## Diagnóstico do piloto 1513 (11/10) e especificação do PED2 — 2026-10-12
+
+- 16:59–17:01 (local): os dois "Novo pedido" foram enviados às 16:59:53 e 17:00:34 e a uazapi só entregou os dois webhooks às 17:01:07; o gateway respondeu em 16 s. Sem refazer, sem fila; Skyone 9,5 s.
+- 17:56: `definir_entrega` com `horario` e `unidade` depois de um toque em "Escolher horário"; carrinho com o texto "hoje às 19h". 22:06: nenhum `fechar_pedido` registrado e nenhum pedido criado; o agente disse que fechou. Carrinho 8 segue aberto (1 Baterá Shake).
+- Agente: `bykoji_atendimento` (By Koji), segmento `delivery_restaurante` v3; perfil da empresa v1 publicado por marco.santos@ticway.com.br em 11/10 16:56 com valores de teste (`nome_empresa` "teste1", `nome_atendente` "Marco").
+- Primeiros turnos reais depois do SOL1/CFG1-c (01:03–01:07 UTC de 12/10): 8 turnos `ok`, sem erro — fecha a conferência pendente do Skyone atual nas imagens novas.
+- `docs/ESPEC_PED2.md` escrita (horário agendado validado, `horario_vencido`, número do pedido, categorias), com 7 decisões. **Nada implementado.**
