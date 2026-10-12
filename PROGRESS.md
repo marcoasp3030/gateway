@@ -1189,3 +1189,9 @@ PY
 - Conferência (só leitura): 4 containers `healthy` na imagem nova, fila zerada, `/gateway/health` 200, `/gateway/health/ops` 503 por fora sem motivos (destino de backup ainda não configurado), admin por fora 404, zero erros nos logs.
 - **Pendente:** conferir uma resposta normal do Skyone atual depois da troca. Nenhuma mensagem real do piloto chegou entre 21:05 e 21:15 UTC.
 - Próximo: R1 → G4-b → G5/G6 → G3 → B4 → C1 → CFG1-b → carrossel.
+
+## CFG1-c — especificação (R1 reações, H1-a fora do horário, T1 transbordo) — 2026-10-12
+
+- `docs/ESPEC_CFG1C.md` escrita, com o contrato único do Skyone (SOL1 + R1) na seção 5, como o painel sabe que saiu do "em breve" na seção 6 e 9 decisões na seção 8. **Nada implementado; aguarda aprovação.** Pedido agendado fica no G4-b.
+- Achados: o segmento `delivery_restaurante` está gravado com `fora_do_horario: so_avisar` (o pedido novo diz "atender"); o alerta de transbordo do By Koji aponta para o número da própria instância; a chave `pedido_com_unidade_fechada` ainda não existe (G4-b).
+- SOL1: nenhum turno real do piloto desde a troca (conferido em 12/10 00:30 UTC); a conferência do Skyone atual na imagem nova continua pendente.
