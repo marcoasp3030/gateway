@@ -1226,3 +1226,7 @@ PY
 - Testes: `tests/test_ped2.py` (5). Dois testes antigos trocaram "20h" por "amanhã às 20h" para não depender da hora do dia.
 - **Implantado em 12/10/2026 03:20 UTC:** `gateway:b9b6ff1`, schema 38, trava com 262 passed (0 falhas, 0 pulados). Volta: `gateway:e5e62c1`. Backup: `pre-ped2-20261012T031953Z`. A primeira tentativa foi bloqueada pela trava (teste do contrato do pacote não conhecia `aviso_do_gateway`); corrigido o teste e refeita.
 - Conferência de leitura: carrinho do piloto 1513 aparece com `horario_vencido: true`, `pode_fechar: false`; Pátio Guedala com 18 categorias e 193 itens pedíveis.
+
+## CAL1 — calendário no pacote — 2026-10-13
+
+- `docs/ESPEC_CAL1.md` escrita, com 5 decisões. **Nada implementado.** Achados: a biblioteca `holidays` não está na imagem; a unidade não tem campo de cidade (só endereço em texto); não há exceção futura cadastrada no By Koji.
