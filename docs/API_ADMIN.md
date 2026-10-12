@@ -225,6 +225,8 @@ Estado persistente por agente: três falhas consecutivas em cinco minutos abrem 
 
 **Horário do pedido, categorias e registro de Skills (PED2, `docs/ESPEC_PED2.md` seções 8 e 9):** `GET /tenants/{t}/skills/registro` (filtros `conversation_id`, `skill`, `limite` até 200, `cursor`) devolve todas as chamadas de Skill: `{"itens": [{"id", "conversation_id", "skill", "metodo", "campos": [nomes], "status", "motivo", "duracao_ms", "criado_em"}], "proximo_cursor"}` — sem valores. `GET …/pedidos/{numero}` ganhou `entrega.agendado_para`. `GET metricas` ganhou `anuncios_falsos_refeitos` e `anuncios_falsos_segurados`. Nas Skills: `definir_entrega` aceita `agendado_para`; carrinho com `agendado_para` e `horario_vencido`; `fechar_pedido` com `numero` na raiz; `GET /api/v1/catalogo/busca` com `categorias`, `categoria` e `pagina`.
 
+**Calendário no pacote (CAL1, `docs/ESPEC_CAL1.md`):** a unidade ganhou `cidade` (texto, até 80) e `uf` (duas letras maiúsculas, ex.: `SP`), aceitos na criação e na alteração e devolvidos nas leituras; nulos = a unidade só recebe feriados nacionais no calendário do agente. As exceções por data já cadastradas passam a aparecer para o agente em `calendario.dias[].observacao`.
+
 **Gestão G1 — horários da unidade** (`docs/ESPEC_GESTAO.md`). Todas sob `/admin/v1/tenants/{t}/unidades`, rede interna, chave do painel e `X-Actor`.
 
 | Rota | Corpo | Resposta |

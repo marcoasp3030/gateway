@@ -33,6 +33,9 @@ class Unidade(Estrito):
     regras:str|None=Field(None,max_length=2000)
     # Gestão G1: fuso próprio da unidade (nulo herda o da empresa).
     fuso:str|None=Field(None,max_length=64)
+    # CAL1: cidade e UF da unidade, para os feriados estaduais e municipais do calendário do pacote. Nulo = só nacionais.
+    cidade:str|None=Field(None,max_length=80)
+    uf:str|None=Field(None,pattern=r'^[A-Z]{2}$')
     # Gestão G4-a: entrega. Nulo = não informado ("a unidade confirma"). Só cadastro até o G4-b.
     delivery_ativo:bool|None=None
     taxa_modo:Literal['fixa','bairro','cep']|None=None
@@ -41,7 +44,7 @@ class Unidade(Estrito):
     tempo_retirada_min:int|None=Field(None,ge=1,le=600)
 
 EXTRAS=('codigo','endereco','telefone','whatsapp_pedidos','formas_pagamento','taxa_entrega','pedido_minimo','area_entrega','aceita_retirada','regras','fuso',
-        'delivery_ativo','taxa_modo','frete_gratis_acima','tempo_entrega_min','tempo_retirada_min')
+        'delivery_ativo','taxa_modo','frete_gratis_acima','tempo_entrega_min','tempo_retirada_min','cidade','uf')
 # Taxas e formas de pagamento: só admin e plataforma alteram (decisão 1 do G4). Vale quando o valor muda.
 SO_ADMIN=('taxa_entrega','taxa_modo','frete_gratis_acima','delivery_ativo','formas_pagamento')
 

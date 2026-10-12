@@ -138,7 +138,10 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
     equipe_agora = await expediente.da_equipe(repo.db,tenant_id,cfg,tenant['timezone'],agora,empresa_agora)
     com_menu = cfg.get('botoes_interativos')=='on' and (canal or {}).get('tipo')=='uazapi'
     com_reacao = cfg.get('reacoes')=='on' and (canal or {}).get('tipo')=='uazapi'
+    from nucleo import calendario
     return {
+        # CAL1: hoje + 7 dias com dia da semana, feriado e o que muda nas unidades. O agente não calcula datas.
+        'calendario':await calendario.do_pacote(repo.db,tenant_id,tenant['timezone'],agora),
         'unidades':await unidades(repo.db,tenant_id,tenant['timezone']),
         'contexto_modulos':contexto,
         'fora_do_horario':empresa_agora['fora'],'proxima_abertura':expediente.proxima_abertura(empresa_agora),

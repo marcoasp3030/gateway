@@ -1230,3 +1230,4 @@ PY
 ## CAL1 — calendário no pacote — 2026-10-13
 
 - `docs/ESPEC_CAL1.md` escrita, com 5 decisões. **Nada implementado.** Achados: a biblioteca `holidays` não está na imagem; a unidade não tem campo de cidade (só endereço em texto); não há exceção futura cadastrada no By Koji.
+- **CAL1 aprovado e implementado (12/10/2026):** `calendario` na raiz do pacote (hoje + 7 dias; feriados pela `holidays==0.106`, municipais de São Paulo, pontos facultativos e exceções das unidades em `observacao`); migração 039 (`tenant_unidades.cidade`, `uf`; By Koji = São Paulo/SP); `cidade`/`uf` no contrato admin da unidade; `scripts/test_suite.sh` instala as bibliotecas novas do requirements no contêiner de teste. Testes em `tests/test_cal1.py` (5).

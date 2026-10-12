@@ -1,7 +1,7 @@
 # CAL1 — Calendário no pacote
 
-**Situação:** especificação para aprovação. **Nada implementado.**
-**Data:** 13/10/2026. Produção: `gateway:b9b6ff1`, schema 38.
+**Situação:** aprovado em 12/10/2026 com as decisões da seção 8 e implementado (seção 9). Onde as seções 3, 4 e 7 divergem das decisões, **valem as seções 8 e 9**.
+**Data:** 12/10/2026. Produção: `gateway:b9b6ff1`, schema 38.
 
 ## 1. Objetivo
 
@@ -85,3 +85,25 @@ Todos na **raiz** do pacote, nenhum dentro de `contexto_modulos`:
 3. **Ponto facultativo** (Carnaval, Cinzas) fora do calendário (proposta), ou entra como `observacao` ("ponto facultativo: Carnaval")?
 4. **Exceção com horário especial:** texto `"Einstein abre 12h–16h"`; com dois turnos, `"Einstein abre 12h–15h e 19h–23h"`. Serve?
 5. **Aviso de sistema** (turno `tarefa: notificar`) também leva `calendario` (proposta: sim, o pacote é o mesmo)?
+
+## 8. Decisões do Marco (12/10/2026)
+
+1. **Cidade e UF por unidade:** migração 039 aditiva, com `cidade` e `uf` já preenchidas (São Paulo/SP) nas 4 unidades do By Koji. Os dois campos entram no contrato admin da unidade (leitura e escrita), para o painel editar.
+2. **`tipo_feriado: "empresa"`:** como proposto (todas as unidades fecham com o mesmo motivo). Fechamento parcial vira só `observacao`.
+3. **Ponto facultativo** (Carnaval segunda e terça, Quarta-feira de Cinzas): entra em `observacao` ("Carnaval (ponto facultativo)"); `feriado` continua nulo. Com exceção de unidade no mesmo dia, tudo na mesma `observacao`, separado por "; ".
+4. **Horário especial:** como proposto ("Einstein abre 12h–15h e 19h–23h").
+5. **`calendario` também no turno `tarefa: notificar`.**
+
+## 9. O que foi implementado
+
+- **Pacote:** `calendario` na raiz, em todo turno (inclusive `tarefa: notificar`), no formato da seção 2. Código em `app/nucleo/calendario.py`.
+- **Biblioteca:** `holidays==0.106` (e `python-dateutil==2.9.0.post0`, dependência dela), fixadas em `app/requirements.txt`. Só a categoria de feriado oficial; nomes em português.
+- **Municipais:** São Paulo capital — "Aniversário de São Paulo" (25/01) e "Corpus Christi" (Páscoa + 60 dias). A cidade é comparada sem acento e sem maiúsculas. Outra cidade entra acrescentando uma linha em `MUNICIPAIS`.
+- **Pontos facultativos:** "Carnaval (ponto facultativo)" (Páscoa − 48 e − 47 dias) e "Quarta-feira de Cinzas (ponto facultativo)" (Páscoa − 46), em `observacao`.
+- **Ordem dentro da `observacao`:** ponto facultativo; "feriado só em <UF ou cidade>" (quando o feriado estadual ou municipal não vale para todas as unidades); depois as unidades, em ordem alfabética.
+- **Textos das exceções:** `"<Unidade> fechado"`, `"<Unidade> fechado (<motivo>)"`, `"<Unidade> abre 12h–16h"`, `"<Unidade> abre 12h–15h e 19h–23h30"`; todas as unidades iguais: `"Todas as unidades fechadas"`, `"Todas as unidades fechadas (<motivo>)"`, `"Todas as unidades abrem 12h–17h"`. Limite de 160 caracteres.
+- **Exceção que só repete o feriado** (unidade fechada no feriado sem motivo, com motivo "feriado" ou com o nome do feriado): não gera texto.
+- **Unidade no contrato admin:** `cidade` (texto, até 80) e `uf` (duas letras maiúsculas) em `POST/PUT /admin/v1/tenants/{id}/unidades[/{uid}]` e nas leituras. Entram no histórico de alterações da unidade.
+- **Falha de fonte:** o pacote sai com os 8 dias (data, dia da semana, rótulo) sem feriado nem observação; aviso no log.
+- **Suíte:** `scripts/test_suite.sh` passou a instalar, no contêiner de teste, as bibliotecas `holidays` e `python-dateutil` na versão do `requirements.txt` (a suíte roda na imagem em uso, que ainda não as tem na primeira implantação).
+- **Testes:** `tests/test_cal1.py` — formato e 8 dias; nacional (12/10); estadual (09/07); municipal (25/01); Corpus Christi 2026 e 2027; Carnaval e Cinzas 2026 e 2027; exceções (fechada, horário especial, parcial, todas, feriado da empresa, repetição do feriado); virada às 00:05; outro fuso; isolamento entre empresas; cadastro de cidade/UF; falha de fonte.
