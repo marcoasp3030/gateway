@@ -204,12 +204,12 @@ def test_alerta_de_transbordo_quando_a_conversa_fica_aguardando_atendente(monkey
             conv=(await webhook(CLIENTE,'quero falar com uma pessoa'))['conversation_id'];await p.processar_duravel('bykoji',conv)
             assert await conn.fetchval("SELECT aguardando_motivo FROM conversas WHERE conversation_id=$1",conv)=='transferido_pelo_agente'
             assert await conn.fetchval("SELECT count(*) FROM avisos_internos WHERE tipo='transbordo'")==0
-            # Com número cadastrado: um alerta por entrada em "aguardando atendente", com número mascarado, motivo e painel.
+            # Com número cadastrado: um alerta por entrada em "aguardando atendente", com motivo e painel. Destino interno (padrão): telefone inteiro (CFG1-c).
             assert (await client.patch('/admin/v1/tenants/bykoji',json={'whatsapp_alerta_transbordo':ALERTA})).status_code==200
             assert (await client.patch('/admin/v1/tenants/bykoji',json={'whatsapp_alerta_transbordo':'11-9999'})).status_code in (400,422)
             enviados.clear();c2=(await webhook('5511942717046','quero falar com uma pessoa'))['conversation_id'];await p.processar_duravel('bykoji',c2)
             await avisos.despachar(p);alerta=[e for e in enviados if e[0]==ALERTA]
-            assert len(alerta)==1 and '5511****7046' in alerta[0][1] and '5511942717046' not in alerta[0][1] and 'pediu_humano' in alerta[0][1] and 'Painel:' in alerta[0][1]
+            assert len(alerta)==1 and '+55 11 94271-7046' in alerta[0][1] and 'pediu_humano' in alerta[0][1] and 'Painel:' in alerta[0][1]
             # Já aguardando: nova mensagem não gera outro alerta. Erro do agente em outra conversa gera.
             await conn.execute("UPDATE conversas SET bot_pausado_ate=NULL WHERE conversation_id=$1",c2)
             await webhook('5511942717046','alô?');await p.processar_duravel('bykoji',c2);assert await conn.fetchval("SELECT count(*) FROM avisos_internos WHERE tipo='transbordo'")==1

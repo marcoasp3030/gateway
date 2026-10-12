@@ -221,6 +221,8 @@ Estado persistente por agente: três falhas consecutivas em cinco minutos abrem 
 
 **Solicitações para a equipe (SOL1, `docs/ESPEC_SOL1.md` seção 10):** `GET /tenants/{t}/solicitacoes` (filtros `status`, `motivo`, `tipo`, `desde`, `ate`, `busca`, `limite`, `cursor`), `GET …/solicitacoes/contagem`, `GET …/solicitacoes/{id}`, `PATCH …/solicitacoes/{id}` (`status`, `nota`; qualquer papel). `GET conversas` ganha `solicitacao_aberta`; `GET metricas` ganha o bloco `solicitacoes`. Configurações novas (versionadas, grupo `transbordo`): `notificar_equipe` (`on`/`off`) e `transbordo_destino_externo` (sim/não).
 
+**Reações, fora do horário e transbordo (CFG1-c, `docs/ESPEC_CFG1C.md` seção 10):** os comportamentos `reacoes`, `reacoes_emojis`, `reacoes_max_dia`, `fora_do_horario` (`atender`/`so_avisar`), `fora_do_horario_mensagem`, `transbordo_alerta` (telefone brasileiro; recusa o número da instância), `transbordo_horario_equipe` e `transbordo_fora_do_horario` passaram a ser executados (`disponivel: true` no esquema de `GET …/atendimento`); só `fora_do_horario_aceita_agendado` continua "em breve". O mesmo `GET` ganhou `pendencias`. `GET metricas` ganhou `reacoes`, `fora_do_horario` e `transbordo`.
+
 **Gestão G1 — horários da unidade** (`docs/ESPEC_GESTAO.md`). Todas sob `/admin/v1/tenants/{t}/unidades`, rede interna, chave do painel e `X-Actor`.
 
 | Rota | Corpo | Resposta |

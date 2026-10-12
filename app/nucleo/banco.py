@@ -102,7 +102,7 @@ class Repositorio:
         if not 0 <= limite <= 100:
             raise ValueError('history_turns inválido')
         rows = await self.db.fetch('SELECT direcao,conteudo,enviada_em FROM mensagens '
-            'WHERE tenant_id=$1 AND conversation_id=$2 AND id<$3 '
+            "WHERE tenant_id=$1 AND conversation_id=$2 AND id<$3 AND NOT (direcao='saida' AND coalesce(tipo,'')='reacao') "
             'ORDER BY enviada_em DESC,id DESC LIMIT $4',
             escopo(tenant_id),conversa_id,antes_id,limite)
         return [dict(r) for r in reversed(rows)]

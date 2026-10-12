@@ -89,8 +89,9 @@ def test_rascunho_publicacao_versoes_restauracao_previa_e_papeis():
             assert g['pode_editar'] is False and (await client.get(E,headers={'X-Role':'admin'})).json()['pode_editar'] is True
             esq=g['esquema'];assert esq['perfil']['tom']['opcoes']==['formal','equilibrado','descontraido'] and esq['perfil']['regras_da_casa']['max']==1500
             assert esq['comportamentos']['debounce_s']=={'grupo':'ritmo','tipo':'inteiro','padrao':4,'editavel':False,'disponivel':True,'min':1,'max':15}
-            # Reações, fora do horário e transbordo já estão no contrato, marcados como ainda não disponíveis; os de operação não são editáveis aqui.
-            assert [c for c,i in esq['comportamentos'].items() if not i['disponivel']]==['reacoes','reacoes_emojis','reacoes_max_dia','fora_do_horario','fora_do_horario_mensagem','fora_do_horario_aceita_agendado','transbordo_alerta','transbordo_horario_equipe','transbordo_fora_do_horario']
+            # Desde o CFG1-c, reações, fora do horário e transbordo estão disponíveis; só o pedido agendado continua "em breve". Os de operação não são editáveis aqui.
+            assert [c for c,i in esq['comportamentos'].items() if not i['disponivel']]==['fora_do_horario_aceita_agendado']
+            assert esq['comportamentos']['fora_do_horario_mensagem']['variaveis']==['proxima_abertura','nome_empresa','abre'] and esq['comportamentos']['transbordo_fora_do_horario']['variaveis']==['retorno_equipe','horario'] and g['pendencias']==[]
             assert esq['comportamentos']['send_mode']['tipo']=='so_plataforma' and (await client.get(E,headers={'X-Role':'plataforma'})).json()['esquema']['comportamentos']['send_mode']['editavel'] is False
             # Papéis: membro, sem cabeçalho ou papel desconhecido leem e veem a prévia, não salvam nem publicam nem restauram.
             for cab in ({'X-Actor':'joana','X-Role':'membro'},{'X-Actor':'joana'},{'X-Actor':'joana','X-Role':'dono'}):
@@ -209,7 +210,7 @@ def test_segmento_empresa_herda_e_migracao_sem_mudar_a_configuracao_efetiva():
             s=(await client.get('/admin/v1/segmentos')).json()['itens'];ids=[x['id'] for x in s];assert 'delivery_restaurante' in ids and 'atendente_delivery' in ids and 'assistente_generico' not in ids
             d=(await client.get('/admin/v1/segmentos/delivery_restaurante')).json()
             assert d['modulos']==['catalogo','pedidos'] and (d['perfil_padrao']['tom'],d['perfil_padrao']['emojis'],d['perfil_padrao']['tamanho_respostas'],d['perfil_padrao']['sugestoes'])==('equilibrado','moderado','curtas','leve')
-            assert (d['comportamento_padrao']['botoes_interativos'],d['comportamento_padrao']['refazer_turno'],d['comportamento_padrao']['debounce_incompleta_s'],d['comportamento_padrao']['fora_do_horario'])==('on','on',7,'so_avisar')
+            assert (d['comportamento_padrao']['botoes_interativos'],d['comportamento_padrao']['refazer_turno'],d['comportamento_padrao']['debounce_incompleta_s'],d['comportamento_padrao']['fora_do_horario'])==('on','on',7,'atender')   # versão mais recente do segmento (CFG1-c)
             assert (await client.get('/admin/v1/segmentos/nao_existe')).status_code==404
             # Migração do By Koji: agente com as configurações próprias de produção troca de modelo e nada muda na configuração efetiva.
             A1='/admin/v1/tenants/bykoji/agentes/bykoji_atendimento'
@@ -227,7 +228,7 @@ def test_segmento_empresa_herda_e_migracao_sem_mudar_a_configuracao_efetiva():
             assert (await client.patch('/admin/v1/tenants/bykoji',json={'segmento':'nao_existe'})).status_code==400
             # Empresa do segmento herda campo a campo; o que ela personaliza não é sobrescrito quando o segmento muda.
             E2='/admin/v1/tenants/bykoji/atendimento'
-            g=(await client.get(E2)).json();assert g['segmento']=='delivery_restaurante' and g['efetivo']['origem']['comportamentos']['botoes_interativos']=='segmento' and g['efetivo']['comportamentos']['fora_do_horario']=='so_avisar'
+            g=(await client.get(E2)).json();assert g['segmento']=='delivery_restaurante' and g['efetivo']['origem']['comportamentos']['botoes_interativos']=='segmento' and g['efetivo']['comportamentos']['fora_do_horario']=='atender'
             assert g['efetivo']['origem']['perfil']['tom']=='segmento' and g['efetivo']['origem']['perfil']['regras_da_casa']=='plataforma'
             await client.put(E2+'/rascunho',json={'baseado_em':0,'perfil':{'tom':'formal'}},headers=ADMIN);assert (await client.post(E2+'/publicar',json={'baseado_em':0},headers=ADMIN)).status_code==200
             await conn.execute("""UPDATE modelos_agente SET perfil_padrao=perfil_padrao||'{"tom":"descontraido","emojis":"bastante"}'::jsonb WHERE id='delivery_restaurante'""");app.state.configuracoes.invalidar()

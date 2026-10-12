@@ -97,7 +97,7 @@ async def registrar(conn,tenant,conversa,cfg,resultado,painel_url=None):
     await conn.execute('SELECT pg_advisory_xact_lock(hashtextextended($1,0))','solicitacoes:'+tenant)
     atual=await conn.fetchrow("SELECT * FROM solicitacoes WHERE tenant_id=$1 AND conversation_id=$2 AND motivo=$3 AND status=ANY($4::text[]) FOR UPDATE",tenant,conversa,motivo,list(ABERTAS))
     conv=await conn.fetchrow('SELECT telefone,contato_id FROM conversas WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa)
-    destino=await conn.fetchval('SELECT whatsapp_alerta_transbordo FROM tenants WHERE id=$1',tenant)
+    destino,_=await avisos.destino_do_alerta(conn,tenant,cfg,conversa)
     nome,_=await nome_da_conversa(conn,tenant,conversa)
     if atual is None:
         n=1+await conn.fetchval('SELECT count(*) FROM solicitacoes WHERE tenant_id=$1',tenant)

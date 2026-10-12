@@ -55,7 +55,7 @@ class Comportamento(Estrito):
     fora_do_horario: Literal['atender','so_avisar'] | None = None
     fora_do_horario_mensagem: str | None = Field(None,min_length=1,max_length=500)
     fora_do_horario_aceita_agendado: bool | None = None
-    transbordo_alerta: str | None = Field(None,pattern=r'^\d{10,15}$')
+    transbordo_alerta: str | None = Field(None,pattern=r'^55[1-9]\d(9\d{8}|[2-8]\d{7})$')
     transbordo_horario_equipe: dict | None = None
     transbordo_fora_do_horario: str | None = Field(None,min_length=1,max_length=500)
     # SOL1

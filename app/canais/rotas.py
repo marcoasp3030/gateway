@@ -50,6 +50,11 @@ async def webhook(request:Request,tipo:str,canal_id:str,s:str=''):
         tenant,tipo,json.dumps(uazapi.limpar_bruto(sanitizar(bruto)) if tipo=='uazapi' else sanitizar(bruto)))
     # Sinal de vida do canal para o painel: qualquer evento autenticado conta.
     await request.app.state.db.execute('UPDATE tenant_canais SET ultimo_evento_em=now() WHERE tenant_id=$1 AND id=$2',tenant,canal_id)
+    if tipo=='uazapi':
+        # T1: o provedor informa em cada evento o número da própria instância; guardado para não servir de destino de alerta.
+        proprio=''.join(c for c in str(bruto.get('owner') or '') if c.isdigit())
+        if 10<=len(proprio)<=15:
+            await request.app.state.db.execute('UPDATE tenant_canais SET numero_instancia=$3 WHERE tenant_id=$1 AND id=$2 AND numero_instancia IS DISTINCT FROM $3',tenant,canal_id,proprio)
     if tipo=='api':
         m=Entrada.model_validate(bruto).model_dump()
     else:
@@ -122,7 +127,7 @@ async def metricas(request:Request,tenant_id:str,agente:str|None=None):
         WHERE m.tenant_id=$1 AND m.direcao='saida' AND m.meta ? 'botoes' AND ($2::text IS NULL OR c.agente_id=$2) GROUP BY 1,2""",tenant_id,agente)
     cliques=await request.app.state.db.fetchrow("""SELECT count(*) AS total,
         count(*) FILTER (WHERE o.id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM mensagens d WHERE d.tenant_id=m.tenant_id
-            AND d.conversation_id=m.conversation_id AND d.direcao='saida' AND d.id>o.id AND d.id<m.id)) AS atuais
+            AND d.conversation_id=m.conversation_id AND d.direcao='saida' AND coalesce(d.tipo,'')<>'reacao' AND d.id>o.id AND d.id<m.id)) AS atuais
         FROM mensagens m JOIN conversas c ON c.tenant_id=m.tenant_id AND c.conversation_id=m.conversation_id
         LEFT JOIN mensagens o ON o.tenant_id=m.tenant_id AND o.conversation_id=m.conversation_id AND o.direcao='saida' AND o.origem='bot'
             AND o.message_id=c.canal_id||':'||(m.meta->'interacao'->>'mensagem')
@@ -155,5 +160,20 @@ async def metricas(request:Request,tenant_id:str,agente:str|None=None):
         FROM solicitacoes WHERE tenant_id=$1 AND ($2::text IS NULL OR agente_id=$2)""",tenant_id,agente)
     alertas=await request.app.state.db.fetchval("SELECT count(*) FROM avisos_internos WHERE tenant_id=$1 AND tipo='solicitacao' AND status='enviado'",tenant_id)
     # SOL1. convertidas = transferências que o gateway trocou por aviso à equipe (acao_original transferir_humano → acao_aplicada notificar_equipe).
+    # CFG1-c: reações pedidas pelo agente (o que saiu e o que foi barrado, por motivo), fora do horário e transferências.
+    reac=await request.app.state.db.fetch("""SELECT reacao->>'resultado' AS resultado,reacao->>'emoji' AS emoji,reacao->>'motivo' AS motivo,count(*) AS n FROM turnos
+        WHERE tenant_id=$1 AND reacao IS NOT NULL AND ($2::text IS NULL OR agente_id=$2) GROUP BY 1,2,3""",tenant_id,agente)
+    aplicadas={};bloqueadas={}
+    for r in reac:
+        if r['resultado'] in ('aplicada','simulada'): aplicadas[r['emoji']]=aplicadas.get(r['emoji'],0)+r['n']
+        else: bloqueadas[r['motivo'] or 'falha_provedor']=bloqueadas.get(r['motivo'] or 'falha_provedor',0)+r['n']
+    reacoes={'aplicadas':{'total':sum(aplicadas.values()),'por_emoji':aplicadas},'bloqueadas':{'total':sum(bloqueadas.values()),'por_motivo':bloqueadas}}
+    extra=await request.app.state.db.fetchrow("""SELECT count(*) FILTER (WHERE resposta->>'fora_do_horario'='avisado') AS avisos,
+        count(*) FILTER (WHERE resposta->>'fora_do_horario'='sem_resposta') AS mudas,
+        count(*) FILTER (WHERE equipe_fora_do_horario IS FALSE) AS dentro,count(*) FILTER (WHERE equipe_fora_do_horario) AS fora
+        FROM turnos WHERE tenant_id=$1 AND status<>'refeito' AND ($2::text IS NULL OR agente_id=$2)""",tenant_id,agente)
+    horario={'avisos_enviados':extra['avisos'],'mensagens_sem_resposta':extra['mudas']}
+    transbordo={'transferencias':{'dentro_do_horario':extra['dentro'],'fora_do_horario':extra['fora']}}
     solicitacoes={'criadas':sol['criadas'],'atualizadas':int(sol['atualizadas']),'convertidas':sol['convertidas'],'alertas_enviados':alertas}
-    return {**dict(linha),'fila':fila,'botoes':botoes,'picotadas':picotadas,'solicitacoes':solicitacoes}
+    return {**dict(linha),'fila':fila,'botoes':botoes,'picotadas':picotadas,'solicitacoes':solicitacoes,
+            'reacoes':reacoes,'fora_do_horario':horario,'transbordo':transbordo}

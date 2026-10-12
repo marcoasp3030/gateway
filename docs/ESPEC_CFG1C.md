@@ -1,6 +1,6 @@
 # CFG1-c — Ativar Reações (R1), Fora do horário (H1-a) e Transbordo (T1)
 
-**Situação:** especificação para aprovação. **Nada implementado.**
+**Situação:** **aprovada em 12/10/2026** (decisões na seção 9, que valem sobre o texto anterior onde houver diferença) e **implementada** (seção 10).
 **Data:** 12/10/2026. Produção: `gateway:85b5481`, schema 36 (SOL1).
 **Fora deste bloco:** pedido agendado (fica no G4-b).
 
@@ -335,3 +335,81 @@ Gerais:
 7. **Transferência fora do horário da equipe não pausa o bot em nenhum motivo**, inclusive `pediu_humano` e `reclamacao`: confirmo que é isso? O cliente que pediu uma pessoa continua falando com o agente até a equipe voltar.
 8. **Intervalo de 3 mensagens entre reações:** fixo (proposta) ou configurável por agente, como o limite diário?
 9. **Um bloco só** (R1 + H1-a + T1 numa implantação), ou três implantações separadas com parada entre elas? Proposta: um só, porque dividem a migração e a versão 3 do segmento.
+
+---
+
+## 9. Decisões do Marco (12/10/2026) — aprovada
+
+1. **Padrão do segmento `delivery_restaurante` para fora do horário:** `atender` (revoga o `so_avisar` do CFG1). Entra na versão 3 do segmento, com a comparação antes e depois.
+2. **Reação** permitida com `nenhuma`, `silencio`, `encerrar`, `notificar_equipe` e `pedido_fechado`. Proibida com `transferir_humano` e com motivo `reclamacao`.
+3. **`so_avisar` com pedido ativo na conversa:** chama o agente.
+4. **Mensagens com a loja fechada (`so_avisar`):** ficam sem resposta.
+5. **Telefone da equipe:** o Marco cadastra pelo painel depois do bloco. Enquanto o destino for o número da própria instância, o alerta **não é enviado** e a pendência fica visível no painel e no log.
+6. **Telefone inteiro no alerta de transferência** quando o destino é interno: confirmado (igual ao SOL1).
+7. **Fora do horário da equipe:** não pausa o bot em nenhum motivo, inclusive `pediu_humano` e `reclamacao`. O pacote leva `equipe_disponivel: false` e `retorno_equipe`.
+8. **Intervalo de 3 mensagens entre reações:** fixo.
+9. **Um bloco só**, numa implantação, com as três chaves independentes (`reacoes`, `fora_do_horario`, e o horário/telefone do transbordo).
+
+## 10. Implementado (12/10/2026)
+
+Migração 037 (aditiva). Código: `nucleo/reacoes.py`, `nucleo/expediente.py`, `nucleo/pipeline.py`, `agentes/skyone.py`, `modulos/pedidos/avisos.py`, `admin/atendimento.py`. Testes em `tests/test_cfg1c.py`.
+
+### 10.1 Formato exato dos campos novos do pacote
+
+Todos na raiz do pacote e **sempre presentes** (o `Normalizar Entrada` pode contar com eles):
+
+```json
+"fora_do_horario": true,
+"proxima_abertura": {"unidade": "Pátio Guedala", "codigo": "patio_guedala", "dia_semana": "terça-feira", "data": "2026-10-13", "hora": "12:00"},
+"equipe_disponivel": false,
+"retorno_equipe": {"dia_semana": "terça-feira", "data": "2026-10-13", "hora": "12:00"},
+"recursos": {"botoes": true, "lista": true, "reacoes": true, "emojis_de_reacao": ["❤️", "😊", "👍", "🙏"], "notificar_equipe": true}
+```
+
+| Campo | Tipo | Valores |
+|---|---|---|
+| `fora_do_horario` | booleano | `true` só quando **todas** as unidades ativas estão fechadas agora. Unidade sem horário cadastrado impede o `true` |
+| `proxima_abertura` | objeto ou `null` | `null` com a empresa aberta, ou quando não se sabe quando abre. `unidade` = nome; `codigo` = código da unidade; `dia_semana` por extenso, em minúsculas (`segunda-feira` … `domingo`); `data` = `AAAA-MM-DD`; `hora` = `HH:MM` (24 h). Data e hora no fuso da unidade |
+| `equipe_disponivel` | booleano | A equipe humana está no horário dela agora. Sem grade própria, acompanha as unidades (`true` quando `fora_do_horario` é `false`) |
+| `retorno_equipe` | objeto ou `null` | `null` com a equipe disponível ou sem previsão. Mesmas três chaves de data: `dia_semana`, `data`, `hora` (sem `unidade` nem `codigo`) |
+| `recursos.botoes`, `recursos.lista` | booleano | Botões e listas ligados no agente **e** canal que os suporta |
+| `recursos.reacoes` | booleano | Reações ligadas no agente **e** canal que as suporta |
+| `recursos.emojis_de_reacao` | lista de textos | Os emojis que o agente pode devolver em `reacao`. Lista vazia quando `reacoes` é `false` |
+| `recursos.notificar_equipe` | booleano | A ação `notificar_equipe` está ligada |
+
+- Com a empresa aberta: `"fora_do_horario": false, "proxima_abertura": null, "equipe_disponivel": true, "retorno_equipe": null`.
+- `contexto_modulos.solicitacoes` (SOL1) continua existindo só com `notificar_equipe` ligado.
+
+### 10.2 O que o fluxo devolve — `reacao`
+
+Campo opcional na raiz do retorno: **texto com um emoji** (`"reacao": "❤️"`) ou `null`/ausente. Texto, número, dois emojis ou objeto são ignorados, sem erro. O resto do contrato é o da seção 5.
+
+Antes deste bloco o gateway já ignorava `reacao` (o leitor só lê os campos do contrato), então o `Interpretar Resposta` pode repassá-la a qualquer momento.
+
+### 10.3 Como ficou cada recurso
+
+**Reações**
+- Travas na ordem: `desligado` → `emoji_fora_da_lista` → `limite_diario` → `intervalo` → `acao_ou_motivo` → `sem_texto`; depois `canal`, `nao_permitido` (conversa pausada ou fora do piloto), envio de teste (`simulada`) e `falha_provedor`.
+- Cada turno guarda `{"emoji", "resultado": "aplicada" | "simulada" | "bloqueada", "motivo"}` em `turnos.reacao`.
+- A reação é marcada no turno antes de falar com o provedor: se o processo cair no meio, a retomada não reage de novo.
+- Fica no histórico como mensagem do bot do tipo `reacao`; não vai ao agente como fala, não conta como "bot falou há pouco" e não torna o botão anterior "antigo".
+- Só no caminho da fila durável (o que está em produção).
+
+**Fora do horário**
+- `atender`: o agente é chamado; os campos da 10.1 dizem a situação.
+- `so_avisar`: mensagem enviada uma vez por período fechado (origem `sistema`, marca `fora_do_horario`), sem chamar o agente; o turno fica com `acao: silencio` e motivo `fora_do_horario`. Quando a empresa reabre, o período é zerado.
+- Com pedido ativo na conversa, o agente é chamado mesmo em `so_avisar`.
+
+**Transbordo**
+- Destino: `transbordo_alerta` (com herança) e, na falta, o número antigo da empresa. Validado como telefone brasileiro (`55` + DDD + 8 ou 9 dígitos); o número da própria instância é recusado ao salvar (`numero_da_instancia`).
+- O número da instância é lido do campo `owner` de cada evento da uazapi e guardado no canal. **Até o primeiro evento chegar depois da implantação, o gateway ainda não o conhece.**
+- Destino igual ao da instância: o alerta não é enviado; fica o registro `transbordo.alerta_pendente` na auditoria da empresa, um aviso no log, e `GET {escopo}/atendimento` devolve `pendencias: [{"campo": "comportamentos.transbordo_alerta", "motivo": "numero_da_instancia"}]`.
+- Transferência fora do horário da equipe: balões do agente, depois a mensagem de equipe ausente (uma vez enquanto a conversa aguarda), alerta com a linha "Fora do horário da equipe", conversa aguardando e **bot sem pausa**. `turnos.equipe_fora_do_horario` registra dentro ou fora.
+
+### 10.4 Painel
+
+- `esquema.comportamentos.<campo>.disponivel` agora é `true` para `reacoes`, `reacoes_emojis`, `reacoes_max_dia`, `fora_do_horario`, `fora_do_horario_mensagem`, `transbordo_alerta`, `transbordo_horario_equipe`, `transbordo_fora_do_horario`. Continua `false` só em `fora_do_horario_aceita_agendado`.
+- `fora_do_horario_mensagem` e `transbordo_fora_do_horario` trazem `variaveis` no esquema. Variável fora da lista → 400 com `motivo: variavel_desconhecida`. Os dois textos passam pela análise de instrução de sistema ao publicar.
+- `transbordo_alerta` aceita o número com `+`, espaços, parênteses e traço; o gateway guarda só os dígitos.
+- Campo novo na resposta do `GET`: `pendencias`.
+- `GET /metricas` ganhou `reacoes`, `fora_do_horario` e `transbordo`.

@@ -10,7 +10,7 @@ from starlette.responses import JSONResponse
 from nucleo.autenticacao import painel,papel,exigir_admin
 from nucleo.banco import Repositorio,registro
 from nucleo.configuracao import Configuracoes,PADROES
-from nucleo import atendimento as A,horarios
+from nucleo import atendimento as A,horarios,expediente
 from nucleo.atendimento import COMPORTAMENTOS
 from .modelos import Comportamento
 from .servico import auditar
@@ -74,6 +74,8 @@ def validar_comportamentos(dados):
     if not isinstance(dados,dict): return {},[{'campo':'comportamentos','motivo':'tipo'}]
     erros=[{'campo':'comportamentos.'+str(c)[:40],'motivo':'so_plataforma' if c in A.SO_PLATAFORMA else 'campo_desconhecido'} for c in dados if c not in COMPORTAMENTOS]
     conhecidos={c:v for c,v in dados.items() if c in COMPORTAMENTOS}
+    # Telefone de alerta: aceita "+55 (11) 94728-1513"; guarda só os dígitos.
+    if isinstance(conhecidos.get('transbordo_alerta'),str): conhecidos['transbordo_alerta']=''.join(c for c in conhecidos['transbordo_alerta'] if c.isdigit())
     try: limpo=Comportamento.model_validate(conhecidos).model_dump(include=set(conhecidos))
     except ValidationError as exc:
         ruins={str(e['loc'][0]) for e in exc.errors() if e.get('loc')}
@@ -92,6 +94,8 @@ def validar_comportamentos(dados):
             except Exception: ruim=True
         elif tipo=='lista_escolhas': ruim=len(set(valor))!=len(valor)
         if ruim: erros.append({'campo':'comportamentos.'+campo,'motivo':'valor'})
+        elif campo in expediente.VARIAVEIS and expediente.variaveis_desconhecidas(campo,valor):
+            erros.append({'campo':'comportamentos.'+campo,'motivo':'variavel_desconhecida','variaveis':list(expediente.VARIAVEIS[campo])})
     return limpo,erros
 
 
@@ -105,6 +109,18 @@ async def _escopo(request,tenant,agente,conn=None):
     linha=await repo.obter(tenant,'agentes',agente)
     if not linha: raise HTTPException(404,'NOT_FOUND')
     return repo,empresa,config,linha
+
+
+async def numeros_da_instancia(db,tenant):
+    return {r['numero_instancia'] for r in await db.fetch('SELECT numero_instancia FROM tenant_canais WHERE tenant_id=$1 AND numero_instancia IS NOT NULL',tenant)}
+
+
+def analisar_textos(definicao):
+    """(bloqueios, avisos) dos textos livres do escopo: os do perfil e as mensagens que o gateway envia sozinho."""
+    bloqueios,avisos=A.analisar_perfil(definicao['perfil'])
+    for campo in expediente.VARIAVEIS:
+        b,a=A.analisar_texto('comportamentos.'+campo,definicao['comportamentos'].get(campo));bloqueios+=b;avisos+=a
+    return bloqueios,avisos
 
 
 def aplicar(definicao,rascunho):
@@ -166,6 +182,8 @@ async def _visao(request,tenant,agente,avisos=None):
            'versao_publicada':versao,'publicado_em':ultima['publicado_em'] if ultima else None,'publicado_por':ultima['publicado_por'] if ultima else None,
            'perfil_versao':texto,'publicado':definicao,'rascunho':None,'efetivo':efetivo,
            'esquema':A.esquema(PADROES,quem),'pode_editar':quem in ('admin','plataforma')}
+    # Pendências que o painel deve mostrar (não impedem nada): o telefone de alerta em vigor é o da própria instância → o alerta não é enviado.
+    saida['pendencias']=[{'campo':'comportamentos.transbordo_alerta','motivo':'numero_da_instancia'}] if efetivo['comportamentos'].get('transbordo_alerta') in await numeros_da_instancia(db,tenant) else []
     # O padrão de nome_empresa é o nome cadastrado desta empresa.
     saida['esquema']['perfil']['nome_empresa']['padrao']=' '.join(str(empresa.get('nome') or '').split())[:60] or None
     # Personalizado = definido neste escopo; o resto vem de cima (segmento, plataforma ou, no agente, da empresa).
@@ -174,7 +192,7 @@ async def _visao(request,tenant,agente,avisos=None):
                             'comportamentos':sorted(c for c,o in efetivo['origem']['comportamentos'].items() if o==aqui and c in COMPORTAMENTOS)}
     if r:
         futuro=aplicar(definicao,r['conteudo']);previsto,_=await _efetivo(request,repo,tenant,agente,futuro)
-        bloqueios,duvidas=A.analisar_perfil(futuro['perfil'])
+        bloqueios,duvidas=analisar_textos(futuro)
         saida['rascunho']={'baseado_em':r['baseado_em'],'desatualizado':r['baseado_em']!=versao,'atualizado_em':r['atualizado_em'],'atualizado_por':r['atualizado_por'],
                            'perfil':r['conteudo'].get('perfil') or {},'comportamentos':r['conteudo'].get('comportamentos') or {},
                            'efetivo':previsto,'alteracoes':diferencas(definicao,futuro),'bloqueios':bloqueios,'avisos':duvidas}
@@ -202,6 +220,9 @@ async def salvar_rascunho(request:Request,tenant_id:str,dados:Rascunho,agente_id
     """Salva só os campos enviados (nulo = voltar ao padrão de cima). Nada muda em produção."""
     perfil,erros=A.validar_perfil(dados.perfil or {})
     comportamentos,erros_c=validar_comportamentos(dados.comportamentos or {})
+    # T1: o número da própria instância não serve de telefone de alerta (o bot avisaria a si mesmo).
+    if comportamentos.get('transbordo_alerta') and comportamentos['transbordo_alerta'] in await numeros_da_instancia(request.app.state.db,tenant_id):
+        erros_c.append({'campo':'comportamentos.transbordo_alerta','motivo':'numero_da_instancia'})
     if erros+erros_c: return erro(400,'VALIDATION_ERROR','Há campos inválidos.',{'campos':erros+erros_c})
     async with request.app.state.db.acquire() as conn,conn.transaction():
         repo,empresa,config,linha=await _escopo(request,tenant_id,agente_id,conn)
@@ -252,7 +273,7 @@ async def publicar(request:Request,tenant_id:str,dados:Publicar,agente_id:str|No
         # Revalida tudo: as regras podem ter mudado desde que o rascunho foi salvo.
         _,e1=A.validar_perfil(nova['perfil']);_,e2=validar_comportamentos(nova['comportamentos'])
         if e1+e2: return erro(400,'VALIDATION_ERROR','Há campos inválidos.',{'campos':e1+e2})
-        bloqueios,duvidas=A.analisar_perfil(nova['perfil'])
+        bloqueios,duvidas=analisar_textos(nova)
         # A confirmação vale para o que está mudando agora; trecho já confirmado numa versão anterior não volta a pedir.
         mudando={d['campo'] for d in diferencas(antes,nova)}
         duvidas=[d for d in duvidas if d['campo'].split('[')[0] in mudando]
@@ -304,7 +325,7 @@ async def restaurar(request:Request,tenant_id:str,versao:int,dados:Restaurar|Non
         antes=definicao_do_escopo(alvo);nova={'perfil':conteudo.get('perfil') or {},'comportamentos':conteudo.get('comportamentos') or {}}
         if not diferencas(antes,nova): return erro(409,'CONFLICT','Esta versão já é a que está em vigor.',{'motivo':'sem_alteracoes','versao_publicada':alvo.get('perfil_versao') or 0})
         # Versão antiga é revalidada pelas regras de hoje; texto que hoje seria bloqueado não volta.
-        _,e1=A.validar_perfil(nova['perfil']);_,e2=validar_comportamentos(nova['comportamentos']);bloqueios,_=A.analisar_perfil(nova['perfil'])
+        _,e1=A.validar_perfil(nova['perfil']);_,e2=validar_comportamentos(nova['comportamentos']);bloqueios,_=analisar_textos(nova)
         if e1+e2 or bloqueios: return erro(400,'VALIDATION_ERROR','Esta versão não passa nas regras atuais.',{'campos':e1+e2,'bloqueios':bloqueios})
         nota=((dados.nota if dados else None) or '').strip() or f'Restaurada da versão {versao}'
         await _gravar(request,conn,repo,tenant_id,agente_id,empresa,antes,nova,'restauracao',actor,nota,versao)

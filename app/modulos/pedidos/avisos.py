@@ -124,9 +124,17 @@ def texto_cliente(p,nome_unidade,modelo=None):
                                            'motivo':motivo,'nome_cliente':primeiro_nome(p['cliente_nome'])})
 
 
-def texto_transbordo(telefone,nome,motivo,detalhe,pedido,painel_url):
-    linhas=['⚠️ CONVERSA AGUARDANDO ATENDENTE',f'Cliente: {nome or "(sem nome)"} — {mascarar_numero(telefone)}',
+def numero_para_o_alerta(telefone,mascarar):
+    """Telefone do cliente no alerta: inteiro para a equipe interna; mascarado quando o destino é um grupo externo."""
+    if mascarar: return mascarar_numero(telefone)
+    from nucleo.contatos import e164,formatado
+    return formatado(e164(telefone)) or '(sem número)'
+
+
+def texto_transbordo(telefone,nome,motivo,detalhe,pedido,painel_url,mascarar=True,equipe_ausente=False):
+    linhas=['⚠️ CONVERSA AGUARDANDO ATENDENTE',f'Cliente: {nome or "(sem nome)"} — {numero_para_o_alerta(telefone,mascarar)}',
             'Motivo: '+MOTIVOS.get(motivo,motivo)+(f' ({detalhe})' if detalhe else '')]
+    if equipe_ausente: linhas.append('Fora do horário da equipe: o bot continua atendendo e o cliente foi avisado.')
     if pedido: linhas.append(f'Pedido: {pedido["numero"]} ({pedido["status"]})')
     if painel_url: linhas.append(f'Painel: {painel_url}')
     return '\n'.join(linhas)
@@ -167,9 +175,25 @@ RECUSA_CERTA='recusado_pelo_provedor'
 def incerto(erro): return erro!=RECUSA_CERTA
 
 
-async def avisar_transbordo(conn,tenant,conversa,motivo,detalhe=None,painel_url=None):
-    """Conversa entrou em "aguardando atendente" → aviso curto ao número de alerta da empresa (vazio = desligado)."""
-    destino=await conn.fetchval('SELECT whatsapp_alerta_transbordo FROM tenants WHERE id=$1',tenant)
+async def destino_do_alerta(conn,tenant,cfg=None,conversa=None):
+    """(telefone de alerta da equipe ou None, pendência ou None). T1: vale a configuração `transbordo_alerta`
+    (com herança) e, na falta dela, o número antigo da empresa. O número da própria instância não serve de destino:
+    o alerta não é enviado e a pendência fica no log e na auditoria da empresa."""
+    destino=(cfg or {}).get('transbordo_alerta')
+    if not destino:
+        destino=await conn.fetchval('SELECT coalesce(c.transbordo_alerta,t.whatsapp_alerta_transbordo) FROM tenants t LEFT JOIN tenant_config c ON c.tenant_id=t.id WHERE t.id=$1',tenant)
+    if not destino: return None,None
+    if await conn.fetchval('SELECT EXISTS(SELECT 1 FROM tenant_canais WHERE tenant_id=$1 AND numero_instancia=$2)',tenant,destino):
+        log.warning('Alerta à equipe não enviado: o telefone de alerta é o número da própria instância')
+        from admin.servico import auditar
+        await auditar(conn,tenant,'sistema','transbordo.alerta_pendente',conversa or tenant)
+        return None,'numero_da_instancia'
+    return destino,None
+
+
+async def avisar_transbordo(conn,tenant,conversa,motivo,detalhe=None,painel_url=None,cfg=None,equipe_ausente=False):
+    """Conversa entrou em "aguardando atendente" → aviso curto ao telefone de alerta da equipe (vazio = desligado)."""
+    destino,_=await destino_do_alerta(conn,tenant,cfg,conversa)
     if not destino: return None
     conv=await conn.fetchrow('SELECT telefone,nome,aguardando_atendente_desde FROM conversas WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa)
     if not conv: return None
@@ -177,7 +201,8 @@ async def avisar_transbordo(conn,tenant,conversa,motivo,detalhe=None,painel_url=
     marca=conv['aguardando_atendente_desde'].isoformat() if conv['aguardando_atendente_desde'] else str(time.time())
     nome,_=await nome_da_conversa(conn,tenant,conversa)
     return await enfileirar(conn,tenant,'transbordo',conversa+'@'+marca,
-        texto_transbordo(conv['telefone'],nome,motivo,(detalhe or '')[:120] or None,pedido,painel_url),destino,conversa)
+        texto_transbordo(conv['telefone'],nome,motivo,(detalhe or '')[:120] or None,pedido,painel_url,
+                         bool((cfg or {}).get('transbordo_destino_externo')),equipe_ausente),destino,conversa)
 
 
 async def _canal_de_envio(db,tenant,conversa):

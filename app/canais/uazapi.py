@@ -235,6 +235,14 @@ async def enviar_lista(client,cofre,tenant_id,canal,telefone,texto,opcoes,botao,
         'choices':[f'[{secao}]']+[f'{o["titulo"]}|{o["id"]}'+(f'|{o["descricao"]}' if o.get('descricao') else '') for o in opcoes]})
 
 
+async def reagir(client,cofre,tenant_id,canal,mensagem_id,emoji):
+    """POST /message/react {id,text}: reação a uma mensagem recebida. Devolve o messageid da reação (ou None).
+    Qualquer falha sobe para quem chamou, que registra e segue (a reação nunca é tentada de novo)."""
+    response=await _chamar(client,cofre,tenant_id,canal,'POST','/message/react',{'id':mensagem_id,'text':emoji},timeout=10)
+    try: return id_do_envio(response.json())
+    except ValueError: return None
+
+
 def marca_do_envio(canal_id,provedor_id):
     """(message_id, meta) da mensagem enviada ao vivo: com o id do provedor, ou marcada como sem id."""
     if provedor_id: return f'{canal_id}:{provedor_id}',None

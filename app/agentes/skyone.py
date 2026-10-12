@@ -76,7 +76,7 @@ async def interacao(db,tenant_id,conversa_id,canal_id,mensagem):
     opcoes=((gravado or {}).get('botoes') or {}).get('opcoes') if isinstance(gravado,dict) else None
     if isinstance(opcoes,list) and clique['id'] not in {o.get('id') for o in opcoes if isinstance(o,dict)}: return None
     depois=await db.fetchval("""SELECT EXISTS(SELECT 1 FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND id>$3
-        AND direcao='saida')""",tenant_id,conversa_id,origem['id'])
+        AND direcao='saida' AND coalesce(tipo,'')<>'reacao')""",tenant_id,conversa_id,origem['id'])
     return {'tipo':clique['tipo'],'id':clique['id'],'titulo':mensagem['conteudo'],'atual':not depois}
 
 
@@ -132,9 +132,19 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
         # SOL1: o que a equipe já foi avisada nesta conversa (para o agente complementar em vez de repetir). Só com o recurso ligado.
         from nucleo.solicitacoes import abertas
         contexto['solicitacoes'] = await abertas(repo.db,tenant_id,conversa_id)
+    # CFG1-c: situação da empresa e da equipe agora, e o que está ligado neste agente. Sempre presentes.
+    from nucleo import expediente
+    empresa_agora = await expediente.da_empresa(repo.db,tenant_id,tenant['timezone'],agora)
+    equipe_agora = await expediente.da_equipe(repo.db,tenant_id,cfg,tenant['timezone'],agora,empresa_agora)
+    com_menu = cfg.get('botoes_interativos')=='on' and (canal or {}).get('tipo')=='uazapi'
+    com_reacao = cfg.get('reacoes')=='on' and (canal or {}).get('tipo')=='uazapi'
     return {
         'unidades':await unidades(repo.db,tenant_id,tenant['timezone']),
         'contexto_modulos':contexto,
+        'fora_do_horario':empresa_agora['fora'],'proxima_abertura':expediente.proxima_abertura(empresa_agora),
+        'equipe_disponivel':equipe_agora['disponivel'],'retorno_equipe':expediente.retorno_equipe(equipe_agora),
+        'recursos':{'botoes':com_menu,'lista':com_menu,'reacoes':com_reacao,'emojis_de_reacao':list(cfg.get('reacoes_emojis') or []) if com_reacao else [],
+                    'notificar_equipe':cfg.get('notificar_equipe')=='on'},
         'conversation_id':conversa_id,'request_id':rid,'session_id':rid,'message':message,
         'instrucoes_agente':cfg['instrucoes_agente'],
         # CFG1-a: preferências de estilo da empresa (versão publicada), sempre com todos os campos. São dados, não instruções de sistema.
@@ -247,6 +257,10 @@ async def _chamar(client,repo,cofre,tenant_id,cfg,payload):
             from nucleo.solicitacoes import validar as validar_solicitacao
             solicitacao=validar_solicitacao(corpo.get('solicitacao'))
             if solicitacao: result['solicitacao']=solicitacao
+        # Reação pedida pelo agente (R1). Opcional; valor que não seja um emoji é ignorado.
+        from nucleo.reacoes import do_retorno as reacao_do_retorno
+        reacao=reacao_do_retorno(corpo.get('reacao'))
+        if reacao: result['reacao']=reacao
         uso=corpo.get('uso')
         if isinstance(uso,dict) and all(isinstance(k,str) and type(v) is int and v>=0 for k,v in uso.items()): result['uso']=uso
         # Não permitir eco da credencial mesmo dentro de campos do contrato.

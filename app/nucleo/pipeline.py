@@ -123,7 +123,7 @@ def _meta(marca_meta,plano):
     return json.dumps(meta,ensure_ascii=False) if meta else None
 
 
-async def marcar_aguardando(conn,tenant,conversa,motivo,detalhe=None):
+async def marcar_aguardando(conn,tenant,conversa,motivo,detalhe=None,cfg=None,equipe_ausente=False):
     """Marca a conversa como aguardando atendente; evento e alerta de transbordo só na primeira marcação."""
     novo=await conn.fetchval("""UPDATE conversas SET aguardando_atendente_desde=now(),aguardando_motivo=$3
         WHERE tenant_id=$1 AND conversation_id=$2 AND aguardando_atendente_desde IS NULL RETURNING true""",
@@ -132,7 +132,7 @@ async def marcar_aguardando(conn,tenant,conversa,motivo,detalhe=None):
         await auditar(conn,tenant,'sistema','conversa.aguardando_atendente',conversa)
         # Alerta de transbordo (Fase 4): aviso curto ao número da empresa, se houver um cadastrado.
         from modulos.pedidos.avisos import avisar_transbordo
-        await avisar_transbordo(conn,tenant,conversa,motivo,detalhe,PAINEL_URL)
+        await avisar_transbordo(conn,tenant,conversa,motivo,detalhe,PAINEL_URL,cfg,equipe_ausente)
     return bool(novo)
 
 
@@ -153,6 +153,11 @@ def sanitizar(valor):
                    else sanitizar(v)) for k,v in valor.items()}
     if isinstance(valor,list): return [sanitizar(v) for v in valor]
     return valor
+
+
+class RespostaPronta(Exception):
+    """O gateway já tem a resposta do turno sem consultar o agente (fora do horário, modo "só avisar")."""
+    def __init__(self,resultado): self.resultado=resultado
 
 
 class Pipeline:
@@ -305,8 +310,9 @@ return 1
             await auditar(conn,tenant,'sistema','mensagem.enviada',conversa)
         return True
 
-    async def enviar_transacional(self,tenant,conversa,texto,aviso):
-        """Aviso de status do pedido ao cliente (PED1): não é resposta do bot, então a pausa por atendente não o segura
+    async def enviar_transacional(self,tenant,conversa,texto,aviso,marca_meta='aviso_pedido',auditoria='pedido.aviso'):
+        """Mensagem que o gateway envia por conta própria (aviso de pedido, fora do horário, equipe ausente).
+        Aviso de status do pedido ao cliente (PED1): não é resposta do bot, então a pausa por atendente não o segura
         e ele não mexe na pausa. Respeita empresa/agente/canal ativos, o piloto e o envio de teste.
         Devolve 'enviado', 'simulado' (envio de teste ou canal sem envio) ou 'descartado'. Erro do provedor sobe para quem chamou."""
         async with self.db.acquire() as conn,conn.transaction():
@@ -320,12 +326,12 @@ return 1
             real=cfg['send_mode']=='live' and canal['tipo']=='uazapi'
             marca=uazapi.marca_do_envio(canal['id'],await uazapi.enviar(self.http,self.cofre,tenant,canal,conv['telefone'],texto)) if real else (None,None)
             meta=json.loads(marca[1]) if marca[1] else {}
-            meta['aviso_pedido']=aviso
+            meta[marca_meta]=aviso
             # Entra no histórico como "sistema": o agente vê o que o cliente já recebeu; com o id do provedor, a varredura não o confunde com atendente.
             await conn.execute("""INSERT INTO mensagens(tenant_id,conversation_id,direcao,origem,conteudo,processada_em,message_id,meta)
                 VALUES ($1,$2,'saida','sistema',$3,now(),$4,$5::jsonb) ON CONFLICT(tenant_id,message_id) DO NOTHING""",tenant,conversa,texto,marca[0],json.dumps(meta,ensure_ascii=False))
             await conn.execute('UPDATE conversas SET atualizado_em=now() WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa)
-            await auditar(conn,tenant,'sistema','pedido.aviso_enviado' if real else 'pedido.aviso_simulado',conversa)
+            await auditar(conn,tenant,'sistema',auditoria+('_enviado' if real else '_simulado'),conversa)
             return 'enviado' if real else 'simulado'
 
     async def processar(self,tenant,conversa):
@@ -604,6 +610,10 @@ return 1
             status='ignorado'
         else:
             try:
+                # H1-a, modo "só avisar": empresa fechada → o gateway responde sozinho (uma vez por período) e não chama o agente.
+                if origem=='cliente':
+                    pronta=await self._so_avisar(tenant,conversa,conv,cfg)
+                    if pronta is not None: raise RespostaPronta(pronta)
                 payload=await skyone.pacote(self.repo,tenant,conversa,min(ids),'\n'.join(i['conteudo'] for i in itens),cfg,str(rid),lote=itens,acoes=acoes)
                 if origem=='sistema':
                     payload.update(tarefa='notificar',evento=json.loads(itens[0]['evento']) if isinstance(itens[0]['evento'],str) else itens[0]['evento'])
@@ -627,6 +637,8 @@ return 1
                     if not tarefa.done():
                         tarefa.cancel()
                         await asyncio.gather(tarefa,return_exceptions=True)
+            except RespostaPronta as pronta:
+                resultado=pronta.resultado
             except (CredencialRecusada,CircuitoAberto) as falha:
                 erro='SKYONE_CREDENTIAL_REJECTED' if isinstance(falha,CredencialRecusada) else 'SKYONE_CIRCUIT_OPEN'
                 status='erro';resultado={'resposta':[cfg['fallback']],'acao':'nenhuma'}
@@ -727,6 +739,8 @@ return 1
         status=turno['status'];entregue=bool(turno['aviso_demora'])
         resultado=json.loads(turno['resposta']) if isinstance(turno['resposta'],str) else turno['resposta']
         if status=='ignorado' or not resultado: return status,entregue
+        # R1: a reação sai antes dos balões e nunca muda o resultado do turno.
+        await self._reagir(tenant,conversa,cfg,turno,resultado)
         try:
             ultima=len(resultado['resposta'])
             for i,texto in enumerate(resultado['resposta'],start=1):
@@ -734,12 +748,89 @@ return 1
                 r=await self._enviar_parte(tenant,conversa,cfg,turno['request_id'],i,texto,resultado.get('botoes') if i==ultima else None)
                 if r=='ignorada': status='ignorado';break
                 if r=='enviada': entregue=True
-            if resultado.get('acao')=='transferir_humano':
-                await self.db.execute('UPDATE conversas SET bot_pausado_ate=now()+make_interval(mins=>$3) WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa,cfg['pause_minutes'])
+            if resultado.get('acao')=='transferir_humano' and status!='ignorado':
+                # T1: fora do horário da equipe o cliente é avisado e o bot NÃO é pausado (segue atendendo); dentro, pausa como sempre.
+                if await self._equipe_ausente(tenant,conversa,cfg,turno): pass
+                else: await self.db.execute('UPDATE conversas SET bot_pausado_ate=now()+make_interval(mins=>$3) WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa,cfg['pause_minutes'])
         except Exception:
             status='erro'
             await self.db.execute("UPDATE turnos SET erro='SEND_ERROR' WHERE tenant_id=$1 AND id=$2",tenant,turno['id'])
         return status,entregue
+
+    async def _so_avisar(self,tenant,conversa,conv,cfg):
+        """H1-a: no modo "só avisar", com todas as unidades fechadas, devolve a resposta pronta do turno (sem agente).
+        None = segue o caminho normal (modo "atender", empresa aberta, ou conversa com pedido ativo)."""
+        if cfg.get('fora_do_horario')!='so_avisar': return None
+        from nucleo import expediente
+        from nucleo.solicitacoes import PEDIDO_ATIVO
+        empresa=await self.repo.tenant(tenant)
+        s=await expediente.da_empresa(self.db,tenant,empresa['timezone'])
+        if not s['fora']:
+            # Reabriu: o período fechado acabou; se fechar de novo, o cliente é avisado de novo.
+            await self.db.execute('UPDATE conversas SET fora_do_horario_avisado_ate=NULL WHERE tenant_id=$1 AND conversation_id=$2 AND fora_do_horario_avisado_ate IS NOT NULL',tenant,conversa)
+            return None
+        # Quem tem pedido em andamento precisa conseguir perguntar por ele: o agente atende.
+        if await self.db.fetchval('SELECT EXISTS(SELECT 1 FROM pedidos WHERE tenant_id=$1 AND conversation_id=$2 AND status=ANY($3::text[]))',tenant,conversa,list(PEDIDO_ATIVO)): return None
+        silencio={'resposta':[],'acao':'silencio','motivo':'fora_do_horario'}
+        if await self.db.fetchval('SELECT fora_do_horario_avisado_ate>now() FROM conversas WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa):
+            return {**silencio,'fora_do_horario':'sem_resposta'}
+        texto=expediente.renderizar(cfg.get('fora_do_horario_mensagem') or '',{'proxima_abertura':expediente.em_palavras(s['proxima'],s['fuso']),
+            'abre':expediente.em_palavras(s['proxima'],s['fuso']),'nome_empresa':(cfg.get('perfil_atendimento') or {}).get('nome_empresa') or empresa['nome']})
+        if texto: await self.enviar_transacional(tenant,conversa,texto,{'ate':s['proxima']},'fora_do_horario','fora_do_horario.aviso')
+        # Um aviso por período fechado: vale até a próxima abertura (ou 12 h, se ela não é conhecida).
+        await self.db.execute("""UPDATE conversas SET fora_do_horario_avisado_ate=coalesce($3::timestamptz,now()+make_interval(hours=>$4))
+            WHERE tenant_id=$1 AND conversation_id=$2""",tenant,conversa,datetime.fromisoformat(s['proxima']) if s['proxima'] else None,expediente.SEM_PERIODO_H)
+        return {**silencio,'fora_do_horario':'avisado'}
+
+    async def _equipe_ausente(self,tenant,conversa,cfg,turno):
+        """T1: a transferência caiu fora do horário da equipe? Registra no turno e, na primeira vez enquanto a conversa
+        não está aguardando, envia a mensagem de equipe ausente. Qualquer falha aqui vale como "equipe disponível"."""
+        try:
+            from nucleo import expediente
+            empresa=await self.repo.tenant(tenant)
+            eq=await expediente.da_equipe(self.db,tenant,cfg,empresa['timezone'])
+            ausente=not eq['disponivel']
+            await self.db.execute('UPDATE turnos SET equipe_fora_do_horario=$3 WHERE tenant_id=$1 AND id=$2',tenant,turno['id'],ausente)
+            if not ausente: return False
+            ja_aguardava=await self.db.fetchval('SELECT aguardando_atendente_desde IS NOT NULL FROM conversas WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa)
+            volta=expediente.em_palavras(eq['retorno'],eq['fuso'])
+            texto=expediente.renderizar(cfg.get('transbordo_fora_do_horario') or '',{'retorno_equipe':volta,'horario':volta})
+            if texto and not ja_aguardava: await self.enviar_transacional(tenant,conversa,texto,{'retorno':eq['retorno']},'equipe_ausente','transbordo.equipe_ausente')
+            return True
+        except Exception:
+            log.warning('Horário da equipe não avaliado; transferência segue como dentro do horário')
+            return False
+
+    async def _reagir(self,tenant,conversa,cfg,turno,resultado):
+        """R1: reage à última mensagem de texto do cliente no lote, se o agente pediu e as travas deixarem.
+        O que aconteceu fica em turnos.reacao. Nunca levanta erro e nunca é tentada de novo."""
+        emoji=resultado.get('reacao')
+        if not emoji or turno['reacao'] is not None: return
+        from nucleo import reacoes
+        registro={'emoji':emoji,'resultado':'bloqueada','motivo':None}
+        try:
+            conv=await self.repo.obter(tenant,'conversas',conversa)
+            canal,empresa,efetiva=await self.contexto(tenant,conv['canal_id'])
+            motivo,alvo=await reacoes.avaliar(self.db,tenant,conversa,efetiva,resultado,turno['mensagem_ids'],empresa['timezone'])
+            if not motivo and canal['tipo']!='uazapi': motivo='canal'
+            if not motivo and not await self.permitido(tenant,conversa,cfg['id']): motivo='nao_permitido'
+            if motivo: registro['motivo']=motivo
+            else:
+                # Marca antes de falar com o provedor: se o worker cair no meio, a retomada não reage de novo.
+                await self.db.execute('UPDATE turnos SET reacao=$3::jsonb WHERE tenant_id=$1 AND id=$2',tenant,turno['id'],json.dumps({**registro,'resultado':'enviando'},ensure_ascii=False))
+                alvo_id=alvo['message_id'].split(':',1)[1];marca=(None,None);registro['resultado']='simulada'
+                if efetiva['send_mode']=='live':
+                    marca=uazapi.marca_do_envio(canal['id'],await uazapi.reagir(self.http,self.cofre,tenant,canal,alvo_id,emoji));registro['resultado']='aplicada'
+                meta=json.loads(marca[1]) if marca[1] else {}
+                meta.update(reacao_a=alvo_id,emoji=emoji)
+                await self.db.execute("""INSERT INTO mensagens(tenant_id,conversation_id,direcao,origem,conteudo,tipo,processada_em,message_id,meta)
+                    VALUES ($1,$2,'saida','bot',$3,'reacao',now(),$4,$5::jsonb) ON CONFLICT(tenant_id,message_id) DO NOTHING""",
+                    tenant,conversa,f'[reação: {emoji}]',marca[0],json.dumps(meta,ensure_ascii=False))
+        except Exception as erro:
+            registro.update(resultado='bloqueada',motivo='falha_provedor')
+            log.warning('Reação não enviada (%s); o turno segue',type(erro).__name__)
+        try: await self.db.execute('UPDATE turnos SET reacao=$3::jsonb WHERE tenant_id=$1 AND id=$2',tenant,turno['id'],json.dumps(registro,ensure_ascii=False))
+        except Exception: log.warning('Resultado da reação não registrado')
 
     async def _concluir(self,tenant,conversa,cfg,turno,envio):
         status,entregue=envio
@@ -757,7 +848,9 @@ return 1
             # Ordem de travas: consumo antes de auditoria em todos os turnos.
             from nucleo.consumo import registrar,atualizar_cache
             mes,total=await registrar(conn,tenant)
-            if motivo: await marcar_aguardando(conn,tenant,conversa,motivo,resultado.get('motivo') if resultado and motivo=='transferido_pelo_agente' else None)
+            if motivo:
+                ausente=bool(await conn.fetchval('SELECT equipe_fora_do_horario FROM turnos WHERE tenant_id=$1 AND id=$2',tenant,turno['id']))
+                await marcar_aguardando(conn,tenant,conversa,motivo,resultado.get('motivo') if resultado and motivo=='transferido_pelo_agente' else None,cfg,ausente)
             if resultado and resultado.get('nome_cliente'): await gravar_informado(conn,tenant,conversa,resultado['nome_cliente'])
             # SOL1: avisa a equipe e segue atendendo (sem pausa, sem "aguardando atendente"). Só a resposta que saiu registra.
             if status=='ok' and resultado and resultado.get('acao')=='notificar_equipe': await registrar_solicitacao(conn,tenant,conversa,cfg,resultado,PAINEL_URL)

@@ -34,7 +34,8 @@ TEXTOS_LIVRES=('descricao_negocio','regras_da_casa','mensagem_boas_vindas','mens
 
 EMOJIS_DE_REACAO=('👍','❤️','🙏','😊','😂','👏','🎉','✅')
 # Comportamentos que a empresa ajusta e que entram na versão. (grupo, tipo, mínimo, máximo, opções, disponível)
-# disponivel=False: já faz parte do contrato, mas o gateway ainda não executa (blocos R1 e G3) — o painel mostra "em breve".
+# disponivel=False: já faz parte do contrato, mas o gateway ainda não executa — o painel mostra "em breve".
+# Desde o CFG1-c só o pedido agendado continua assim.
 COMPORTAMENTOS={
     'debounce_s':('ritmo','inteiro',1,15,None,True),'debounce_curto_s':('ritmo','decimal',0.5,15,None,True),
     'debounce_incompleta_s':('ritmo','decimal',1,15,None,True),'debounce_palavras':('ritmo','inteiro',1,50,None,True),
@@ -46,15 +47,17 @@ COMPORTAMENTOS={
     'botoes_interativos':('mensagens','escolha',None,None,['on','off'],True),
     'pause_minutes':('atendimento_humano','inteiro',0,1440,None,True),'encerrar_vazia_min':('atendimento_humano','inteiro',1,1440,None,True),
     'carrinho_expira_h':('pedidos','inteiro',1,720,None,True),
-    'reacoes':('reacoes','escolha',None,None,['on','off'],False),'reacoes_emojis':('reacoes','lista_escolhas',1,8,list(EMOJIS_DE_REACAO),False),
-    'reacoes_max_dia':('reacoes','inteiro',0,10,None,False),
-    'fora_do_horario':('fora_do_horario','escolha',None,None,['atender','so_avisar'],False),
-    'fora_do_horario_mensagem':('fora_do_horario','texto',1,500,None,False),'fora_do_horario_aceita_agendado':('fora_do_horario','booleano',None,None,None,False),
-    'transbordo_alerta':('transbordo','telefone',10,15,None,False),'transbordo_horario_equipe':('transbordo','horarios',None,None,None,False),
-    'transbordo_fora_do_horario':('transbordo','texto',1,500,None,False),
+    'reacoes':('reacoes','escolha',None,None,['on','off'],True),'reacoes_emojis':('reacoes','lista_escolhas',1,8,list(EMOJIS_DE_REACAO),True),
+    'reacoes_max_dia':('reacoes','inteiro',0,10,None,True),
+    'fora_do_horario':('fora_do_horario','escolha',None,None,['atender','so_avisar'],True),
+    'fora_do_horario_mensagem':('fora_do_horario','texto',1,500,None,True),'fora_do_horario_aceita_agendado':('fora_do_horario','booleano',None,None,None,False),
+    'transbordo_alerta':('transbordo','telefone',10,15,None,True),'transbordo_horario_equipe':('transbordo','horarios',None,None,None,True),
+    'transbordo_fora_do_horario':('transbordo','texto',1,500,None,True),
     # SOL1: avisar a equipe sem parar o atendimento; destino do alerta marcado como grupo externo mascara o telefone.
     'notificar_equipe':('transbordo','escolha',None,None,['on','off'],True),'transbordo_destino_externo':('transbordo','booleano',None,None,None,True),
 }
+# Variáveis aceitas nos textos que o gateway envia sozinho (CFG1-c).
+VARIAVEIS_DE_TEXTO={'fora_do_horario_mensagem':('proxima_abertura','nome_empresa','abre'),'transbordo_fora_do_horario':('retorno_equipe','horario')}
 # De operação e proteção: fora da versão, efeito imediato, só a plataforma muda (pelas rotas de sempre).
 SO_PLATAFORMA=('send_mode','agente_mode','modo_piloto','contatos_permitidos','max_lotes_simultaneos','max_concorrencia',
                'max_msgs_por_minuto_contato','skyone_dominios_permitidos','alerta_telefone')
@@ -194,6 +197,7 @@ def esquema(padroes,papel):
         if minimo is not None: item['min']=minimo
         if maximo is not None: item['max']=maximo
         if opcoes: item['opcoes']=opcoes
+        if campo in VARIAVEIS_DE_TEXTO: item['variaveis']=list(VARIAVEIS_DE_TEXTO[campo])
         comportamentos[campo]=item
     for campo in SO_PLATAFORMA:
         comportamentos[campo]={'grupo':'operacao','tipo':'so_plataforma','padrao':padroes.get(campo),'editavel':False,'disponivel':True}

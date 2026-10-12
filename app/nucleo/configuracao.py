@@ -33,11 +33,12 @@ PADROES = dict(debounce_s=4,debounce_curto_s=1.5,debounce_palavras=6,max_wait_s=
     aviso_demora_janela_s=120,carrinho_expira_h=6,
     # UX3.1. acoes_recentes do pacote: chamadas de Skill da conversa nos últimos N minutos (0 = lista vazia).
     acoes_recentes_min=15,
-    # CFG1-a. Guardados e versionados; ainda sem efeito (R1 e G3).
-    reacoes='off',reacoes_emojis=['👍','❤️','🙏','😊'],reacoes_max_dia=2,
-    fora_do_horario='atender',fora_do_horario_mensagem='Estamos fechados agora. Abrimos {abre}.',fora_do_horario_aceita_agendado=False,
+    # CFG1-a/CFG1-c. Reações, fora do horário e transbordo: executados desde o CFG1-c (pedido agendado ainda não).
+    reacoes='off',reacoes_emojis=['❤️','😊','👍','🙏'],reacoes_max_dia=2,
+    fora_do_horario='atender',fora_do_horario_aceita_agendado=False,
+    fora_do_horario_mensagem='Oi! 😊 No momento a {nome_empresa} está fechada.[[ Voltamos {proxima_abertura}.]] Quando abrirmos, é só mandar uma mensagem por aqui que a gente te atende!',
     transbordo_alerta=None,transbordo_horario_equipe=None,
-    transbordo_fora_do_horario='Nossa equipe atende {horario}. Deixei seu recado e voltamos assim que possível.',
+    transbordo_fora_do_horario='Nossa equipe não está disponível agora.[[ Voltamos {retorno_equipe}.]] Deixei seu recado e, enquanto isso, sigo te ajudando por aqui.',
     # SOL1. notificar_equipe: o agente avisa a equipe (evento, catering, encomenda…) sem pausar o bot.
     notificar_equipe='off',transbordo_destino_externo=False)
 
