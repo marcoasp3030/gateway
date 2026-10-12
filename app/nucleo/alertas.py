@@ -89,6 +89,10 @@ class Alertas:
         await self.redis.expire(k,7*86400)
         return 'lembrete'
 
+    async def avisar(self,nivel,titulo,detalhe=''):
+        """Aviso de um fato isolado (sem estado, sem lembrete, sem "normalizado"). True se saiu."""
+        return await self._enviar(self._texto(ICONES.get(nivel,'🟡'),titulo,detalhe))
+
     async def normalizar(self,chave,titulo=None,detalhe=''):
         """Uma mensagem de "normalizado", só se havia alerta aberto. Devolve True se havia."""
         k=self._k(chave);estado=await self.redis.hgetall(k)

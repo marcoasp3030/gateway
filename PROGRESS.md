@@ -1213,3 +1213,14 @@ PY
 - Agente: `bykoji_atendimento` (By Koji), segmento `delivery_restaurante` v3; perfil da empresa v1 publicado por marco.santos@ticway.com.br em 11/10 16:56 com valores de teste (`nome_empresa` "teste1", `nome_atendente` "Marco").
 - Primeiros turnos reais depois do SOL1/CFG1-c (01:03–01:07 UTC de 12/10): 8 turnos `ok`, sem erro — fecha a conferência pendente do Skyone atual nas imagens novas.
 - `docs/ESPEC_PED2.md` escrita (horário agendado validado, `horario_vencido`, número do pedido, categorias), com 7 decisões. **Nada implementado.**
+
+## PED2 — horário agendado validado, categorias, registro de Skills e pedido anunciado sem fechar — 2026-10-12
+
+- Decisões do Marco registradas em `docs/ESPEC_PED2.md` (seção 7); contrato final dos motivos na seção 8; o que foi feito na seção 9.
+- Migração 038 (aditiva): `carrinhos.agendado_para`, `pedidos.agendado_para`, `turnos.anuncio_falso`, tabela `skill_registro`.
+- `definir_entrega` lê a hora do texto (`horario`) ou recebe `agendado_para`; recusas `horario_passado`, `horario_fora_funcionamento`, `horario_invalido`, `horario_muito_distante` (7 dias). `fechar_pedido` confere de novo.
+- Carrinho e pacote: `agendado_para` e `horario_vencido`; vencido tira o `pode_fechar`. `fechar_pedido` devolve `numero` na raiz.
+- Busca do catálogo: `categorias=true` e `categoria=<nome>` (10 por página, só com preço).
+- Registro de todas as chamadas de Skill (`skill_registro`, `GET /admin/v1/tenants/{id}/skills/registro`).
+- Pipeline: pedido anunciado sem `fechar_pedido` de sucesso → refaz 1 vez com `aviso_do_gateway`; repetiu → texto fixo com botão "Confirmar pedido", alerta e métrica `anuncios_falsos_segurados`.
+- Testes: `tests/test_ped2.py` (5). Dois testes antigos trocaram "20h" por "amanhã às 20h" para não depender da hora do dia.

@@ -1,6 +1,6 @@
 # PED2 — Horário do pedido validado e categorias do cardápio
 
-**Situação:** especificação para aprovação. **Nada implementado.**
+**Situação:** aprovado em 12/10/2026 com as decisões da seção 7 e implementado (seções 8 a 10). Onde as seções 2 a 6 divergem das decisões, **valem as seções 7 a 10**.
 **Data:** 12/10/2026. Produção: `gateway:e5e62c1`, schema 37.
 
 ---
@@ -143,3 +143,76 @@ Testes:
 5. **Registro de todas as chamadas de Skill** (consultas e recusas de entrada, sem conteúdo): incluir neste bloco?
 6. **Categorias:** duas rotas novas (`listar_categorias` e itens por categoria), como proposto, ou prefere um parâmetro `categoria` na busca que já existe?
 7. **Onde entra na fila:** antes do G4-b (proposta, porque é pedido se perdendo), ou junto dele?
+
+---
+
+## 7. Decisões do Marco (12/10/2026)
+
+1. **Hora em texto livre:** o gateway interpreta quando vier só `horario` ("hoje às 19h", "19h", "19:30", "amanhã ao meio-dia", "o quanto antes"). O que não der para interpretar é recusado com `horario_invalido`. `agendado_para` continua aceito.
+2. **Pedido anunciado sem fechar:** SEGURAR. Detecta `desfecho: pedido_feito`, `acao: pedido_fechado` ou texto de fechamento sem `fechar_pedido` de sucesso no mesmo turno. (a) refaz o turno 1 vez com aviso no pacote; (b) se repetir, não envia o texto do agente: envia o texto fixo com o botão "Confirmar pedido" e alerta. Métrica `anuncios_falsos_segurados`.
+3. **Agendamento:** até 7 dias à frente.
+4. **Horário vencido:** `pode_fechar: false` até o cliente escolher outro horário.
+5. **Registro de todas as chamadas de Skill** (inclusive as recusadas na entrada): entra neste bloco.
+6. **Categorias:** sem rotas novas; parâmetros `categorias=true` e `categoria=<nome>` na busca que já existe.
+7. **`numero` na raiz** da resposta de sucesso de `fechar_pedido`: sim.
+
+Prioridade 1, antes do G4-b.
+
+## 8. Contrato final dos motivos de horário
+
+Todos vêm em `erro.detalhes.motivo`, HTTP 422, com `erro.detalhes.campo = "horario"` e o `carrinho` atual ao lado de `erro`. A recusa nunca altera o carrinho.
+
+| Motivo | Onde | Quando | Campos a mais em `erro.detalhes` |
+|---|---|---|---|
+| `horario_passado` | `definir_entrega`, `fechar_pedido` | O horário marcado é anterior a agora (5 minutos de tolerância) | `agendado_para`, `agora`, `aberta_agora` (true/false/null), `proxima_abertura` |
+| `horario_fora_funcionamento` | `definir_entrega`, `fechar_pedido` | A unidade não funciona naquele dia e hora (grade e exceções por data) | `agendado_para`, `agora`, `aberta_no_dia` (faixas daquele dia), `proxima_abertura` |
+| `horario_invalido` | `definir_entrega` | `horario` sem hora reconhecível, ou `agendado_para` que não é data e hora | — |
+| `horario_muito_distante` | `definir_entrega` | Mais de 7 dias à frente | `agendado_para`, `agora`, `max_dias` |
+
+```json
+{"erro": {"codigo": "VALIDATION_ERROR", "mensagem": "O horário marcado já passou. Pergunte ao cliente outro horário e chame definir_entrega de novo.",
+          "detalhes": {"campo": "horario", "motivo": "horario_passado",
+                       "agendado_para": "2026-10-12T19:00:00-03:00", "agora": "2026-10-12T22:06:00-03:00",
+                       "aberta_agora": true, "proxima_abertura": null}},
+ "carrinho": {"horario": "hoje às 19h", "agendado_para": "2026-10-12T19:00:00-03:00", "horario_vencido": true, "pode_fechar": false, "faltando": ["horario"], "…": "…"}}
+```
+
+```json
+{"erro": {"codigo": "VALIDATION_ERROR", "mensagem": "A unidade não funciona nesse dia e horário. Ofereça um horário dentro do funcionamento (veja proxima_abertura).",
+          "detalhes": {"campo": "horario", "motivo": "horario_fora_funcionamento",
+                       "agendado_para": "2026-10-12T18:30:00-03:00", "agora": "2026-10-12T17:56:00-03:00",
+                       "aberta_no_dia": [["19:00", "23:00"]],
+                       "proxima_abertura": {"unidade": "Pátio Guedala", "codigo": "patio_guedala", "dia_semana": "segunda-feira", "data": "2026-10-12", "hora": "19:00"}}},
+ "carrinho": {"…": "…"}}
+```
+
+Regras:
+
+- `proxima_abertura` tem o formato do pacote (`unidade`, `codigo`, `dia_semana`, `data`, `hora`). Em `horario_fora_funcionamento` é a primeira abertura a partir do horário pedido; em `horario_passado`, a partir de agora (nula se a unidade está aberta agora ou não tem horário cadastrado).
+- Unidade sem horário cadastrado: só vale `horario_passado`.
+- Pausa manual da unidade não entra nesta conferência (vale para agora, não para um horário marcado adiante).
+- A conferência acontece em `definir_entrega` só quando `horario` ou `agendado_para` vêm na chamada; mudar modalidade ou endereço com horário vencido não é barrado. `fechar_pedido` confere sempre.
+- O que o gateway lê do texto: "hoje/amanhã/depois de amanhã", dia da semana, "dia 15", "15/10"; "19h", "19h30", "19:30", "20 horas", "às 19", "7 da noite", "meio-dia", "meia-noite"; "daqui a 40 minutos", "em 2 horas". Sem dia, vale hoje. "o quanto antes", "agora", "já", "assim que possível" e texto vazio = sem agendamento. O resto ("mais tarde", "à noite") = `horario_invalido`.
+- Carrinho anterior ao PED2 (só com o texto) é lido em relação ao dia em que foi escrito.
+
+## 9. O que foi implementado
+
+- **Banco (migração 038, aditiva):** `carrinhos.agendado_para`, `pedidos.agendado_para`, `turnos.anuncio_falso`, tabela `skill_registro`.
+- **Carrinho e pacote:** `agendado_para` (ISO no fuso da unidade) e `horario_vencido` sempre presentes; vencido → `pode_fechar: false` e `"horario"` em `faltando`. Esvaziar limpa o agendamento. O pedido guarda `agendado_para`.
+- **`fechar_pedido`:** `numero` na raiz e em `pedido.numero`.
+- **Busca do catálogo:** `categorias=true` → `{"unidade","total_itens","categorias":[{"categoria","qtd_itens"}]}`; `categoria=<nome>` → `{"unidade","categoria","categorias_encontradas","pagina","por_pagina":10,"total","tem_mais","itens":[…]}` (com `sugestoes` quando a categoria não existe). Só itens que podem ser pedidos (ativos, com preço, não exclusivos do salão). Sem `unidade`, vale a do carrinho aberto; sem carrinho, 400 com `campo: unidade`. Sem os parâmetros novos, a resposta é a de sempre.
+- **Registro de Skills:** toda chamada às rotas das Skills grava em `skill_registro` o nome da Skill, o método, os nomes dos campos recebidos, o status HTTP, o motivo (`ok`, o motivo da regra, `campo:<nome>` ou o código do erro) e o tempo. Nunca valores. Consulta: `GET /admin/v1/tenants/{id}/skills/registro?conversation_id=&skill=&limite=&cursor=`. Chamada com chave inválida (sem empresa identificada) fica só no log. Segue a retenção da empresa.
+- **Pedido anunciado sem fechar** (só na fila durável, só para agente com o módulo de pedidos, só em turno de cliente):
+  - Sinal: `acao: pedido_fechado`, `desfecho: pedido_feito`, texto que afirma o fechamento ("fechei", "acabei de fechar", "pedido feito/registrado/confirmado/enviado…") ou número de pedido citado. Pergunta e frase no futuro ("vou fechar", "para confirmar", "assim que") não contam.
+  - Com `acao` `transferir_humano`, `notificar_equipe` ou `silencio`, o texto não conta ("seu pedido foi enviado para a equipe confirmar").
+  - Não é anúncio falso quando: houve `fechar_pedido` de sucesso no turno (contando desde a primeira tentativa, se foi refeito); o texto cita o número de um pedido que existe na conversa; ou não há carrinho aberto com itens e a conversa tem pedido criado nas últimas 12 h (é conversa sobre o pedido real, como o "obrigado" depois de fechar).
+  - 1ª vez: a resposta é descartada (`turnos.anuncio_falso = "refeito"`) e o turno é refeito com `aviso_do_gateway` no pacote.
+  - Repetiu: `turnos.anuncio_falso = "segurado"`; o cliente recebe "Opa, tive um probleminha para registrar seu pedido. Pode tocar em Confirmar de novo?" com o botão `confirmar_pedido` ("Confirmar pedido"); o que o agente respondeu fica em `turnos.resposta.segurado`; auditoria `pedido.anuncio_segurado`; log e alerta no Telegram (empresa, agente, turno e os 4 últimos dígitos da conversa — sem telefone inteiro, nome ou texto).
+  - Métricas: `anuncios_falsos_refeitos` e `anuncios_falsos_segurados` em `GET /admin/v1/tenants/{id}/metricas`.
+- **Pacote:** campo novo `aviso_do_gateway` (texto ou nulo), sempre presente.
+
+## 10. Limites conhecidos
+
+- A detecção por texto é por padrões: uma frase fora deles ("está tudo encaminhado com a cozinha") passa. Os sinais estruturados (`acao`, `desfecho`) não dependem do texto.
+- Carrinho novo em aberto + o agente falando de um pedido antigo sem citar o número ("seu pedido já foi confirmado") é tratado como anúncio: refaz uma vez e, se repetir, segura. Citar o número evita.
+- No modo sem fila durável (`FILA_DURAVEL=off`) a trava do anúncio não roda. Produção usa a fila durável.

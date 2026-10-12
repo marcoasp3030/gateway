@@ -80,7 +80,7 @@ async def interacao(db,tenant_id,conversa_id,canal_id,mensagem):
     return {'tipo':clique['tipo'],'id':clique['id'],'titulo':mensagem['conteudo'],'atual':not depois}
 
 
-async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None,lote=None,acoes=None):
+async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None,lote=None,acoes=None,aviso=None):
     """Pacote do Apêndice A. `lote` são as mensagens pendentes do turno (enviada_em, tipo, conteudo)."""
     conv = await repo.obter(tenant_id,'conversas',conversa_id)
     if not conv or conv['agente_id']!=cfg['id'] or cfg['tenant_id']!=tenant_id:
@@ -164,6 +164,9 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
         'ultima_interacao':ultima_interacao,
         # Só em turno refeito (UX2): o que a tentativa descartada já fez nas Skills. Lista vazia nos demais.
         'acoes_ja_executadas':acoes or [],
+        # PED2: recado do gateway para este turno (nulo quase sempre). Hoje: turno refeito porque o agente anunciou pedido
+        # fechado sem fechar_pedido de sucesso.
+        'aviso_do_gateway':aviso,
         # Sempre presente (UX3.1): chamadas de Skill desta conversa nos últimos minutos, com há quantos segundos foi cada uma.
         'acoes_recentes':await acoes_recentes(repo.db,tenant_id,conversa_id,cfg.get('acoes_recentes_min')),
         # Nome pela prioridade cadastro > informado > perfil (PED1-c); nunca o telefone. nome_origem diz de onde veio.

@@ -171,10 +171,10 @@ def test_esvaziar_e_expirar_devolvem_o_carrinho_ao_estado_inicial_completo(tmp_p
                 async def carrinho(conv): return (await api('GET',f'/carrinho/{conv}')).json()['carrinho']
                 async def montar_cheio(conv):
                     assert (await api('POST',f'/carrinho/{conv}/itens',json={'item_id':ids['GUE-0001'],'quantidade':2})).status_code==200
-                    resp=await api('PUT',f'/carrinho/{conv}/entrega',json={'modalidade':'delivery','endereco':'Rua Topázio, 100','horario':'20h','observacao':'tocar a campainha','maioridade_confirmada':True})
+                    resp=await api('PUT',f'/carrinho/{conv}/entrega',json={'modalidade':'delivery','endereco':'Rua Topázio, 100','horario':'amanhã às 20h','observacao':'tocar a campainha','maioridade_confirmada':True})
                     assert resp.status_code==200,resp.text
                     k=await carrinho(conv)
-                    assert (k['modalidade'],k['endereco'],k['horario'],k['observacao'],k['maioridade_confirmada'])==('delivery','Rua Topázio, 100','20h','tocar a campainha',True) and k['unidade']
+                    assert (k['modalidade'],k['endereco'],k['horario'],k['observacao'],k['maioridade_confirmada'])==('delivery','Rua Topázio, 100','amanhã às 20h','tocar a campainha',True) and k['unidade']
                 # 1) Esvaziar: tudo volta ao começo (antes a modalidade, o endereço e o horário ficavam).
                 c1=await conversa('z1');await montar_cheio(c1)
                 assert (await api('DELETE',f'/carrinho/{c1}')).status_code==200

@@ -36,6 +36,9 @@ class Entrega(Estrito):
     modalidade:Literal['delivery','retirada']|None=None
     endereco:str|None=Field(None,max_length=500)
     horario:str|None=Field(None,max_length=100)
+    # PED2: data e hora do pedido agendado (AAAA-MM-DDTHH:MM, no fuso da unidade). Conferido na regra, não aqui:
+    # formato errado volta como horario_invalido, com a orientação para o agente.
+    agendado_para:str|None=Field(None,max_length=40)
     observacao:str|None=Field(None,max_length=500)
     maioridade_confirmada:bool|None=None
 
@@ -64,7 +67,7 @@ async def conversa_da_chave(request,ctx,conversa):
 def recusa(r,carrinho=None):
     """Recusa de regra de negócio: envelope padrão + motivo para o agente + carrinho atual."""
     corpo={'erro':{'codigo':{404:'NOT_FOUND',409:'CONFLICT'}.get(r.status,'VALIDATION_ERROR'),'mensagem':r.mensagem,
-                   'detalhes':{'campo':r.campo,'motivo':r.motivo}}}
+                   'detalhes':{'campo':r.campo,'motivo':r.motivo,**r.detalhes}}}
     if carrinho is not None: corpo['carrinho']=carrinho
     return JSONResponse(corpo,status_code=r.status,headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
 
@@ -153,7 +156,8 @@ async def fechar(request:Request,dados:Fechar,ctx=Depends(chave)):
             await servico.registrar_skill(conn,t,conversa,'fechar_pedido',{},'preco_alterado')
             return recusa(servico.Recusa('preco_alterado',409),await servico.retrato(conn,t,conversa))
         await servico.registrar_skill(conn,t,conversa,'fechar_pedido',{'detalhe':'pedido '+str(p['numero'])},'ok')
-        return {'ok':True,'pedido':servico.retrato_pedido(p),'carrinho':await servico.retrato(conn,t,conversa)}
+        # `numero` também na raiz (PED2): é o que o agente diz ao cliente; não depende de ler dentro de `pedido`.
+        return {'ok':True,'numero':p['numero'],'pedido':servico.retrato_pedido(p),'carrinho':await servico.retrato(conn,t,conversa)}
 
 
 @router.get('/api/v1/pedidos')
@@ -251,7 +255,7 @@ def resumo_painel(r):
 async def detalhe_painel(db,tenant_id,numero):
     r=await db.fetchrow(SELECAO+' WHERE p.tenant_id=$1 AND p.numero=$2',tenant_id,numero)
     if not r: raise HTTPException(404,'NOT_FOUND')
-    return {**resumo_painel(r),'entrega':{'modalidade':r['modalidade'],'endereco':r['endereco'],'horario':r['horario'],'observacao':r['observacao']},
+    return {**resumo_painel(r),'entrega':{'modalidade':r['modalidade'],'endereco':r['endereco'],'horario':r['horario'],'agendado_para':r['agendado_para'],'observacao':r['observacao']},
             'status_descricao':servico.DESCRICAO[r['status']],'proximos_status':servico.proximos(r),'linha_do_tempo':await servico.linha_do_tempo(db,tenant_id,r)}
 
 
@@ -430,6 +434,17 @@ async def confirmar(request:Request,tenant_id:str,numero:str,dados:Decisao|None=
 @admin.post('/tenants/{tenant_id}/pedidos/{numero}/recusar')
 async def recusar(request:Request,tenant_id:str,numero:str,dados:Decisao|None=None,actor=Depends(painel)):
     return await _mudar_pelo_painel(request,tenant_id,numero,'recusado',dados.motivo if dados else None,None,actor)
+
+
+@admin.get('/tenants/{tenant_id}/skills/registro')
+async def registro_de_skills(request:Request,tenant_id:str,conversation_id:str|None=None,skill:str|None=None,limite:int=50,cursor:int=0):
+    """Todas as chamadas de Skill da empresa (PED2), da mais recente para a mais antiga: nomes dos campos recebidos, status, motivo e tempo."""
+    if not await Repositorio(request.app.state.db).tenant(tenant_id): raise HTTPException(404,'NOT_FOUND')
+    if not 1<=limite<=200 or cursor<0: raise HTTPException(400,'VALIDATION_ERROR')
+    rows=await request.app.state.db.fetch("""SELECT id,conversation_id,skill,metodo,campos,status,motivo,duracao_ms,criado_em FROM skill_registro
+        WHERE tenant_id=$1 AND ($2::text IS NULL OR conversation_id=$2) AND ($3::text IS NULL OR skill=$3) AND ($4=0 OR id<$4)
+        ORDER BY id DESC LIMIT $5""",tenant_id,conversation_id,skill,cursor,limite+1)
+    return {'itens':[dict(r) for r in rows[:limite]],'proximo_cursor':rows[limite-1]['id'] if len(rows)>limite else None}
 
 
 @admin.get('/tenants/{tenant_id}/avisos')

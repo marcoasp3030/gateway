@@ -15,9 +15,39 @@ def publico(r):
             'alcoolico':r['alcoolico'],'delivery':r['delivery'],'tipo':r['tipo'],'observacao':r['observacao']}
 
 
+# Itens por página quando a busca é por categoria (PED2).
+POR_PAGINA=10
+MAX_SUGESTOES=5
+
+
+def vendavel(r):
+    """O que pode entrar em pedido: ativo, com preço e que não seja só do salão (mesma regra do carrinho)."""
+    return r['preco'] is not None and r['delivery']!='nao' and r['tipo'] in ('item','adicional')
+
+
+def contar_categorias(rows):
+    """[{categoria, qtd_itens}] dos itens que podem ser pedidos, em ordem alfabética (sem acento)."""
+    contagem={}
+    for r in rows:
+        if vendavel(r): contagem[r['categoria']]=contagem.get(r['categoria'],0)+1
+    return [{'categoria':c,'qtd_itens':n} for c,n in sorted(contagem.items(),key=lambda par:mod_busca.normalizar(par[0]))]
+
+
+def da_categoria(rows,categoria):
+    """(itens vendáveis da categoria pedida, nomes das categorias achadas). Compara sem acento e sem maiúsculas;
+    sem nome igual, vale o que contém o texto ("temaki" acha "Temakis — cone" e "Temakis — hand roll")."""
+    alvo=mod_busca.normalizar(categoria);bons=[r for r in rows if vendavel(r)]
+    nomes={r['categoria']:mod_busca.normalizar(r['categoria']) for r in bons}
+    achadas=[c for c,n in nomes.items() if n==alvo] or ([c for c,n in nomes.items() if alvo and (alvo in n or n in alvo)])
+    return [r for r in bons if r['categoria'] in achadas],sorted(achadas,key=mod_busca.normalizar)
+
+
 @router.get('/api/v1/catalogo/busca')
 async def busca(request:Request,conversation_id:str,q:str=Query('',max_length=200),unidade:str|None=Query(None,max_length=40),
+                categorias:bool=False,categoria:str|None=Query(None,max_length=120),pagina:int=Query(1,ge=1,le=1000),
                 ctx=Depends(contexto_da_chave('ferramentas:catalogo'))):
+    """Sem parâmetros novos, a busca de sempre. `categorias=true` lista as categorias da unidade com a quantidade de
+    itens; `categoria=<nome>` devolve os itens daquela categoria, 10 por página, só os que têm preço (PED2)."""
     repo=Repositorio(request.app.state.db);t=ctx['tenant_id']
     await habilitado(repo,t,'catalogo')
     conv=await repo.obter(t,'conversas',conversation_id)
@@ -25,10 +55,31 @@ async def busca(request:Request,conversation_id:str,q:str=Query('',max_length=20
     cfg=await request.app.state.configuracoes.efetiva(t,conv['agente_id'])
     modelo=await repo.modelo(t,cfg['modelo_id'],cfg['modelo_versao'])
     if 'catalogo' not in modelo['modulos']: raise HTTPException(404,'NOT_FOUND')
+    por_categoria=categorias or bool((categoria or '').strip())
+    if por_categoria and not unidade:
+        # Sem unidade na chamada, vale a do carrinho aberto da conversa; sem carrinho, o agente precisa dizer qual.
+        unidade=await repo.db.fetchval("SELECT unidade FROM carrinhos WHERE tenant_id=$1 AND conversation_id=$2 AND status='aberto'",t,conversation_id)
+        if not unidade: raise HTTPException(400,{'campo':'unidade'})
     # Só itens ativos. A ordenação por relevância é feita aqui (sem acento e tolerante), não no banco.
-    rows=await repo.db.fetch('''SELECT id,codigo,unidade,categoria,nome,descricao,preco,alcoolico,delivery,tipo,observacao
-        FROM catalogo_itens WHERE tenant_id=$1 AND ativo AND ($2::text IS NULL OR unidade=$2) ORDER BY id LIMIT 5000''',t,unidade)
-    return {'itens':[publico(r) for r in mod_busca.buscar([dict(r) for r in rows],q)]}
+    rows=[dict(r) for r in await repo.db.fetch('''SELECT id,codigo,unidade,categoria,nome,descricao,preco,alcoolico,delivery,tipo,observacao
+        FROM catalogo_itens WHERE tenant_id=$1 AND ativo AND ($2::text IS NULL OR unidade=$2) ORDER BY id LIMIT 5000''',t,unidade)]
+    if not por_categoria: return {'itens':[publico(r) for r in mod_busca.buscar(rows,q)]}
+    if not rows and not await repo.db.fetchval('SELECT EXISTS(SELECT 1 FROM tenant_unidades WHERE tenant_id=$1 AND codigo=$2 AND ativo)',t,unidade):
+        raise HTTPException(404,'NOT_FOUND')
+    lista=contar_categorias(rows)
+    if categorias: return {'unidade':unidade,'total_itens':sum(c['qtd_itens'] for c in lista),'categorias':lista}
+    achados,nomes=da_categoria(rows,categoria)
+    if q.strip(): achados=mod_busca.buscar(achados,q,limite=5000)
+    else: achados.sort(key=lambda r:(mod_busca.normalizar(r['categoria']),mod_busca.normalizar(r['nome']),r['id']))
+    inicio=(pagina-1)*POR_PAGINA;parte=achados[inicio:inicio+POR_PAGINA]
+    saida={'unidade':unidade,'categoria':categoria.strip(),'categorias_encontradas':nomes,'pagina':pagina,'por_pagina':POR_PAGINA,
+           'total':len(achados),'tem_mais':inicio+POR_PAGINA<len(achados),'itens':[publico(r) for r in parte]}
+    if not nomes:
+        # Categoria que não existe: as parecidas, para o agente oferecer (ou chamar com categorias=true).
+        import difflib
+        por_nome={mod_busca.normalizar(c['categoria']):c['categoria'] for c in lista}
+        saida['sugestoes']=[por_nome[n] for n in difflib.get_close_matches(mod_busca.normalizar(categoria),list(por_nome),MAX_SUGESTOES,0.5)]
+    return saida
 
 
 admin=APIRouter(prefix='/admin/v1',dependencies=[Depends(painel)])

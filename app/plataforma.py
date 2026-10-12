@@ -106,6 +106,9 @@ def criar_app(infra,db=None,redis=None):
                                     skyone_rpm=infra.skyone_rpm,fila_duravel=infra.fila_duravel)
         app.state.fila=FilaDuravel(app.state.pipeline,infra.fila_duravel,infra.concorrencia_por_worker)
     if db is not None: preparar(app)
+    # PED2: por dentro do limite de corpo (só vê o que já passou por ele); registra as chamadas de Skill.
+    from nucleo.skill_registro import RegistroDeSkills
+    app.add_middleware(RegistroDeSkills)
     app.add_middleware(limites.LimiteCorpo,max_bytes=infra.max_body_bytes)
 
     @app.middleware('http')

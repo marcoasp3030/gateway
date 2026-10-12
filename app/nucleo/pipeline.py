@@ -507,6 +507,17 @@ return 1
                     if reservada: await vaga.renovar(cfg)
                     turno=await self._responder(tenant,conversa,conv,cfg)
                     if turno is None: return 'vazio'
+                # PED2: o agente disse que fechou o pedido sem fechar_pedido de sucesso → refaz uma vez, com aviso no pacote.
+                if await self._anuncio_falso(tenant,conversa,cfg,turno):
+                    from modulos.pedidos import anuncio
+                    await self.db.execute("UPDATE turnos SET anuncio_falso='refeito' WHERE tenant_id=$1 AND id=$2",tenant,turno['id'])
+                    await self._descartar(tenant,conversa,turno)
+                    await self.redis.eval("if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('EXPIRE',KEYS[1],ARGV[2]) else return 0 end",1,lock,token,cfg['timeout_s']+90)
+                    if reservada: await vaga.renovar(cfg)
+                    turno=await self._responder(tenant,conversa,conv,cfg,recado=anuncio.AVISO_AO_AGENTE)
+                    if turno is None: return 'vazio'
+            # Repetiu (ou o turno foi retomado depois de uma queda): o texto do agente não sai.
+            if await self._anuncio_falso(tenant,conversa,cfg,turno): turno=await self._segurar_anuncio(tenant,conversa,cfg,turno)
             await self._concluir(tenant,conversa,cfg,turno,await self._enviar_partes(tenant,conversa,cfg,turno))
             return 'concluido'
         finally:
@@ -566,6 +577,49 @@ return 1
             return False
         return True
 
+    async def _anuncio_falso(self,tenant,conversa,cfg,turno):
+        """A resposta do turno anuncia pedido fechado sem fechar_pedido de sucesso? Devolve por onde veio o anúncio, ou None.
+        Só para agente com o módulo de pedidos. Falha na conferência não segura a resposta."""
+        if turno['origem']!='cliente' or turno['status']!='ok' or turno['anuncio_falso']=='segurado': return None
+        try:
+            from modulos.pedidos import anuncio
+            resultado=json.loads(turno['resposta']) if isinstance(turno['resposta'],str) else (turno['resposta'] or {})
+            if not anuncio.sinal(resultado): return None
+            modelo=await self.repo.modelo(tenant,cfg['modelo_id'],cfg['modelo_versao'])
+            if 'pedidos' not in (modelo or {}).get('modulos',()) or not await self.db.fetchval(
+                    "SELECT ativo FROM modulos_tenant WHERE tenant_id=$1 AND modulo='pedidos'",tenant): return None
+            # Turno refeito: vale o fechar_pedido feito desde a primeira tentativa.
+            desde=turno['agente_inicio'];anterior=turno['refeito_de']
+            for _ in range(MAX_REFAZER+2):
+                if anterior is None: break
+                o=await self.db.fetchrow('SELECT refeito_de,agente_inicio FROM turnos WHERE tenant_id=$1 AND id=$2',tenant,anterior)
+                if o is None: break
+                desde=min(desde,o['agente_inicio']);anterior=o['refeito_de']
+            return await anuncio.avaliar(self.db,tenant,conversa,resultado,desde)
+        except Exception:
+            log.warning('Anúncio de pedido não conferido; a resposta segue')
+            return None
+
+    async def _segurar_anuncio(self,tenant,conversa,cfg,turno):
+        """Troca a resposta do turno pelo texto fixo com o botão "Confirmar pedido" e avisa a operação.
+        O que o agente respondeu fica guardado no turno (campo `segurado`) para auditoria."""
+        from modulos.pedidos import anuncio
+        original=json.loads(turno['resposta']) if isinstance(turno['resposta'],str) else (turno['resposta'] or {})
+        nova={'resposta':[anuncio.TEXTO_AO_CLIENTE],'acao':'nenhuma','botoes':{'opcoes':[dict(anuncio.BOTAO)]},
+              'segurado':{k:original.get(k) for k in ('resposta','acao','desfecho','motivo')}}
+        async with self.db.acquire() as conn,conn.transaction():
+            turno=await conn.fetchrow("""UPDATE turnos SET resposta=$3::jsonb,acao='nenhuma',desfecho=NULL,motivo_silencio=NULL,anuncio_falso='segurado'
+                WHERE tenant_id=$1 AND id=$2 RETURNING *""",tenant,turno['id'],json.dumps(nova,ensure_ascii=False))
+            await auditar(conn,tenant,'sistema','pedido.anuncio_segurado',conversa)
+        log.warning('Pedido anunciado sem fechar_pedido: resposta do agente segurada (empresa %s, turno %s)',tenant,turno['id'])
+        try:
+            from nucleo.alertas import Alertas
+            await Alertas(self.redis,self.http,self.db,self.prefixo).avisar('aviso','pedido anunciado sem fechar',
+                f'Empresa: {tenant} · agente: {cfg["id"]} · turno {turno["id"]} · conversa de final {conversa[-4:]}\n'
+                'O agente disse que fechou o pedido, mas fechar_pedido não teve sucesso. O cliente recebeu o pedido para confirmar de novo.')
+        except Exception: log.warning('Alerta de pedido anunciado sem fechar não enviado')
+        return turno
+
     async def _descartar(self,tenant,conversa,turno):
         """Conclui o turno como 'refeito': a resposta fica guardada para auditoria e não é enviada.
         As mensagens do lote continuam pendentes e entram no turno seguinte, junto com as novas."""
@@ -590,7 +644,7 @@ return 1
             FROM turnos t WHERE t.tenant_id=$1 AND t.conversation_id=$2
             AND t.status='refeito' AND t.mensagem_ids && $3::bigint[] ORDER BY t.id DESC LIMIT 1""",tenant,conversa,ids)
 
-    async def _responder(self,tenant,conversa,conv,cfg):
+    async def _responder(self,tenant,conversa,conv,cfg,recado=None):
         itens=await self._pendentes(self.db,tenant,conversa)
         if not itens: return None
         origem=itens[0]['origem'];ids=[i['id'] for i in itens];rid=uuid.uuid4()
@@ -614,7 +668,7 @@ return 1
                 if origem=='cliente':
                     pronta=await self._so_avisar(tenant,conversa,conv,cfg)
                     if pronta is not None: raise RespostaPronta(pronta)
-                payload=await skyone.pacote(self.repo,tenant,conversa,min(ids),'\n'.join(i['conteudo'] for i in itens),cfg,str(rid),lote=itens,acoes=acoes)
+                payload=await skyone.pacote(self.repo,tenant,conversa,min(ids),'\n'.join(i['conteudo'] for i in itens),cfg,str(rid),lote=itens,acoes=acoes,aviso=recado)
                 if origem=='sistema':
                     payload.update(tarefa='notificar',evento=json.loads(itens[0]['evento']) if isinstance(itens[0]['evento'],str) else itens[0]['evento'])
                 tarefa=asyncio.create_task(self.consultar(tenant,cfg,payload))
@@ -908,6 +962,7 @@ return 1
         for row in await self.db.fetch('SELECT id,retencao_dias FROM tenants'):
             await self.db.execute('DELETE FROM webhook_raw WHERE tenant_id=$1 AND recebido_em < now()-make_interval(days=>$2)',row['id'],row['retencao_dias'])
             await self.db.execute('DELETE FROM skill_chamadas WHERE tenant_id=$1 AND criado_em < now()-make_interval(days=>$2)',row['id'],row['retencao_dias'])
+            await self.db.execute('DELETE FROM skill_registro WHERE tenant_id=$1 AND criado_em < now()-make_interval(days=>$2)',row['id'],row['retencao_dias'])
 
     async def agendador(self):
         if self.fila_duravel: return

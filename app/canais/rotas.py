@@ -175,5 +175,9 @@ async def metricas(request:Request,tenant_id:str,agente:str|None=None):
     horario={'avisos_enviados':extra['avisos'],'mensagens_sem_resposta':extra['mudas']}
     transbordo={'transferencias':{'dentro_do_horario':extra['dentro'],'fora_do_horario':extra['fora']}}
     solicitacoes={'criadas':sol['criadas'],'atualizadas':int(sol['atualizadas']),'convertidas':sol['convertidas'],'alertas_enviados':alertas}
+    # PED2: turnos em que o agente anunciou pedido fechado sem fechar_pedido de sucesso (refeitos com aviso; segurados = texto do agente não enviado).
+    falsos=await request.app.state.db.fetchrow("""SELECT count(*) FILTER (WHERE anuncio_falso='refeito') AS refeitos,count(*) FILTER (WHERE anuncio_falso='segurado') AS segurados
+        FROM turnos WHERE tenant_id=$1 AND anuncio_falso IS NOT NULL AND ($2::text IS NULL OR agente_id=$2)""",tenant_id,agente)
     return {**dict(linha),'fila':fila,'botoes':botoes,'picotadas':picotadas,'solicitacoes':solicitacoes,
-            'reacoes':reacoes,'fora_do_horario':horario,'transbordo':transbordo}
+            'reacoes':reacoes,'fora_do_horario':horario,'transbordo':transbordo,
+            'anuncios_falsos_refeitos':falsos['refeitos'],'anuncios_falsos_segurados':falsos['segurados']}

@@ -3,7 +3,9 @@ preço sempre do catálogo, carrinho de uma unidade só, item só entra se for v
 bebida alcoólica só fecha com maioridade confirmada (SEG06: o que o agente pedir não muda isso)."""
 import json,secrets
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 from nucleo.contatos import nome_da_conversa
+from . import agendamento
 
 MAX_LINHAS=50
 MAX_QUANTIDADE=99
@@ -26,12 +28,18 @@ RECUSAS={
  'preco_alterado':('itens','O preço de um item mudou. Confira o carrinho atualizado com o cliente antes de fechar.'),
  'pedido_inexistente':('numero','Pedido não encontrado nesta conversa.'),
  'pedido_nao_cancelavel':('numero','Este pedido já foi decidido pela unidade e não pode ser cancelado por aqui. Transfira para a equipe.'),
+ 'horario_passado':('horario','O horário marcado já passou. Pergunte ao cliente outro horário e chame definir_entrega de novo.'),
+ 'horario_fora_funcionamento':('horario','A unidade não funciona nesse dia e horário. Ofereça um horário dentro do funcionamento (veja proxima_abertura).'),
+ 'horario_invalido':('horario','Não deu para entender o horário. Envie agendado_para (AAAA-MM-DDTHH:MM) ou um texto com a hora ("hoje às 19h", "19:30", "o quanto antes").'),
+ 'horario_muito_distante':('horario','O horário marcado está longe demais. O pedido pode ser agendado para até 7 dias à frente.'),
 }
 
 
 class Recusa(Exception):
-    def __init__(self,motivo,status=422):
+    def __init__(self,motivo,status=422,detalhes=None):
         self.motivo=motivo;self.status=status;self.campo,self.mensagem=RECUSAS[motivo]
+        # Dados a mais para o agente decidir o que oferecer (ex.: proxima_abertura numa recusa de horário).
+        self.detalhes=detalhes or {}
 
 
 def dinheiro(valor):
@@ -61,11 +69,17 @@ async def linhas(conn,tenant,carrinho_id):
         WHERE l.tenant_id=$1 AND l.carrinho_id=$2 ORDER BY l.id''',tenant,carrinho_id)
 
 
+async def fuso_da_unidade(conn,tenant,u=None):
+    """Fuso em que o horário do pedido é lido: o da unidade, ou o da empresa."""
+    return (u['fuso'] if u and u['fuso'] else None) or await conn.fetchval('SELECT timezone FROM tenants WHERE id=$1',tenant)
+
+
 async def retrato(conn,tenant,conversa):
     """Carrinho completo para o agente: itens, subtotal, taxa, total e o que falta para fechar."""
     c=await aberto(conn,tenant,conversa)
     if c is None:
-        return {'conversation_id':conversa,'unidade':None,'modalidade':None,'endereco':None,'horario':None,'observacao':None,
+        return {'conversation_id':conversa,'unidade':None,'modalidade':None,'endereco':None,'horario':None,
+                'agendado_para':None,'horario_vencido':False,'observacao':None,
                 'maioridade_confirmada':False,'itens':[],'numero_itens':0,'subtotal':None,'taxa_entrega':None,'total':None,
                 'pedido_minimo':None,'tem_alcoolico':False,'faltando':['itens','modalidade'],'pode_fechar':False,'atualizado_em':None}
     ls=await linhas(conn,tenant,c['id'])
@@ -82,7 +96,11 @@ async def retrato(conn,tenant,conversa):
     if not c['modalidade']: faltando.append('modalidade')
     if c['modalidade']=='delivery' and not (c['endereco'] or '').strip(): faltando.append('endereco')
     if tem_alcool and not c['maioridade_confirmada']: faltando.append('maioridade_confirmada')
+    # PED2: horário marcado que já passou não fecha pedido; o agente pergunta outro.
+    fuso=await fuso_da_unidade(conn,tenant,u);quando=agendamento.do_carrinho(c,fuso);passou=agendamento.vencido(quando)
+    if passou: faltando.append('horario')
     return {'conversation_id':conversa,'unidade':c['unidade'],'modalidade':c['modalidade'],'endereco':c['endereco'],'horario':c['horario'],
+            'agendado_para':agendamento.iso(quando,fuso),'horario_vencido':passou,
             'observacao':c['observacao'],'maioridade_confirmada':c['maioridade_confirmada'],'itens':itens,
             'numero_itens':sum(l['quantidade'] for l in ls),'subtotal':dinheiro(subtotal),'taxa_entrega':dinheiro(taxa),
             'total':dinheiro(subtotal+(taxa or 0)) if subtotal is not None else None,
@@ -216,7 +234,7 @@ async def esvaziar(conn,tenant,conversa):
     if c:
         await conn.execute('DELETE FROM carrinho_itens WHERE tenant_id=$1 AND carrinho_id=$2',tenant,c['id'])
         # Volta ao estado inicial completo: nada do pedido anterior (retirada, endereço, horário…) fica para o agente presumir.
-        await conn.execute("""UPDATE carrinhos SET unidade=NULL,modalidade=NULL,endereco=NULL,horario=NULL,observacao=NULL,
+        await conn.execute("""UPDATE carrinhos SET unidade=NULL,modalidade=NULL,endereco=NULL,horario=NULL,agendado_para=NULL,observacao=NULL,
             maioridade_confirmada=false,atualizado_em=now() WHERE tenant_id=$1 AND id=$2""",tenant,c['id'])
 
 
@@ -231,13 +249,51 @@ async def entrega(conn,tenant,conversa,dados):
     if dados.get('modalidade')=='retirada':
         u=await unidade_da_empresa(conn,tenant,dados.get('unidade') or c['unidade'])
         if u and u['aceita_retirada'] is False: raise Recusa('retirada_indisponivel')
-    for campo in ('modalidade','endereco','horario','observacao'):
+    if 'horario' in dados or 'agendado_para' in dados:
+        await _agendar(conn,tenant,c,dados)
+    for campo in ('modalidade','endereco','observacao'):
         if campo in dados:
             valor=(dados[campo] or '').strip() or None if isinstance(dados[campo],str) or dados[campo] is None else dados[campo]
             await conn.execute(f'UPDATE carrinhos SET {campo}=$3 WHERE tenant_id=$1 AND id=$2',tenant,c['id'],valor)
     if dados.get('maioridade_confirmada') is not None:
         await conn.execute('UPDATE carrinhos SET maioridade_confirmada=$3 WHERE tenant_id=$1 AND id=$2',tenant,c['id'],bool(dados['maioridade_confirmada']))
     await tocar(conn,tenant,c['id'])
+
+
+async def _agendar(conn,tenant,c,dados):
+    """Horário do pedido (PED2): `agendado_para` (data e hora) vale quando vem; só com o texto `horario`, a hora é lida dele.
+    Texto que não dá para ler, horário no passado, fora do funcionamento ou longe demais são recusados e nada muda."""
+    u=await unidade_da_empresa(conn,tenant,dados.get('unidade') or c['unidade'])
+    fuso=await fuso_da_unidade(conn,tenant,u);agora=agendamento.agora_utc()
+    texto=(dados.get('horario') or '').strip() or None
+    if dados.get('agendado_para'):
+        quando=agendamento.de_iso(dados['agendado_para'],fuso)
+        if quando is None: raise Recusa('horario_invalido')
+    elif texto:
+        situacao,quando=agendamento.interpretar(texto,agora.astimezone(ZoneInfo(fuso)))
+        if situacao=='invalido': raise Recusa('horario_invalido')
+    else: quando=None
+    if quando is not None:
+        motivo,detalhes=await agendamento.conferir(conn,tenant,u,fuso,quando,agora)
+        if motivo: raise Recusa(motivo,detalhes=detalhes)
+        # Sem texto, o gateway escreve o que o cliente vai ler ("hoje às 19h").
+        texto=texto or expediente_em_palavras(quando,fuso,agora)
+    await conn.execute('UPDATE carrinhos SET horario=$3,agendado_para=$4 WHERE tenant_id=$1 AND id=$2',tenant,c['id'],texto,quando)
+
+
+def expediente_em_palavras(quando,fuso,agora):
+    from nucleo.expediente import em_palavras
+    return em_palavras(quando.isoformat(),fuso,agora)
+
+
+async def conferir_horario(conn,tenant,c,u):
+    """No fechamento: o horário podia valer quando foi marcado e já ter passado. Devolve o horário agendado (ou None)."""
+    fuso=await fuso_da_unidade(conn,tenant,u);quando=agendamento.do_carrinho(c,fuso)
+    if quando is None: return None
+    motivo,detalhes=await agendamento.conferir(conn,tenant,u,fuso,quando)
+    # Longe demais só é barrado ao marcar; aqui valem o passado e o funcionamento.
+    if motivo in ('horario_passado','horario_fora_funcionamento'): raise Recusa(motivo,detalhes=detalhes)
+    return quando
 
 
 async def _numero(conn,tenant):
@@ -251,7 +307,9 @@ async def _numero(conn,tenant):
 def retrato_pedido(p):
     itens=json.loads(p['itens']) if isinstance(p['itens'],str) else p['itens']
     return {'numero':p['numero'],'status':p['status'],'conversation_id':p['conversation_id'],'unidade':p['unidade'],'modalidade':p['modalidade'],
-            'endereco':p['endereco'],'horario':p['horario'],'observacao':p['observacao'],'itens':itens,
+            'endereco':p['endereco'],'horario':p['horario'],
+            'agendado_para':p['agendado_para'].isoformat(timespec='seconds') if p.get('agendado_para') else None,
+            'observacao':p['observacao'],'itens':itens,
             'subtotal':dinheiro(p['subtotal']),'taxa_entrega':dinheiro(p['taxa_entrega']),'total':dinheiro(p['total']),
             'tem_alcoolico':p['tem_alcoolico'],'motivo':p['motivo'],'cliente_nome':p['cliente_nome'],
             'criado_em':p['criado_em'],'decidido_em':p['decidido_em'],
@@ -391,6 +449,7 @@ async def fechar(conn,tenant,conversa):
     if c['modalidade']=='retirada' and u and u['aceita_retirada'] is False: raise Recusa('retirada_indisponivel')
     subtotal=sum((l['preco_unitario']*l['quantidade'] for l in ls),Decimal('0'))
     if u and u['pedido_minimo'] is not None and subtotal<u['pedido_minimo']: raise Recusa('abaixo_do_minimo')
+    agendado=await conferir_horario(conn,tenant,c,u)
     taxa=u['taxa_entrega'] if u and c['modalidade']=='delivery' else None
     itens=[{'item_id':l['item_id'],'codigo':l['codigo'],'nome':l['nome'],'categoria':l['categoria'],'quantidade':l['quantidade'],
             'preco_unitario':dinheiro(l['preco_unitario']),'subtotal':dinheiro(l['preco_unitario']*l['quantidade']),
@@ -398,11 +457,11 @@ async def fechar(conn,tenant,conversa):
     conv=await conn.fetchrow('SELECT telefone FROM conversas WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa)
     nome,_=await nome_da_conversa(conn,tenant,conversa)
     p=await conn.fetchrow('''INSERT INTO pedidos(tenant_id,numero,conversation_id,carrinho_id,unidade,modalidade,endereco,horario,observacao,
-        itens,subtotal,taxa_entrega,total,cliente_nome,cliente_telefone,tem_alcoolico,maioridade_confirmada)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15,$16,$17) RETURNING *''',
+        itens,subtotal,taxa_entrega,total,cliente_nome,cliente_telefone,tem_alcoolico,maioridade_confirmada,agendado_para)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *''',
         tenant,await _numero(conn,tenant),conversa,c['id'],c['unidade'],c['modalidade'],c['endereco'] if c['modalidade']=='delivery' else None,
         c['horario'],c['observacao'],json.dumps(itens,ensure_ascii=False),subtotal,taxa,subtotal+(taxa or 0),nome,conv['telefone'],
-        tem_alcool,bool(c['maioridade_confirmada']))
+        tem_alcool,bool(c['maioridade_confirmada']),agendado)
     await conn.execute("UPDATE carrinhos SET status='fechado',atualizado_em=now() WHERE tenant_id=$1 AND id=$2",tenant,c['id'])
     await registrar_evento(conn,tenant,p['id'],None,'aguardando_loja','agente','agente')
     return p

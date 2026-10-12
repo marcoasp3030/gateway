@@ -113,8 +113,8 @@ def test_fechar_pedido_exigencias_alcool_minimo_e_preco_do_banco():
             # Delivery sem endereço → 422.
             k=(await api('PUT',base+'/entrega',json={'modalidade':'delivery'})).json()['carrinho'];assert k['faltando']==['endereco','maioridade_confirmada']
             r=await fechar();assert (r.status_code,motivo(r))==(422,'falta_endereco')
-            k=(await api('PUT',base+'/entrega',json={'endereco':'Rua A, 10','horario':'20h','observacao':'interfone 12'})).json()['carrinho']
-            assert (k['modalidade'],k['endereco'],k['horario'])==('delivery','Rua A, 10','20h')     # só muda o que veio
+            k=(await api('PUT',base+'/entrega',json={'endereco':'Rua A, 10','horario':'amanhã às 20h','observacao':'interfone 12'})).json()['carrinho']
+            assert (k['modalidade'],k['endereco'],k['horario'])==('delivery','Rua A, 10','amanhã às 20h')     # só muda o que veio
             # Regra 3: bebida alcoólica só fecha com maioridade confirmada.
             r=await fechar();assert (r.status_code,motivo(r))==(422,'falta_maioridade') and r.json()['carrinho']['tem_alcoolico']
             k=(await api('PUT',base+'/entrega',json={'maioridade_confirmada':True})).json()['carrinho'];assert k['pode_fechar'] and k['total']==260.0

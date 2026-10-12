@@ -44,6 +44,8 @@ def contexto_da_chave(escopo):
         if not chave or chave['revogada_em'] or chave['tenant_status']!='ativo' or (
                 chave['expira_em'] and chave['expira_em']<=agora):
             raise HTTPException(401,'UNAUTHORIZED')
+        # Empresa identificada pela chave: o registro das chamadas de Skill (PED2) usa isto, mesmo se a chamada for recusada adiante.
+        request.state.skill_tenant = chave['tenant_id']
         if escopo not in chave['escopos']:
             raise HTTPException(403,'FORBIDDEN')
         if chave['ips_permitidos']:

@@ -110,6 +110,10 @@ A cada turno o gateway envia, sem o agente pedir:
 | `abaixo_do_minimo` | 422 | Informa o `pedido_minimo` e pergunta se quer acrescentar algo |
 | `preco_alterado` | 409 | O preço mudou no catálogo: mostra o carrinho atualizado, confirma o novo total e chama `fechar_pedido` de novo |
 | `pedido_inexistente` | 404 | O número não é desta conversa |
+| `horario_passado` | 422 | O horário marcado já passou (ao marcar ou ao fechar): pergunta outro horário ao cliente e chama `definir_entrega` de novo. `detalhes.proxima_abertura` diz quando a unidade abre |
+| `horario_fora_funcionamento` | 422 | A unidade não funciona naquele dia e hora: oferece horário dentro de `detalhes.aberta_no_dia` ou a partir de `detalhes.proxima_abertura` |
+| `horario_invalido` | 422 | Não deu para ler a hora: pergunta ao cliente um horário claro, ou envia `agendado_para` |
+| `horario_muito_distante` | 422 | Agendamento só até 7 dias à frente |
 | `pedido_nao_cancelavel` | 409 | A unidade já decidiu: transfere para a equipe |
 
 Outros erros: 401 (chave ausente ou inválida), 403 (chave sem o escopo), 404 (conversa inexistente), 400 (campo inválido; `detalhes.campo` diz qual).
@@ -129,6 +133,23 @@ Outros erros: 401 (chave ausente ou inválida), 403 (chave sem o escopo), 404 (c
 | `conversation_id` | sim | Conversa atual |
 | `q` | não | O que o cliente pediu ("temaki de salmão", "tempura"). Sem acento, sem diferença de maiúsculas e tolerante a erro de digitação. Vazio lista os primeiros itens |
 | `unidade` | recomendado | Código da unidade (`morumbi`, `einstein`, `vila_nova_conceicao`, `patio_guedala`). Sem ele, busca em todas |
+| `categorias` | não | `true` → em vez de itens, devolve as categorias da unidade com a quantidade de itens (PED2) |
+| `categoria` | não | Nome da categoria → só os itens dela que podem ser pedidos, 10 por página, sempre com preço. Sem acento e sem maiúsculas; "temaki" acha "Temakis — cone" (PED2) |
+| `pagina` | não | Página dos itens da categoria (padrão 1) |
+
+Com `categorias` ou `categoria`, a `unidade` é necessária; sem ela vale a do carrinho aberto e, sem carrinho, a chamada volta 400 com `detalhes.campo = "unidade"`.
+
+```json
+{"unidade": "patio_guedala", "total_itens": 193, "categorias": [{"categoria": "Baterá", "qtd_itens": 6}, {"categoria": "Sashimis", "qtd_itens": 14}]}
+```
+
+```json
+{"unidade": "patio_guedala", "categoria": "batera", "categorias_encontradas": ["Baterá"], "pagina": 1, "por_pagina": 10, "total": 6, "tem_mais": false,
+ "itens": [{"item_id": 812, "codigo": "GUE-0412", "unidade": "patio_guedala", "categoria": "Baterá", "nome": "Baterá Shake", "descricao": null,
+            "preco": 58.0, "alcoolico": false, "delivery": "a_confirmar", "tipo": "item", "observacao": null}]}
+```
+
+Categoria que não existe: `itens` vazio e `sugestoes` com as parecidas. Para "o cardápio completo", chame com `categorias=true` e ofereça as categorias; não liste itens de cabeça.
 
 Retorno (até 20 itens, só ativos, do mais relevante para o menos):
 
@@ -190,7 +211,8 @@ Exemplo: `{"item_id": 1027, "quantidade": 2, "observacao": "sem cebola"}`. O mes
 | `unidade` | Código da unidade. Só pode mudar com o carrinho vazio |
 | `modalidade` | `delivery` ou `retirada` |
 | `endereco` | Endereço completo (obrigatório para `delivery`) |
-| `horario` | Texto livre do horário desejado ("hoje às 20h") |
+| `horario` | Horário desejado, em texto ("hoje às 20h", "19:30", "amanhã ao meio-dia", "o quanto antes"). O gateway lê a hora do texto; sem dia, vale hoje. Texto sem hora que não seja "o quanto antes" é recusado (`horario_invalido`) |
+| `agendado_para` | Opcional: data e hora do pedido agendado, `AAAA-MM-DDTHH:MM` no fuso da unidade. Quando vem, vale no lugar da leitura do texto. `null` tira o agendamento |
 | `observacao` | Observação geral do pedido |
 | `maioridade_confirmada` | `true` **somente** depois de o cliente confirmar, com as próprias palavras, que tem 18 anos ou mais |
 
@@ -202,11 +224,12 @@ Exemplo: `{"modalidade": "delivery", "endereco": "Rua Jacarandá, 200, ap. 12 �
 
 `POST /api/v1/pedidos` — corpo: `{"conversation_id": "<conversa>"}`
 
-Retorno (HTTP 201):
+Retorno (HTTP 201). O número do pedido vem na raiz (`numero`) e em `pedido.numero`:
 
 ```json
 {
   "ok": true,
+  "numero": "48213",
   "pedido": {
     "numero": "48213", "status": "aguardando_loja",
     "conversation_id": "bykoji:can_49fce1f15a43f87f22739d60:5511942717046",
@@ -351,4 +374,7 @@ Os blocos `entrega`, `retirada` e `pagamentos` existem desde o G4-a (11/10/2026)
 - Com bebida alcoólica no carrinho (`tem_alcoolico = true`), pergunte: "Você confirma que tem 18 anos ou mais?". Só depois da confirmação chame `definir_entrega` com `maioridade_confirmada: true`. Se o cliente negar, remova as bebidas.
 - Antes de `fechar_pedido`, leia o resumo e peça a confirmação do cliente.
 - Campo nulo em `unidades` (taxa, área de entrega, formas de pagamento, pedido mínimo): diga que a unidade confirma no retorno do pré-pedido.
+- **Nunca diga que o pedido foi fechado, registrado ou enviado sem `fechar_pedido` ter devolvido `ok: true` com `numero` neste turno.** Se o gateway receber esse anúncio sem o fechamento, refaz o turno com `aviso_do_gateway` no pacote e, se repetir, não envia a sua resposta.
+- Carrinho com `horario_vencido: true`: o horário guardado já passou. Pergunte outro horário antes de fechar; não repita o horário antigo ao cliente.
+- Não marque horário que o cliente não disse. Unidade fechada agora: ofereça os horários a partir de `proxima_abertura` e espere a escolha.
 - Depois de fechar: informe o número e que a unidade vai confirmar. Não diga que o pedido está confirmado nem prometa prazo.
