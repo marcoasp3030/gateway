@@ -1232,3 +1232,8 @@ PY
 - `docs/ESPEC_CAL1.md` escrita, com 5 decisões. **Nada implementado.** Achados: a biblioteca `holidays` não está na imagem; a unidade não tem campo de cidade (só endereço em texto); não há exceção futura cadastrada no By Koji.
 - **CAL1 aprovado e implementado (12/10/2026):** `calendario` na raiz do pacote (hoje + 7 dias; feriados pela `holidays==0.106`, municipais de São Paulo, pontos facultativos e exceções das unidades em `observacao`); migração 039 (`tenant_unidades.cidade`, `uf`; By Koji = São Paulo/SP); `cidade`/`uf` no contrato admin da unidade; `scripts/test_suite.sh` instala as bibliotecas novas do requirements no contêiner de teste. Testes em `tests/test_cal1.py` (5).
 - **CAL1 implantado em 12/10/2026 23:15 UTC:** `gateway:7784585`, schema 39, trava com 267 passed (0 falhas, 0 pulados). Volta: `gateway:b9b6ff1`. Backup: `pre-cal1-20261012T231520Z`. Pacote real conferido: `calendario.dias[0]` = 12/10, segunda-feira, hoje, Nossa Senhora Aparecida (nacional).
+
+## DISP1 — disponibilidade de item e paginação de categorias — 2026-10-12
+
+- Diagnóstico do teste de 12/10 20:30 entregue (11 turnos; almoço executivo vendido no feriado; lista com 10 de 18 categorias; perfil ainda `e1` de teste; pedido 12873 aguardando a loja).
+- `docs/ESPEC_DISP1.md` escrita, com 9 decisões. **Nada implementado.** Achado: não existe rota de criar/editar item (só CSV e listagem).
