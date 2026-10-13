@@ -1253,3 +1253,7 @@ PY
 - Análise das conversas de 13/10 entregue (transferências sem tentar, unidade sem cardápio oferecida, horário presumido, Skyone com o dobro do tempo, perfil de teste).
 - Itens 6, 7 e 8 aprovados e implementados: `proxima_abertura` da raiz só com unidades com cardápio; `horario_aviso` no carrinho e `aviso_horario` no `definir_entrega`; guarda de transferência por `pedido_para_confirmar` sem recusa de Skill (refaz 1 vez; repetiu → segue com alerta). Migração 041. Testes em `tests/test_hor2.py` (2). Contrato em `docs/ESPEC_HOR2.md`.
 - **HOR2 implantado em 13/10/2026 16:54 UTC:** `gateway:d34db19`, schema 41, trava com 276 passed (0 falhas, 0 pulados). Volta: `gateway:39a4a25`. Backup: `pre-hor2-20261013T165425Z`.
+
+## Análise de comportamento nº 1 e propostas DEM1, FUP1 e ENC1 — 2026-10-13
+
+- `docs/ANALISE_COMPORTAMENTO_1.md`: análise dos 86 turnos de 12–13/10 (respostas, tom, reações, botões, fluxo, transferências, tempo), 17 problemas com causa, gravidade e correção, linha do tempo turno a turno em apêndice; e as propostas de aviso de demora (DEM1), follow-up (FUP1) e encerramento do atendimento (ENC1), com 17 decisões. **Só leitura; nada implementado.**
