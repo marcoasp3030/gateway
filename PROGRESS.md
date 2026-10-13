@@ -1237,3 +1237,4 @@ PY
 
 - Diagnóstico do teste de 12/10 20:30 entregue (11 turnos; almoço executivo vendido no feriado; lista com 10 de 18 categorias; perfil ainda `e1` de teste; pedido 12873 aguardando a loja).
 - `docs/ESPEC_DISP1.md` escrita, com 9 decisões. **Nada implementado.** Achado: não existe rota de criar/editar item (só CSV e listagem).
+- 13/10/2026: diagnóstico do teste com o prompt v6.3 entregue (turno 894: `adicionar_item` com id errado → `sem_preco` → transferência). `docs/ESPEC_DISP1.md` ganhou a seção 6 (registro com `ref`, `unidade_diferente` antes do preço, proteção `item_nao_buscado`, `tem_cardapio`), com as decisões 10 a 14. **Nada implementado.**
