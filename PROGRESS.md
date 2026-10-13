@@ -1246,3 +1246,4 @@ PY
 - Decisões do Marco (9 itens) implementadas; contrato para o [PAINEL] em `docs/ESPEC_CAT2.md`. Sem migração.
 - PATCH do item ampliado (nome, descrição, preço, ativo, categoria, disponibilidade; `atualizado_em` → 409 com o item atual); GET individual; GET de categorias da unidade; prévia de disponibilidade sem gravar; `disponivel_agora`/`indisponivel_motivo`/`data_referencia` nas leituras; histórico em `gestao_alteracoes`.
 - Testes: `tests/test_cat2.py` (2). Limites registrados: categoria some quando fica sem itens; reimportar CSV sobrescreve a edição do painel.
+- **CAT2 implantado em 13/10/2026 02:44 UTC:** `gateway:39a4a25`, schema 40 (sem migração), trava com 274 passed (0 falhas, 0 pulados). Volta: `gateway:d9b079c`. Backup: `pre-cat2-20261013T024344Z`.
