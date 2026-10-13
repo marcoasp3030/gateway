@@ -17,7 +17,7 @@ COLUNAS = {
     'slow_notice_s','aviso_demora','fallback','alerta_telefone','send_mode','agente_mode',
     'modo_piloto','contatos_permitidos','encerrar_vazia_min','max_lotes_simultaneos',
     'max_concorrencia','max_msgs_por_minuto_contato','botoes_interativos','debounce_incompleta_s','refazer_turno','aviso_demora_janela_s','carrinho_expira_h','acoes_recentes_min',
-    'reacoes','reacoes_emojis','reacoes_max_dia','fora_do_horario','fora_do_horario_mensagem','fora_do_horario_aceita_agendado',
+    'aviso_espera_modo','aviso_espera_textos','reacoes','reacoes_emojis','reacoes_max_dia','fora_do_horario','fora_do_horario_mensagem','fora_do_horario_aceita_agendado',
     'transbordo_alerta','transbordo_horario_equipe','transbordo_fora_do_horario','notificar_equipe','transbordo_destino_externo','skyone_dominios_permitidos','tipo','agente_id','triagem','webhook_secret',
     'credenciais_enc','publico','ativo','status_conexao','ultimo_evento_em','hash','escopos',
     'expira_em','ips_permitidos','revogada_em','ultimo_uso_em','actor','acao','alvo','dados',

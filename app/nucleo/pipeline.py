@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import time
 import uuid
 from datetime import datetime,timezone,timedelta
@@ -54,6 +55,12 @@ PAINEL_URL=os.getenv('PAINEL_URL','https://painel.luxbrain.com.br').strip() or N
 FIM_DE_FRASE=('?','.','!','…')
 # Segundos de "digitando" pedidos ao canal por vez; o canal cancela sozinho ao enviar.
 DIGITANDO_S=25
+# AVS1: o "digitando" é renovado a cada RENOVAR_DIGITANDO_S enquanto o agente processa (antes de os 25 s acabarem).
+RENOVAR_DIGITANDO_S=20
+# AVS1, aviso em texto: só se o bot falou nesta conversa há no máximo ANDAMENTO_MIN (conversa em andamento, não retomada),
+# e no máximo um aviso a cada ESPACO_ENTRE_AVISOS_MIN por conversa.
+ANDAMENTO_MIN=10
+ESPACO_ENTRE_AVISOS_MIN=5
 # Refazer o turno (UX2/UX3.1): no máximo dois por turno; o segundo só enquanto o turno original começou há até 30 s.
 MAX_REFAZER=2
 TETO_REFAZER_S=30
@@ -85,6 +92,25 @@ def parece_fechamento(itens):
     if len(palavras)>MAX_PALAVRAS_FECHAMENTO: return False
     # Sem nenhuma palavra = só emoji/pontuação ("👍", "🙏🙏").
     return all(p in FECHAMENTOS for p in palavras)
+
+
+# Só cumprimento, sem pedido nenhum: nunca recebe aviso de espera (AVS1).
+SAUDACOES=frozenset("""oi oie oii oiii ola olá opa eae eai ei hey hi hello alo alô salve bom dia boa tarde noite
+tudo td bem bom blz beleza como vai vc voce você e ai aí tem alguem alguém""".split())
+MAX_PALAVRAS_SAUDACAO=6
+
+
+def parece_saudacao(itens):
+    """O lote é só um cumprimento ("oi", "olá, boa tarde", "opa, tudo bem?")? Texto curto, só com palavras de
+    saudação ou emoji. Na dúvida devolve False."""
+    palavras=[]
+    for i in itens:
+        if (i.get('tipo') or 'texto')!='texto': return False
+        meta=i.get('meta');meta=json.loads(meta) if isinstance(meta,str) else meta
+        # Toque em botão é resposta a uma pergunta, não cumprimento.
+        if isinstance(meta,dict) and meta.get('interacao'): return False
+        palavras+=''.join(c if c.isalnum() else ' ' for c in str(i.get('conteudo') or '').lower()).split()
+    return len(palavras)<=MAX_PALAVRAS_SAUDACAO and all(p in SAUDACOES for p in palavras)
 
 
 # Palavra de ligação no fim = a frase continua na próxima mensagem ("quero um temaki e").
@@ -371,8 +397,10 @@ return 1
                     tarefa=asyncio.create_task(self.consultar(tenant,cfg,payload))
                     try:
                         feito,_=await asyncio.wait({tarefa},timeout=cfg['slow_notice_s'])
-                        if not feito and cfg['aviso_demora'] and not parece_fechamento(itens):
-                            aviso=await self.enviar(tenant,conversa,cfg['id'],cfg['aviso_demora'])
+                        # AVS1: texto de espera só no modo com texto e quando a conversa está em andamento.
+                        texto=None if feito or cfg.get('aviso_espera_modo')!='presenca_e_texto_contextual' or origem!='cliente' else await self._texto_de_espera(tenant,conversa,cfg,itens,inicio)
+                        if texto:
+                            aviso=await self.enviar(tenant,conversa,cfg['id'],texto)
                             entregue=aviso
                         resultado=await tarefa
                         await converter_transferencia(self.db,tenant,conversa,cfg,resultado)
@@ -459,6 +487,44 @@ return 1
         except asyncio.CancelledError: raise
         except Exception:
             return False
+
+    async def _manter_digitando(self,tenant,conv,cfg,parar):
+        """AVS1: mantém o "digitando…" enquanto o agente processa, renovando antes de cada pedido acabar. Para quando `parar`
+        é marcado, quando o canal não aceita (envio de teste, canal sem suporte) ou ao passar do limite de tempo do agente."""
+        fim=time.monotonic()+float(cfg.get('timeout_s') or 60)+5
+        while not parar.is_set() and time.monotonic()<fim:
+            if not await self.digitando(tenant,conv,cfg): return
+            try: await asyncio.wait_for(parar.wait(),timeout=RENOVAR_DIGITANDO_S)
+            except asyncio.TimeoutError: pass
+
+    async def _texto_de_espera(self,tenant,conversa,cfg,itens,inicio):
+        """Texto do aviso de espera para este turno, ou None se ele não cabe (AVS1). Só no meio de algo: nunca em saudação,
+        agradecimento, primeira mensagem de uma conversa nova ou retomada, nem logo depois de outro aviso. Na dúvida, não manda."""
+        try:
+            if parece_fechamento(itens) or parece_saudacao(itens) or await self._bot_falou_ha_pouco(tenant,conversa,cfg): return None
+            ultima=await self.db.fetchrow("""SELECT conteudo,meta FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND direcao='saida'
+                AND origem='bot' AND coalesce(tipo,'')<>'reacao' AND coalesce(parte,1)<>0 AND criado_em>now()-make_interval(mins=>$3)
+                ORDER BY id DESC LIMIT 1""",tenant,conversa,ANDAMENTO_MIN)
+            # O bot não falou nos últimos minutos: é conversa nova ou retomada.
+            if ultima is None: return None
+            meta=json.loads(ultima['meta']) if isinstance(ultima['meta'],str) else (ultima['meta'] or {})
+            pendente=bool(meta.get('botoes')) or str(ultima['conteudo'] or '').rstrip().endswith('?')
+            if not pendente:
+                pendente=await self.db.fetchval("""SELECT EXISTS(SELECT 1 FROM carrinhos c JOIN carrinho_itens l ON l.tenant_id=c.tenant_id AND l.carrinho_id=c.id
+                    WHERE c.tenant_id=$1 AND c.conversation_id=$2 AND c.status='aberto')
+                    OR EXISTS(SELECT 1 FROM skill_registro WHERE tenant_id=$1 AND conversation_id=$2 AND criado_em>=$3)""",tenant,conversa,inicio)
+            if not pendente: return None
+            anterior=await self.db.fetchrow("""SELECT conteudo,criado_em>now()-make_interval(mins=>$3) AS recente FROM mensagens
+                WHERE tenant_id=$1 AND conversation_id=$2 AND direcao='saida' AND origem='bot' AND parte=0 ORDER BY id DESC LIMIT 1""",tenant,conversa,ESPACO_ENTRE_AVISOS_MIN)
+            if anterior and anterior['recente']: return None
+            textos=[t for t in (cfg.get('aviso_espera_textos') or []) if isinstance(t,str) and t.strip()]
+            if not textos: return None
+            # Sorteia sem repetir o último aviso desta conversa.
+            candidatos=[t for t in textos if not anterior or t!=anterior['conteudo']] or textos
+            return random.choice(candidatos)
+        except Exception:
+            log.warning('Aviso de espera não avaliado; segue só com o "digitando"')
+            return None
 
     async def _pendentes(self,conn,tenant,conversa):
         itens=await conn.fetch("SELECT id,conteudo,criado_em,origem,evento,enviada_em,tipo,meta FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND processada_em IS NULL AND direcao='entrada' AND origem IN ('cliente','sistema') ORDER BY id LIMIT 100",tenant,conversa)
@@ -716,19 +782,23 @@ return 1
                 if origem=='sistema':
                     payload.update(tarefa='notificar',evento=json.loads(itens[0]['evento']) if isinstance(itens[0]['evento'],str) else itens[0]['evento'])
                 tarefa=asyncio.create_task(self.consultar(tenant,cfg,payload))
-                presenca=asyncio.create_task(self.digitando(tenant,conv,cfg))
+                # AVS1: "digitando…" pelo turno inteiro (renovado a cada 20 s); o texto de espera só no modo com texto.
+                modo=cfg.get('aviso_espera_modo') or 'presenca';parar_presenca=asyncio.Event()
+                if modo!='off': presenca=asyncio.create_task(self._manter_digitando(tenant,conv,cfg,parar_presenca))
                 try:
-                    feito,_=await asyncio.wait({tarefa},timeout=cfg['slow_notice_s'])
-                    # Lote que parece só fechamento não recebe aviso: se a resposta for silêncio, nada é enviado.
-                    # Aviso de demora não sai em turno refeito nem se o bot falou há pouco nesta conversa (UX3).
-                    if not feito and cfg['aviso_demora'] and not parece_fechamento(itens) and not descartado and not await self._bot_falou_ha_pouco(tenant,conversa,cfg):
-                        # Aviso de demora é a parte 0 do turno: nunca sai duas vezes no mesmo turno.
-                        aviso=await self._enviar_parte(tenant,conversa,cfg,rid,0,cfg['aviso_demora'])=='enviada'
-                        # Enviar mensagem cancela o "digitando" no canal: pede de novo.
-                        if aviso: await self.digitando(tenant,conv,cfg)
+                    if modo=='presenca_e_texto_contextual' and cfg['slow_notice_s'] and origem=='cliente' and not descartado:
+                        feito,_=await asyncio.wait({tarefa},timeout=cfg['slow_notice_s'])
+                        if not feito:
+                            texto=await self._texto_de_espera(tenant,conversa,cfg,itens,turno['agente_inicio'])
+                            if texto:
+                                # O aviso é a parte 0 do turno: nunca sai duas vezes no mesmo turno.
+                                aviso=await self._enviar_parte(tenant,conversa,cfg,rid,0,texto)=='enviada'
+                                # Enviar mensagem cancela o "digitando" no canal: pede de novo.
+                                if aviso: await self.digitando(tenant,conv,cfg)
                     resultado=await tarefa
                     await converter_transferencia(self.db,tenant,conversa,cfg,resultado)
-                    await asyncio.gather(presenca,return_exceptions=True)
+                    parar_presenca.set()
+                    if presenca: await asyncio.gather(presenca,return_exceptions=True)
                     # Nada vai ser enviado (silêncio ou transferência sem texto): tira o "digitando".
                     if not resultado.get('resposta'): await self.digitando(tenant,conv,cfg,'paused')
                 finally:
@@ -744,8 +814,10 @@ return 1
                 erro='AGENT_TIMEOUT' if isinstance(falha,TempoEsgotado) else 'AGENT_ERROR'
                 status='erro';resultado={'resposta':[cfg['fallback']],'acao':'nenhuma'}
             finally:
-                # Espera o pedido de "digitando" terminar (é curto e tem limite próprio) em vez de cortá-lo no meio.
-                if presenca: await asyncio.gather(presenca,return_exceptions=True)
+                # Para de renovar e espera o pedido de "digitando" em curso terminar (é curto e tem limite próprio) em vez de cortá-lo no meio.
+                if presenca:
+                    parar_presenca.set()
+                    await asyncio.gather(presenca,return_exceptions=True)
         # A resposta fica gravada antes de qualquer envio: se o worker cair, só falta enviar.
         if resultado and resultado.get('silencio_sem_motivo'): status='erro';erro='SILENCE_WITHOUT_REASON'
         return await self.db.fetchrow('''UPDATE turnos SET etapa='respondido',status=$3,erro=$4,resposta=$5::jsonb,

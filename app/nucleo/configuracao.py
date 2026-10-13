@@ -12,14 +12,14 @@ COMPORTAMENTO = {
     'skyone_dominios_permitidos','debounce_curto_s','debounce_palavras','max_msgs_por_minuto_contato',
     'botoes_interativos','debounce_incompleta_s','refazer_turno','aviso_demora_janela_s','carrinho_expira_h','acoes_recentes_min',
     # CFG1-a: já no contrato; a execução vem nos blocos R1 (reações) e G3 (fora do horário e transbordo).
-    'reacoes','reacoes_emojis','reacoes_max_dia','fora_do_horario','fora_do_horario_mensagem','fora_do_horario_aceita_agendado',
+    'aviso_espera_modo','aviso_espera_textos','reacoes','reacoes_emojis','reacoes_max_dia','fora_do_horario','fora_do_horario_mensagem','fora_do_horario_aceita_agendado',
     'transbordo_alerta','transbordo_horario_equipe','transbordo_fora_do_horario',
     'notificar_equipe','transbordo_destino_externo',
 }
 # debounce_curto_s vale quando a mensagem parece completa (pontuação final ou mais de
 # debounce_palavras palavras); mensagem curta/picada espera debounce_s.
 PADROES = dict(debounce_s=4,debounce_curto_s=1.5,debounce_palavras=6,max_wait_s=12,media_wait_s=30,pause_minutes=60,history_turns=20,
-    slow_notice_s=20,aviso_demora='Só um instante, estou verificando.',fallback=FALLBACK_PADRAO,
+    slow_notice_s=30,aviso_demora='Só um instante, estou verificando.',fallback=FALLBACK_PADRAO,
     send_mode='dry',agente_mode='mock',modo_piloto=True,contatos_permitidos=[],
     encerrar_vazia_min=30,max_lotes_simultaneos=5,max_concorrencia=5,skyone_dominios_permitidos=[],
     max_msgs_por_minuto_contato=20,
@@ -31,6 +31,9 @@ PADROES = dict(debounce_s=4,debounce_curto_s=1.5,debounce_palavras=6,max_wait_s=
     # UX3. Aviso de demora não sai se o bot falou na conversa há menos de aviso_demora_janela_s (0 = sempre sai).
     # Carrinho sem alteração há mais de carrinho_expira_h horas é arquivado na próxima mensagem do cliente.
     aviso_demora_janela_s=120,carrinho_expira_h=6,
+    # AVS1. Enquanto o agente processa: 'presenca' = só "digitando…" (padrão); 'presenca_e_texto_contextual' = também um texto curto
+    # depois de slow_notice_s, e só no meio de um pedido ou de uma busca; 'off' = nada. Os textos são sorteados sem repetir o último.
+    aviso_espera_modo='presenca',aviso_espera_textos=['Já te respondo 😊','Só mais um instantinho','Um momento, por favor'],
     # UX3.1. acoes_recentes do pacote: chamadas de Skill da conversa nos últimos N minutos (0 = lista vazia).
     acoes_recentes_min=15,
     # CFG1-a/CFG1-c. Reações, fora do horário e transbordo: executados desde o CFG1-c (pedido agendado ainda não).

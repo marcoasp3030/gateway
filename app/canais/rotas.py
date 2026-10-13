@@ -184,5 +184,7 @@ async def metricas(request:Request,tenant_id:str,agente:str|None=None):
     return {**dict(linha),'fila':fila,'botoes':botoes,'picotadas':picotadas,'solicitacoes':solicitacoes,
             'reacoes':reacoes,'fora_do_horario':horario,'transbordo':transbordo,
             'anuncios_falsos_refeitos':falsos['refeitos'],'anuncios_falsos_segurados':falsos['segurados'],
+            # AVS1: avisos de espera em texto que saíram (no modo padrão, só "digitando…", fica em zero).
+            'avisos_de_espera_enviados':await request.app.state.db.fetchval('SELECT count(*) FROM turnos WHERE tenant_id=$1 AND aviso_demora AND ($2::text IS NULL OR agente_id=$2)',tenant_id,agente),
             # HOR2: transferências por pedido_para_confirmar sem recusa de Skill (refeitas com aviso; mantidas = o agente repetiu).
             'transferencias_sem_recusa_refeitas':semrec['refeitas'],'transferencias_sem_recusa_mantidas':semrec['mantidas']}

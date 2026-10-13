@@ -30,7 +30,7 @@ def test_debounce_da_mensagem():
     # O curto nunca aumenta a espera de quem configurou debounce menor.
     assert d('oi?',{**CFG,'debounce_s':1})==1 and d('oi',{**CFG,'debounce_s':1})==1
     assert d('um dois três',{**CFG,'debounce_palavras':2})==1.5
-    assert PADROES['debounce_curto_s']==1.5 and PADROES['debounce_palavras']==6 and PADROES['slow_notice_s']==20
+    assert PADROES['debounce_curto_s']==1.5 and PADROES['debounce_palavras']==6 and PADROES['slow_notice_s']==30
 
 
 @pytest.mark.skipif(not DSN,reason='Postgres de teste obrigatório')
@@ -42,7 +42,7 @@ def test_debounce_adaptativo_no_agendamento_e_configuracao():
             a,can=await criar(client)
             await ativo(client,'alpha',a,can)
             cfg=(await client.get(f'/admin/v1/tenants/alpha/agentes/{a}')).json()['configuracao_efetiva']
-            assert (cfg['debounce_s'],cfg['debounce_curto_s'],cfg['debounce_palavras'],cfg['max_wait_s'],cfg['slow_notice_s'])==(4,1.5,6,12,20)
+            assert (cfg['debounce_s'],cfg['debounce_curto_s'],cfg['debounce_palavras'],cfg['max_wait_s'],cfg['slow_notice_s'])==(4,1.5,6,12,30)
             n=0
             async def manda(texto,mid=None):
                 nonlocal n;n+=1
@@ -136,9 +136,9 @@ def test_aviso_de_demora_uma_vez_e_digitando_de_novo(monkeypatch):
             pl=fx('texto');pl['message'].update(messageTimestamp=__import__('time').time()*1000)
             conv=(await client.post(f'/webhooks/uazapi/{canal}',params={'s':segredo},json=pl)).json()['conversation_id']
             assert await p.processar_duravel('alpha',conv)=='concluido'
-            assert chamadas==[('/message/presence','composing',None),('/send/text',None,'Só um instante.'),
-                              ('/message/presence','composing',None),('/send/text',None,'pronto')]
-            assert await conn.fetchval('SELECT aviso_demora FROM turnos WHERE conversation_id=$1',conv) is True
+            # AVS1: no modo padrão o cliente vê só o "digitando…"; o texto de espera não sai (os casos com texto estão em test_avs1.py).
+            assert chamadas==[('/message/presence','composing',None),('/send/text',None,'pronto')]
+            assert await conn.fetchval('SELECT aviso_demora FROM turnos WHERE conversation_id=$1',conv) is False
     banco(cenario)
 
 
@@ -181,7 +181,7 @@ def test_fechamento_nao_recebe_aviso_de_demora(duravel):
             # Fechamento em que o agente decide responder: sai só a resposta, sem aviso antes.
             t,bot=await turno('u2','valeu!',{'resposta':['Por nada!'],'acao':'nenhuma'})
             assert bot==['Por nada!'] and not t['aviso_demora']
-            # Pergunta com agente lento: o aviso continua saindo, uma vez.
+            # Pergunta com agente lento, primeira mensagem da conversa: sem texto de espera (AVS1).
             t,bot=await turno('u3','vocês entregam no Morumbi?',{'resposta':['Sim!'],'acao':'nenhuma'})
-            assert bot==['Só um instante.','Sim!'] and t['aviso_demora']
+            assert bot==['Sim!'] and not t['aviso_demora']
     banco(cenario)

@@ -1257,3 +1257,9 @@ PY
 ## Análise de comportamento nº 1 e propostas DEM1, FUP1 e ENC1 — 2026-10-13
 
 - `docs/ANALISE_COMPORTAMENTO_1.md`: análise dos 86 turnos de 12–13/10 (respostas, tom, reações, botões, fluxo, transferências, tempo), 17 problemas com causa, gravidade e correção, linha do tempo turno a turno em apêndice; e as propostas de aviso de demora (DEM1), follow-up (FUP1) e encerramento do atendimento (ENC1), com 17 decisões. **Só leitura; nada implementado.**
+
+## AVS1 — aviso de espera — 2026-10-13
+
+- Decisões do Marco sobre a análise nº 1 recebidas (AVS1, ENC1, FUP1; ordem AVS1 → ENC1-a → FUP1-a → FUP1-b + ENC1-b; instrumentação de `request_id` nas Skills e versão do prompt junto do ENC1-a).
+- O `docs/ANALISE_COMPORTAMENTO_1.md` tinha sido reescrito por outra sessão, sem commit, com conversas pessoais de terceiros no Anexo B. A versão integral foi guardada fora do repositório (`/home/twadmin/backups/gateway/docs-fora-do-git/`) e a do repositório ficou sem esse conteúdo.
+- AVS1 implementado: `aviso_espera_modo` (padrão `presenca`), "digitando…" renovado a cada 20 s pelo turno inteiro, texto de espera só no modo `presenca_e_texto_contextual` e no meio de algo, três textos aprovados com rodízio, `slow_notice_s` padrão 30. Migração 042. Testes em `tests/test_avs1.py` (3). Contrato em `docs/ESPEC_AVS1.md`.

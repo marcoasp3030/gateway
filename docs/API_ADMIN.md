@@ -231,6 +231,8 @@ Estado persistente por agente: três falhas consecutivas em cinco minutos abrem 
 
 **Edição do catálogo e disponibilidade atual (CAT2, `docs/ESPEC_CAT2.md`):** `GET /tenants/{t}/catalogo/itens/{item_id}`; `PATCH` do mesmo caminho com `nome`, `descricao`, `preco`, `ativo`, `categoria`, `disponibilidade` (opcionais e independentes; só admin/plataforma) e `atualizado_em` para concorrência (409 com `item` atual); `GET /tenants/{t}/catalogo/categorias?unidade=`; `POST /tenants/{t}/catalogo/disponibilidade/previa`. Todo item nas leituras traz `disponivel_agora`, `indisponivel_motivo` e `data_referencia`. Alterações em `GET …/gestao/alteracoes?entidade=catalogo_item`.
 
+**Aviso de espera (AVS1, `docs/ESPEC_AVS1.md`):** comportamentos novos `aviso_espera_modo` (`off` / `presenca` / `presenca_e_texto_contextual`; padrão `presenca` = só "digitando…") e `aviso_espera_textos` (lista de 1 a 6 textos de até 160 caracteres), no grupo `mensagens`. O padrão de `slow_notice_s` passou de 20 para 30 s e só vale no modo com texto. `aviso_demora` (texto único) deixou de ser usado. `GET metricas` ganhou `avisos_de_espera_enviados`.
+
 **Gestão G1 — horários da unidade** (`docs/ESPEC_GESTAO.md`). Todas sob `/admin/v1/tenants/{t}/unidades`, rede interna, chave do painel e `X-Actor`.
 
 | Rota | Corpo | Resposta |

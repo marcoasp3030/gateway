@@ -1,6 +1,6 @@
 from datetime import datetime
-from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Annotated, Literal
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 
 class Estrito(BaseModel):
@@ -46,6 +46,9 @@ class Comportamento(Estrito):
     debounce_incompleta_s: float | None = Field(None,ge=1,le=15)
     refazer_turno: Literal['on','off'] | None = None
     aviso_demora_janela_s: int | None = Field(None,ge=0,le=3600)
+    # AVS1: o que o cliente vê enquanto o agente processa, e os textos do modo com texto (1 a 6, até 160 caracteres cada).
+    aviso_espera_modo: Literal['off','presenca','presenca_e_texto_contextual'] | None = None
+    aviso_espera_textos: list[Annotated[str,StringConstraints(strip_whitespace=True,min_length=2,max_length=160)]] | None = Field(None,min_length=1,max_length=6)
     carrinho_expira_h: int | None = Field(None,ge=1,le=720)
     acoes_recentes_min: int | None = Field(None,ge=0,le=1440)
     # CFG1-a: no contrato desde já; executados nos blocos R1 e G3.

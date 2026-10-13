@@ -16,58 +16,7 @@ async def preparar(pool,tmp_path):
     return app,c,r,p,pref
 
 
-def test_aviso_de_demora_so_sai_se_o_bot_nao_falou_ha_pouco_e_nunca_em_turno_refeito(tmp_path):
-    async def cenario(pool):
-        app,c,r,p,pref=await preparar(pool,tmp_path)
-        try:
-            async with c:
-                conversa,ids,api,_=await montar_pedidos(pool,c,app)
-                async def modo(**campos): assert (await c.patch(f'/admin/v1/tenants/{T}/agentes/{A}',json=campos)).status_code==200,campos
-                await modo(slow_notice_s=1)
-                cfg=await app.state.configuracoes.efetiva(T,A)
-                assert (cfg['aviso_demora_janela_s'],cfg['origem_config']['aviso_demora_janela_s'],cfg['carrinho_expira_h'])==(120,'plataforma',6)
-                async def chegar(conv,texto): await pool.execute("INSERT INTO mensagens(tenant_id,conversation_id,direcao,origem,conteudo) VALUES ($1,$2,'entrada','cliente',$3)",T,conv,texto)
-                saidas=lambda conv: pool.fetch("SELECT conteudo,parte FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND direcao='saida' ORDER BY id",T,conv)
-                envelhecer=lambda conv,s: pool.execute("UPDATE mensagens SET criado_em=criado_em-make_interval(secs=>$3) WHERE tenant_id=$1 AND conversation_id=$2",T,conv,float(s))
-                roteiro=[]
-                async def agente(http,repo,cofre,tenant,cfg,payload): return await roteiro.pop(0)(payload)
-                p.chamar=agente
-                def fala(texto,demora=0,antes=None):
-                    async def passo(payload):
-                        if antes: await antes(payload)
-                        await asyncio.sleep(demora);return {'resposta':[texto],'acao':'nenhuma'}
-                    return passo
-                async def turno(conv): assert await p.processar_duravel(T,conv)=='concluido'
-
-                c1=await conversa('a1')
-                # 1) Primeira resposta demorada, bot calado antes: o aviso sai (parte 0), uma vez.
-                roteiro[:]=[fala('resposta 1',1.6)];await turno(c1)
-                assert [(m['conteudo'],m['parte']) for m in await saidas(c1)]==[(AVISO,0),('resposta 1',1)]
-                # 2) Outra demora logo em seguida (o bot falou há segundos): sem aviso.
-                await chegar(c1,'mais uma');roteiro[:]=[fala('resposta 2',1.6)];await turno(c1)
-                assert [m['conteudo'] for m in await saidas(c1)]==[AVISO,'resposta 1','resposta 2']
-                # 3) Dentro da janela (119 s): sem aviso. Fora dela (121 s): o aviso volta.
-                await envelhecer(c1,117);await chegar(c1,'ainda');roteiro[:]=[fala('resposta 3',1.6)];await turno(c1)
-                assert [m['conteudo'] for m in await saidas(c1)][-1:]==['resposta 3'] and AVISO not in [m['conteudo'] for m in await saidas(c1)][1:]
-                await envelhecer(c1,125);await chegar(c1,'e agora');roteiro[:]=[fala('resposta 4',1.6)];await turno(c1)
-                assert [m['conteudo'] for m in await saidas(c1)][-2:]==[AVISO,'resposta 4']
-                # 4) Janela configurável por agente: 0 desliga a regra (o aviso sempre sai); valor fora da faixa é recusado.
-                await modo(aviso_demora_janela_s=0);await chegar(c1,'de novo');roteiro[:]=[fala('resposta 5',1.6)];await turno(c1)
-                assert [m['conteudo'] for m in await saidas(c1)][-2:]==[AVISO,'resposta 5']
-                assert (await c.patch(f'/admin/v1/tenants/{T}/agentes/{A}',json={'aviso_demora_janela_s':-1})).status_code==400
-                # Resposta rápida nunca tem aviso.
-                await chegar(c1,'rápida');roteiro[:]=[fala('resposta 6')];await turno(c1)
-                assert [m['conteudo'] for m in await saidas(c1)][-2:]==['resposta 5','resposta 6']
-                # 5) Turno refeito nunca avisa, mesmo demorado, com o bot calado e a janela desligada.
-                await modo(refazer_turno='on');c2=await conversa('a2')
-                async def chega(payload): await chegar(payload['conversation_id'],'segunda')
-                roteiro[:]=[fala('descartada',antes=chega),fala('final',1.6)];await turno(c2)
-                assert [(m['conteudo'],m['parte']) for m in await saidas(c2)]==[('final',1)]
-                ts=await pool.fetch("SELECT status,aviso_demora FROM turnos WHERE conversation_id=$1 ORDER BY id",c2)
-                assert [(t['status'],t['aviso_demora']) for t in ts]==[('refeito',False),('ok',False)]
-        finally:
-            await limpar(r,pref)
-    banco_real(cenario)
+# O aviso de demora mudou no AVS1 ("digitando…" por padrão; texto só no meio de algo): os testes dele estão em tests/test_avs1.py.
 
 
 def test_carrinho_parado_expira_antes_do_pacote_e_o_agente_fica_sabendo(tmp_path):
