@@ -193,3 +193,15 @@ Avaliado: vale a pena e é barato (uma consulta agrupada por unidade).
 12. **Item já no carrinho** dispensa a busca (proposta)? E item de um pedido anterior da conversa ("quero o mesmo de ontem"): exige buscar de novo (proposta), ou também dispensa?
 13. **Proteção sempre ligada** para todo agente com o módulo de pedidos (proposta), ou com chave para desligar?
 14. **`tem_cardapio`:** nos dois lugares, pacote e `info_unidades` (proposta), com `itens_no_cardapio` junto. Serve?
+
+### 6.7 Decisões do Marco para os itens 10 a 14 (13/10/2026)
+
+10. **`ref` no registro:** aprovado, com um acréscimo: em `adicionar_item` guardar também `item_nome` (nome do item no catálogo). `q`, endereço, observações e o texto livre do horário continuam de fora.
+11. **Janela do `item_nao_buscado`:** 30 minutos fixos, numa constante de configuração do gateway. Não é configurável por agente.
+12. **Dispensa da busca:** item já no carrinho aberto dispensa. Item de pedido anterior exige buscar de novo (preço, disponibilidade e unidade podem ter mudado).
+13. **Proteção sempre ligada** para todo agente com o módulo de pedidos, sem chave por agente. Problema em produção = rollback normal.
+14. **`tem_cardapio`:** nos dois lugares (`unidades` do pacote e `info_unidades`), com `itens_no_cardapio`.
+
+O relatório da implantação deve trazer o contrato para o prompt: motivos novos de `adicionar_item` e `buscar_catalogo` (`item_nao_buscado`, `item_indisponivel_hoje`, `unidade_diferente` com as duas unidades), o formato de `disponibilidade` na busca e onde aparecem `tem_cardapio` e `itens_no_cardapio`.
+
+**Itens 1 a 9 (seção 5): ainda sem decisão.** Nada é implementado antes delas.
