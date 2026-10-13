@@ -1,562 +1,1043 @@
-# Análise de comportamento do agente By Koji — nº 1
+# Análise do comportamento By Koji — decisões para aviso, FUP1 e ENC1
 
-**Data:** 13/10/2026, 14:45. **Só leitura:** nada foi alterado em produção, no prompt ou nos dados.
-**Período:** 12/10 00:00 a 13/10 14:45 (horário de São Paulo). **Produção:** `gateway:d34db19`, schema 41.
-**Fontes:** turnos, mensagens, registro de Skills, pedidos e auditoria do gateway; código do gateway. O texto do prompt e a versão dele (v6.x) não são visíveis daqui: o que é atribuído ao prompt é inferência a partir das respostas.
+13/10/2026. **Diagnóstico e proposta, sem implementação. Aguardar decisões do Marco.**
 
-## Resumo
+Esta revisão amplia a análise anterior com as conversas sem turno e explicita os limites de evidência, principalmente fidelidade às Skills, versão do prompt e recebimento no aparelho.
 
-- **86 turnos** no período: 76 na linha de teste (final 1513), 9 no outro contato do piloto (final 7046) e 1 de um agente de bancada simulado (fora da análise). 75 respondidos, 6 ignorados (conversa pausada), 5 refeitos.
-- **O núcleo do pedido funciona:** 5 pedidos fechados, todos com número real; preços, itens e status sempre iguais ao que as Skills devolveram; nenhuma lista com mais de 10 opções; nenhum botão caiu para texto numerado; os 4 silêncios e as 4 reações aplicadas foram corretos.
-- **Os problemas graves estão fora do núcleo:** 2 transferências sem tentativa, 1 transferência por id de item errado, unidade sem cardápio oferecida, horário presumido, respostas a uma conversa pessoal (5 vezes) e o tempo de resposta, que subiu de 16 s para 23 s de mediana no Skyone.
-- **Tom:** correto e cordial, mas com cara de robô: emoji em 80% das respostas, "Perfeito/Beleza/Certo/Combinado —" abrindo 21 delas e o nome do cliente em 19 das 23 respostas da manhã de 13/10.
-- **"Só um instante, estou verificando":** saiu 4 vezes, todas em 13/10; 3 delas em saudação depois de pausa. A causa é mecânica: o Skyone passou dos 20 s de limite.
-- **Propostas:** aviso de demora novo (1 bloco pequeno), encerramento do atendimento ENC1 (2 blocos) e follow-up FUP1 (2 blocos). 17 decisões em aberto, cada uma com proposta.
+## 1. Escopo, evidências e limites
 
----
+Consultas SQL em transação **REPEATABLE READ READ ONLY** no banco próprio do gateway; leitura de código e documentos. Nenhuma chamada ao Skyone/uazapi, alteração de configuração, conversa, pedido, carrinho ou serviço. A única alteração no repositório é este documento; sem commit. O trabalho CAT2 do painel foi pausado quando este pedido chegou, sem publicação.
 
-# PARTE 1 — Análise das conversas
+Recorte: desde **12/10/2026 00:00 em America/Sao_Paulo** (03:00 UTC) até a coleta de 13/10. Última mensagem no retrato: **13/10 14:42:39 -03**; último início de turno: **14:33:54 -03**. Código consultado no checkout `f85fef5`; não aplicar retroativamente as guardas novas aos testes antigos. O prompt fica no Skyone e não é versionado por turno no banco.
 
-A linha do tempo turno a turno está no **Apêndice A**. Abaixo, a avaliação por tema.
+- **16 conversas com 330 mensagens** no recorte. Só três tiveram turnos: final **1513: 76 live**, **7046: 9 live**, **3428: 1 mock**. As outras 13 constam no anexo B, inclusive interações humanas e anexos sem turno.
+- **86 turnos:** 75 ok (74 live + 1 mock), 6 ignorados, 5 refeitos. `ignorado` não é silêncio escolhido pelo agente; `refeito` não é texto entregue.
+- **60 registros de Skills**, 25 registros curtos de ações, 15 eventos de pedido e 453 eventos de auditoria no retrato. Associação Skill→turno por conversa e intervalo do agente; todas as 60 chamadas encontraram janela. Falta `request_id` na Skill para correlação inequívoca em cenários futuros de concorrência.
+- Anexo A: **todos os 86 turnos**, entrada, retorno, ação/motivo/desfecho, reações, menus, Skills/status/ref/duração, saídas persistidas e tempos. Anexo B: **102 mensagens fora dessas entradas/saídas vinculadas**, incluindo todas as conversas sem turno. Números pessoais completos e URLs externas foram omitidos.
 
-## 1.1 Respostas
+**Limites que impedem conclusões absolutas:**
 
-**Corretas em relação às Skills.** Em todos os turnos com Skill de sucesso, o que o agente disse bate com o retorno: preços (R$ 124, 61, 45, 34…), itens, status do pedido ("em preparo, cerca de 45 minutos" no turno 860 = `previsao_min: 45`), horários de fechamento das unidades e os 5 números de pedido.
+1. `skill_registro` guarda status, motivo e referências selecionadas; não guarda o JSON integral de cada consulta. `skill_chamadas` é também resumido. Não é possível afirmar fidelidade a cada preço/horário retornado historicamente só olhando o catálogo de hoje.
+2. `turnos.resposta` é normalizado pelo adaptador, não o JSON original do Skyone. Não há snapshot completo do pacote, histórico, configuração e calendário de cada chamada. O perfil `e1` está registrado, mas **não identifica prompt v6.7**.
+3. `total_ms` é calculado do horário da **última entrada do lote** até a conclusão do processamento/envio; não até confirmação de recebimento no aparelho. `entrega=enviada` significa envio aceito no caminho do gateway/provedor, não leitura humana. Não há nesta análise latência de recibo WhatsApp correlacionada por parte. Para lote refeito, a espera percebida desde a primeira mensagem pode ser maior.
+4. `agente_ms` inclui trabalho do bloco do agente, rede/controle e possível espera por cota; é proxy de latência Skyone, não tempo interno puro do modelo. Duração da Skill mede o handler no gateway, não ida/volta Skyone nem raciocínio entre ferramentas.
+5. Reações registradas como aplicadas não demonstram como o cliente as percebeu. Anexos não foram baixados, ouvidos ou interpretados; ausência de resposta a anexo não prova silêncio correto sobre o conteúdo.
 
-**Informação inventada ou em contradição com o pacote:**
+## 2. Conclusão do comportamento
 
-| Turno | O que disse | O que era verdade | Causa | Gravidade |
-|---|---|---|---|---|
-| 894 | "esse item não tem preço cadastrado" (Centolla, que ele mesmo tinha dito custar R$ 198) | Enviou o `item_id` de outro item, de outra unidade, sem preço | Prompt/modelo (id trocado). Hoje o gateway devolveria `item_nao_buscado` | Alta |
-| 905 | "não consegui incluir as Centolla" | Não chamou nenhuma Skill | Prompt | Alta |
-| 908 | "vou transferir para a equipe confirmar o cardápio" | Bastava listar as categorias; não chamou Skill | Prompt | Alta |
-| 900–903 | "a próxima abertura é da Einstein às 11:30", e ofereceu agendar lá | Einstein tem `tem_cardapio: false` | Gateway (campo `proxima_abertura`), corrigido no HOR2; e prompt | Alta |
-| 902 | "agendei para hoje às 11:30" | O cliente tocou "O quanto antes"; ninguém disse 11:30 | Prompt | Média |
-| 904 | "continua retirada para hoje às 11:30" no Pátio Guedala | A unidade abre às 12h | Gateway (não reconferia na troca de unidade), corrigido no HOR2 | Média |
-| 854–858 | Vendeu o Almoço executivo citando "exceto feriados", num feriado | 12/10 era feriado nacional | Gateway (não havia disponibilidade), corrigido no DISP1 | Média |
-| 855 | "Parece que não consegui adicionar automaticamente" | `adicionar_item` devolveu `item_inexistente` (id errado) | Prompt: expõe falha interna e pede a mesma confirmação de novo | Baixa |
-| 926 | "Total: R$ 45 (taxa a confirmar)" | Era retirada; não há taxa | Prompt | Baixa |
-| 934 | Pedido "pronto para retirada" + "Quer que eu te avise quando houver alguma atualização?" | Depois de pronto não há atualização útil | Prompt | Baixa |
+O agente consegue concluir pedidos com número verdadeiro, usa menus e reconhece agradecimento final. Os problemas mais graves são **consistência do item/unidade**, continuidade excessiva de assunto velho e ausência de um ciclo explícito de atendimento. Há também configuração de teste publicada que contamina o tom.
 
-**Repetição e redundância:**
+### 2.1 Problemas, causas e correção proposta
 
-| Turno | Problema | Gravidade |
-|---|---|---|
-| 925 e 926 | Resumo do pedido mostrado duas vezes seguidas, o primeiro antes de o horário estar definido | Média |
-| 905 | Dois balões dizendo a mesma coisa ("vou chamar a equipe… / a equipe vai continuar…") | Baixa |
-| 867 | Mesma pergunta em dois balões ("Me diz de qual unidade… / De qual delas?") | Baixa |
-| 877, 878 | "Voltando ao seu pedido: 1x Almoço executivo…" repetido em duas respostas seguidas, uma delas no lugar da pergunta da lista | Baixa |
-| 887 → 888, 906 → 907 → 910 | O mesmo menu ("Quer ver o cardápio… ou dizer o que quer?") três vezes em poucos minutos | Baixa |
-
-**Resposta sem próximo passo** (ação `nenhuma`, sem pergunta e sem botão): turnos 858, 860, 862, 866 e 883. Cinco em 71 respostas; nenhuma desde a tarde de 12/10.
-
-**Ação desnecessária:** no turno 851 um simples "Oi" depois de 21 horas levou a `esvaziar_carrinho` sem o cliente pedir (o carrinho já tinha expirado, então não houve perda, mas a chamada não devia existir). No turno 858, `definir_entrega` foi chamada sem nenhum campo.
-
-## 1.2 Tom e humanização
-
-| Medida | Valor |
-|---|---|
-| Respostas com texto | 71 |
-| Balões por resposta | 1,9 |
-| Tamanho da resposta (mediana) | 121 caracteres |
-| Respostas com emoji | 57 de 71 (80%); quase sempre 😊 |
-| Abertura com "Perfeito" / "Beleza" / "Certo" / "Combinado" | 10 / 5 / 3 / 3 |
-| Respostas com o nome do cliente (linha 1513) | 29 de 66 no período; 19 de 23 na manhã de 13/10 |
-
-- **Tamanho:** dentro do perfil (`tamanho_respostas: curtas`). É o ponto forte.
-- **Soa como robô** por três hábitos: a mesma muleta abrindo a frase ("Perfeito, Marco —"), o nome em quase toda resposta e o 😊 fixo no fim. Uma pessoa da equipe usaria o nome na saudação e uma vez ou outra.
-- **Emojis:** o perfil publicado está com `emojis: bastante`, então parte disso é obediência ao perfil de teste.
-- **Apresentação:** "Oi! Sou o Marco, do teste1" (turnos 851, 861, 862) vem do perfil `e1`, que ainda é o de teste. Enquanto não for republicado, o agente não fala como By Koji.
-- **Travessão:** "Perfeito — …", "Combinado — …" em quase toda resposta é marca de texto gerado; em WhatsApp ninguém escreve assim.
-
-**Correção:** prompt (variar a abertura, nome só na saudação e em momentos-chave, no máximo um emoji a cada duas ou três respostas, sem travessão) e perfil (republicar o real, com `emojis: moderado`).
-
-## 1.3 Reações
-
-| Turno | Mensagem do cliente | Emoji | Resultado |
+| Gravidade | Evidência real | Diagnóstico / causa provável | Correção e local |
 |---|---|---|---|
-| 856, 857, 858 | toques "Sim", "Retirada", "Confirmar pedido" | 😊 | **Bloqueadas** pelo gateway (`sem_texto`: toque de botão não recebe reação) |
-| 859, 884, 920 | "Obrigado" depois de pedido fechado | ❤️ | Aplicadas |
-| 932 | "Muito obrigado por avisar" (depois do aviso de pedido pronto) | ❤️ | Aplicada |
+| Alta | 891–894: Centolla R$198 → cliente pede 10 → “esse item não tem preço cadastrado” | Skill recusou `sem_preco`, mas `skill_chamadas` identifica **Almoço executivo**, não Centolla. Diagnóstico histórico em `ESPEC_DISP1.md` §6 confirma ID de outra unidade | Prompt: nunca reconstruir ID por memória; ligar escolha ao item retornado. Gateway: manter proteções DISP1 de item buscado/unidade e ref auditável. Não é ausência de preço da Centolla |
+| Alta | 900–903: oferece Einstein, agenda 11:30 e só depois diz “Einstein ainda não recebe pedidos por aqui” | Unidade aberta confundida com unidade com cardápio vendável | Prompt deve filtrar `tem_cardapio` antes de oferecer unidade para pedido; pacote/Skill devem concordar sobre unidades elegíveis. Não alterar horários reais para contornar |
+| Alta | 904: troca para Pátio, mantém “hoje às 11:30”; 911 informa abertura do Pátio ao meio-dia | Horário da unidade anterior reutilizado; 904 já acontece depois de 11:30 | Prompt: troca de unidade invalida sugestão anterior. Gateway: validar agendamento contra unidade atual/instante e devolver correção. Sem snapshot integral, não concluir que a persistência aceitou horário inválido; a promessa textual é comprovada |
+| Alta | 854/856 e 869/870: oferece e adiciona almoço “exceto feriados” em 12/10 à noite | Restrição estava como texto descritivo; pedidos reais de R$124 confirmam venda. Data é o feriado nacional reconhecido pelo próprio agente no 866 | Dados: disponibilidade estruturada; gateway: validação da Skill DISP1; prompt: não oferecer opção indisponível. Verificar configuração atual antes de concluir que a correção retroage |
+| Média | 905 e 908: “vou transferir” sem nenhuma Skill registrada no turno | Transferência por `pedido_para_confirmar` sem recusa contemporânea; 905 reaproveita fracasso antigo, 908 abandona simples “Ver cardápio” | Prompt: consultar antes de transferir; gateway HOR2: guardar recusa vinculada ao turno e refazer uma vez. Preservar acesso direto a humano e reclamação |
+| Média | 856, 870, 879, 917, 923: adiciona 1 sem perguntar quantidade; 892–893 fazem corretamente | Regra do prompt inconsistente; o default 1 da Skill não equivale a intenção confirmada | Prompt: perguntar quantidade se ausente; não exigir isso em alteração explícita “mais um”. Gateway pode receber evidência de quantidade numa evolução, sem inventar agora |
+| Média | 856/870 pulam “mais itens?” e vão à modalidade; 917/923 oferecem corretamente | Etapas não uniformes | Prompt: após sucesso de adicionar, confirmação curta e pergunta sobre mais itens; sem novo menu genérico |
+| Média | 857 pergunta “Posso mostrar o resumo?” com botão **Confirmar pedido**, e 858 fecha | A legenda da pergunta e a ação do botão divergem: confirmação antes de resumo completo | Prompt: só apresentar Confirmar após itens, quantidade, modalidade e total. Botão nunca deve significar “mostrar resumo” |
+| Média | 925 faz resumo antes de coletar horário; 926 repete resumo e acrescenta “taxa a confirmar” em retirada | Resumo prematuro e template de entrega usado na retirada | Prompt: coletar faltantes primeiro, resumo uma vez; taxa de entrega não apresentada como pendência de retirada |
+| Média | 855 pede “Quer que eu coloque?” após cliente já confirmar; 867 “Me diz de qual unidade” + “De qual delas?” | Pergunta repetida e dois balões para uma intenção | Prompt: recuperação técnica não exige repetir consentimento inalterado; fundir frases redundantes |
+| Média | 874/880/886/896, final7046: conversa de nomes/significados e móveis recebe retomada de Edamame expirado | Contexto de carrinho domina intenção pessoal; nome é inferido de lista de nomes | Prompt: priorizar intenção atual e silêncio `conversa_pessoal`; nome só por autoidentificação inequívoca. ENC1: não restaurar carrinho expirado automaticamente |
+| Média | 851 “Sou o Marco, do teste1”; 873 “Obrigado — até a próxima. teste” | **Cadastro confirmado:** perfil da empresa contém `nome_empresa=teste1`, `nome_atendente=Marco`, `mensagem_despedida=teste`, regras/descrição/boas-vindas também “teste” | Corrigir perfil publicado pelo painel, com aprovação. Não culpar exclusivamente prompt nem mudar nesta análise |
+| Média | 900/921/928 recebem aviso de demora para “Oi/Ola” | Gatilho técnico ignora saudação/novo atendimento; janela de 120s favorece justamente a retomada | Bloco de aviso descrito na seção 5 |
+| Baixa | 930 pergunta “Quer que eu avise quando estiver pronto?”; 931 promete; 934, já pronto, pergunta por futuras atualizações | Pergunta redundante para aviso automático de pedido e conversa sem ponto final | Prompt: informar aviso automático sem pedir escolha sem efeito; ENC1 define conclusão/abertura |
+| Baixa | 10 respostas com “Perfeito”, 5 com “Beleza”; 29 mencionam Marco | Fórmula repetitiva de acolhimento, nome usado como prefixo mecânico | Prompt/perfil: usar nome na saudação, mudança relevante ou confirmação, não em toda resposta; variar sem lista obrigatória de bordões |
+| Média (cadastro, preventiva) | Horário atual do Einstein no sábado inclui 19:00–17:00 | É interpretado como turno atravessando a madrugada até 17h do dia seguinte; pode ser cadastro acidental | Marco conferir intenção. Não é causa provada dos testes de segunda/terça; não corrigir automaticamente |
 
-- **7 pedidas, 4 aplicadas, 3 bloqueadas.** Nenhuma em momento errado chegou ao cliente: as três em toque de botão foram barradas pelo gateway. O prompt parou de pedi-las depois de 12/10.
-- **Faltou reação?** Não houve elogio nem reclamação no período, então não há caso para julgar.
-- **"Obrigado" só com ❤️, sem texto:** funciona como fim de conversa e é o que uma pessoa faria. O risco é outro: em 3 dos 4 casos a resposta anterior tinha terminado com "Quer mais alguma coisa?". O cliente responde "Obrigado" e a conversa fica aberta para sempre, sem despedida e sem encerramento (ver Parte 4). Sugestão: manter o ❤️ e deixar o encerramento registrar o fim; despedida em texto só quando o cliente se despede de fato ("tchau", "até mais").
+**O que funciona bem:** números **99781, 12873, 48806, 29695 e 17450** existem em pedidos e correspondem às cinco Skills `fechar_pedido` com HTTP201. Totais preservados nos snapshots: 124, 124, 185, 45 e 45 reais. 882 soma corretamente 124+61=185. 860 consulta o 99781 após evento `em_preparo` com previsão45; 934 consulta o17450 após `pronto_retirada`. 875 retoma itens após **recusa do12873 às20:54:06**, portanto esse carrinho reaparecer não é, por si só, invenção. 913 coleta 13h do próprio cliente; não inventa esse horário. 929→930 refaz resposta quando chega “Meu nome é Carlos”, e passa a usar Carlos. Os textos descartados não devem entrar como balões duplicados entregues.
 
-## 1.4 Botões e listas
+### 2.2 Tom, reações e silêncios
 
-- **50 respostas com opções:** 41 saíram como botão, 9 como lista, **nenhuma** como texto numerado. Todos os ids no formato.
-- **Listas:** nenhuma passou de 10. Desde 13/10 a lista de categorias usa 9 + "Ver mais categorias" e a de itens 9 + "Ver mais".
-- **Título cortado:** "Entradas frias e carpacc" (24 caracteres, limite da lista). O corte é do agente; vale abreviar de propósito ("Entradas frias").
-- **Botão que faltou:** turnos 912 (pergunta de horário sem "O quanto antes / Escolher horário", que existiam no 901), 921 e 922 (saudação e "O que você quer pedir?" sem opções), 876.
-- **Botão que sobrou:** "Falar com atendente" no menu inicial (928, 931, 933, 934) convida à transferência sem necessidade; "Incluir Centolla" (904), oferecido por conta própria.
-- **Categoria repetida no balão e na lista:** no turno 915 a lista tinha "Ver mais categorias" e o balão ainda escrevia as outras 9. Uma das duas basta.
-- **Toques antigos e contraditórios:** não houve toque em mensagem antiga nem dois toques na mesma mensagem no período. No turno 930 um toque e um texto chegaram juntos e foram respondidos numa resposta só, corretamente.
+Nos **74 live ok**, 65 retornos têm dois balões, cinco têm um e quatro não têm texto. Comprimento total por turno: mediana119,5 caracteres, p90 185,7. São relativamente curtos, mas fragmentação quase obrigatória em dois balões soa mecânica. Contagem por pontos Unicode de emojis pictográficos:57 turnos com um e17 com zero; não é contagem de grafemas universal. O perfil atual pede `emojis=bastante`, e o padrão de tamanho é `curtas`; portanto reduzir emojis requer decisão de perfil, não tratar todo emoji como violação.
 
-## 1.5 Fluxo do pedido
+**Sete pedidos de reação:**
 
-| Regra | Resultado no período |
-|---|---|
-| Perguntar a quantidade quando o cliente não disse | **Falhou em 4 de 5:** 856, 879, 917 e 923 adicionaram 1 direto. Só o 892 perguntou |
-| "Mais itens?" depois de cada item | Cumpriu desde 12/10 à noite (879, 917, 923). Antes não (856) |
-| Resumo com total uma vez só | Falhou em 925/926. O 857 pulou o resumo e foi direto ao botão de confirmar |
-| Número real do pedido | **Cumpriu em 5 de 5** |
-| Horário nunca inventado | Falhou em 902 (11:30 no lugar de "o quanto antes") |
-| Unidade sem cardápio nunca oferecida | Falhou em 851, 861, 865, 867, 889 (botões Einstein e Vila Nova Conceição) e em 900–903. Desde o turno 911 só oferece o Pátio Guedala |
+- 856,857,858 pedem 😊 em clique de botão; os três foram **bloqueados por `sem_texto`**. Bom bloqueio, embora o prompt pudesse evitar pedido inútil.
+- 859,884,920,932: ❤️ **aplicado**, com `acao=silencio`, `motivo=agradecimento_final`, resposta vazia. Dois em12/10 e dois em13/10. Sem reação aplicada a reclamação no recorte.
+- O obrigado com coração fecha o fluxo sem outro balão e não recebeu reclamação textual posterior diretamente atribuível à reação. **Não há evidência suficiente para afirmar satisfação**. É coerente com a direção de não agradecer de volta indefinidamente.
+- Não há amostra clara de elogio sem reação que permita medir “oportunidades perdidas”. Pedidos fechados vieram de botão: reagir ao clique é deliberadamente vedado pelo código. Não relaxar essa trava apenas para elevar número de reações.
+- Os quatro silêncios explícitos são adequados ao agradecimento final. 849,895,897–899,909 são ignorados, não silêncios do Skyone. 895 é reclamação após transferência: não emitir resposta paralela do bot é compatível com handoff, mas exige acompanhamento humano; a pausa não garante que uma pessoa respondeu.
+- 873 devolveu `encerrar/pedido_feito`; os quatro agradecimentos com `silencio` não fazem isso. Resultado: termina linguisticamente, mas permanece aberto operacionalmente (ENC1).
 
-Outros pontos do fluxo:
-- **Busca repetida antes de adicionar:** em 856, 870, 879, 917 e 923 o agente buscou de novo o item que acabara de mostrar numa lista. Não é erro (e protege contra id errado), mas custa um ciclo do modelo.
-- **`info_unidades` antes de resumir e de fechar** (858, 872, 883, 918, 927): os dados já estão no pacote.
-- **Ordem das perguntas varia:** às vezes modalidade → horário → itens (902–915), às vezes itens → modalidade → horário (923–926). O segundo é o natural.
+### 2.3 Botões, listas e transferências
 
-## 1.6 Transferências, silêncios e guardas
+Foram registradas **41 saídas em forma botao e nove em lista**, nenhuma com forma texto nos metadados de menu. Todos os IDs persistidos do retorno satisfazem `[a-z0-9_]{1,40}`; não há lista persistida com mais de dez opções. Isso descreve o retorno normalizado: um retorno bruto invalidado antes de persistir não pode ser reconstituído. Texto numerado no histórico pode ser a representação canônica (`botoes.numerado`), não prova de fallback visual no WhatsApp.
 
-| Tipo | Quantos | Avaliação |
-|---|---|---|
-| Transferências | 3 (894, 905, 908) | **Nenhuma legítima.** A 894 nasceu de um id errado; 905 e 908 não tentaram nada. As duas últimas pausaram a conversa e exigiram devolução manual |
-| Silêncios | 4 (859, 884, 920, 932) | Todos corretos (`agradecimento_final`) |
-| Silêncio que faltou | 5 (874, 880, 886, 896 e o descartado 885) | Mensagens de conversa pessoal no final 7046 receberam resposta |
-| Encerramentos | 1 (873, `pedido_feito`) | Correto; reaberto pela mensagem seguinte |
-| Guarda de anúncio falso | 0 atuações | Não houve anúncio falso no período |
-| Guarda de transferência sem recusa | 0 atuações | Entrou no ar às 13:54 de 13/10, depois das transferências 905 e 908, que ela teria refeito |
+853/868/890 limitam categorias a dez e deixam outras em texto (890) ou pouco descobríveis;915 já oferece “Ver mais categorias”. 916 deixa “Ver mais” como décima opção. Títulos como “Entradas frias e carpacc” prejudicam compreensão: usar título curto natural e descrição, respeitando limites. Menus de unidades em saudação não são sempre necessários;905 não deve ter menu de pedido depois de transferência.
 
-**Conversa pessoal no final 7046 (gravidade alta).** O número do WhatsApp é usado também para conversa pessoal e esse contato está na lista do piloto. Em cinco turnos o contato mandou recados e links que não eram para o restaurante; o agente respondeu a todos, tratou palavras da mensagem como o nome do cliente e, nas cinco vezes, ofereceu remontar um carrinho expirado ("você tinha 1 Edamame…"). Só parou quando alguém respondeu pelo próprio celular e a conversa pausou. Causas: lista do piloto (cadastro) e prompt (não há regra de silêncio para mensagem fora do assunto sem pedido em andamento, nem limite para oferecer carrinho antigo).
+Código atual: `skyone.interacao` compara o ID da mensagem de origem com saídas posteriores e marca `atual=false`; no mesmo lote, cliques contraditórios sobre o mesmo menu deixam só a última escolha. O gateway não executa pedido diretamente pelo ID do botão. **Não há pacote histórico persistido para provar, neste retrato, o valor `atual` passado em cada clique**. Não houve lote do recorte com dois cliques, portanto a regra de cliques contraditórios não foi exercitada por estes turnos. Sem ensaio controlado ou rastreio completo, não declarar antigas/contraditórias aprovadas. Propor teste de aceitação específico, sem executá-lo nesta análise.
 
-## 1.7 Tempo
+Transferências emitidas:894 (há recusa422, motivo legítimo do ponto de vista do gateway, embora induzida por ID errado),905 e908 (sem recusa na janela: não justificadas como falha atual de Skill). **Guardas persistidas: zero `anuncio_falso`, zero `transferencia_sem_recusa` nos86 turnos**. Não significa “não havia problema”:905/908 exemplificam necessidade da guarda. A implantação posterior não reescreve testes antigos.
 
-Tempo do Skyone e tempo total (da última mensagem do cliente até a resposta sair), só turnos respondidos:
+## 3. Tempos
 
-| Período | Turnos | Skyone mediana | Skyone 90% | Total mediana | Total 90% | Pior Skyone |
-|---|---|---|---|---|---|---|
-| 12/10 | 42 | 16,4 s | 24,1 s | 22,1 s | 31,0 s | 28,7 s |
-| 13/10 manhã | 26 | 23,4 s | 31,9 s | 29,0 s | 38,4 s | 47,1 s |
-| 13/10 depois das 13h | 6 | 21,9 s | 26,8 s | 25,8 s | 39,0 s | 28,0 s |
+Percentil90 com interpolação linear; segundos. Apenas **live, status ok**; excluídos mock, ignorados e tentativas refeitas da população principal. Silêncios permanecem: seus tempos medem processamento/reação, não entrega de texto. Os anexos mostram as tentativas excluídas individualmente.
 
-Mediana do Skyone por quantidade de Skills no turno:
+| Grupo | N | Agente mediana | Agente p90 | Total registrado mediana | Total p90 |
+|---|---:|---:|---:|---:|---:|
+| Todos live ok |74|19,777|28,497|24,712|35,106|
+| 12/10 local |42|16,443|24,131|22,078|30,966|
+| 13/10 antes de12h local |19|23,551|33,175|29,558|42,795|
+| 13/10 a partir de12h local |13|22,193|26,962|28,263|31,762|
+| Sem Skill registrada |30|16,855|22,955|22,941|29,570|
+| Uma Skill |33|22,277|31,370|27,359|39,718|
+| Duas Skills |10|22,363|24,634|27,159|29,031|
+| Três Skills |1|16,034|16,034|20,464|20,464|
 
-| Período | Sem Skill | 1 Skill | 2 Skills |
+A amostra de três Skills é um turno, não evidência de que três sejam mais rápidas. Complexidade do pedido, versão do prompt, rede e tamanho do contexto não estão controlados. **Não há base para atribuir a melhora da tarde à v6.7**: nenhum marcador dessa versão foi encontrado no turno ou nos documentos locais; todos os turnos têm perfil `e1`, que é outra versão. É necessário horário exato de publicação v6.7 e, idealmente, versão retornada pelo fluxo para a comparação pedida.
+
+| Skill (todas as chamadas do recorte, inclusive turno refeito/recusada) | N | Mediana ms | p90 ms | Soma ms |
+|---|---:|---:|---:|---:|
+| buscar_catalogo |18|22,5|44,1|1088|
+| definir_entrega |11|16|42|453|
+| adicionar_item |7|17|79,8|256|
+| info_unidades |12|14|30,2|205|
+| fechar_pedido |5|22|33|127|
+| consultar_pedido |4|29,5|33,5|104|
+| esvaziar_carrinho |2|33,5|37,1|67|
+| ver_carrinho |1|8|8|8|
+
+`buscar_catalogo` pesa mais em soma, com máximo710ms; `definir_entrega` máximo230ms. **O handler das Skills não explica os20–35s do turno**. Não recomendar otimização SQL como primeira resposta à latência: medir chamadas no Skyone, ida/volta das ferramentas, tokens e número de ciclos do modelo. Instrumentar `prompt_versao`, `request_id` nas Skills, tempo de espera da cota e recibos do canal, sem guardar credenciais nem corpo pessoal indiscriminadamente.
+
+## 4. Como o aviso de demora funciona hoje
+
+Fontes: `app/nucleo/pipeline.py` (`_responder_turno`, `_bot_falou_ha_pouco`, `parece_fechamento`, `digitando`), `app/nucleo/configuracao.py`, `app/canais/uazapi.py`.
+
+1. Depois de debounce/fila, checagem de permissão, eventual resposta fora do horário e montagem do pacote, inicia `consultar` e pede presença `composing`.
+2. Espera **`slow_notice_s`**, padrão/efetivo consultado20s. É contado desde o início da tarefa de consulta, não desde a primeira mensagem do cliente. Pode incluir espera de cota, não é detector de Skill.
+3. Se ainda não terminou, texto não vazio, lote não parece fechamento, não é tentativa refeita e o bot não falou recentemente, envia **`aviso_demora`**. Configurações herdadas; neste recorte o literal foi **“Só um instante, estou verificando.”**. Não há sorteio/variação.
+4. `aviso_demora_janela_s=120` suprime quando houve saída de bot não-reação nos últimos120s. A função usa `criado_em`; não valida intenção pendente nem saudação. Quanto maior a pausa do cliente, mais provável passar nessa condição.
+5. É parte0 do turno, com persistência/idempotência; não se repete em loop nem no turno refeito. Revalida permissão pelo caminho de envio. Se o aviso saiu, pede composing novamente porque envio interrompe presença.
+
+**Quatro avisos comprovados em mensagens**, todos final1513:
+
+| Turno / mensagem | Hora local do aviso | Entrada | Avaliação |
 |---|---|---|---|
-| 12/10 | 16,4 s (16 turnos) | 14,7 s (18) | 22,6 s (7) |
-| 13/10 manhã | 20,1 s (10) | 29,6 s (13) | 22,1 s (3) |
-| 13/10 depois das 13h | 19,0 s (4) | 26,8 s (2) | — |
+|900 /2549|13/10 11:26:21|Oi|Inadequado: saudação/retorno após longa ausência; nenhum pedido novo em curso confirmado|
+|918 /2601|13/10 11:51:58|Finalizar pedido|Contexto pertinente (resumo), mas texto atual genérico; pode ser substituído por presença|
+|921 /2611|13/10 12:00:45|Ola|Inadequado: saudação após agradecimento/conclusão|
+|928 /2639|13/10 13:59:54|Oi|Inadequado: retomada de contato|
 
-- **As Skills não pesam no gateway:** a mediana de execução de cada uma está entre 8 e 33 ms (uma única busca levou 710 ms). O que custa é cada ida e volta do modelo para decidir e ler a Skill.
-- **O piso é o problema:** um turno **sem Skill nenhuma** leva de 16 a 20 s. Um "Oi" leva 22 s (turnos 900, 921, 928). Isso é tamanho de prompt e de pacote, não Skill.
-- **Turno com uma Skill mais lento em 13/10:** `definir_entrega` (mediana de 23 s nos turnos em que foi a única) e `buscar_catalogo` (21 s). `info_unidades` sozinha: 10 s.
-- **O gateway soma de 2,5 a 6 s:** a espera para juntar mensagens (2,5 a 4,3 s) e o envio.
-- **Depois do prompt v6.7:** não sei quando ele entrou. Se foi antes das 13:59 de 13/10, há só 6 turnos com ele: mediana de 21,9 s, sem melhora clara. Amostra pequena demais para concluir.
-- **Turno refeito dobra a espera:** no 930 o cliente escreveu enquanto a resposta de 34 s era gerada; o total chegou a 48 s.
+**Presença existe e já é chamada**: `POST /message/presence`, corpo `{number,presence:"composing",delay:25000}`; `paused` cancela. Adaptador aceita1s–300s, pipeline limita a chamada externa a5s e ignora falha. Só send_mode live, canal uazapi ativo. Atualmente não há renovação periódica durante toda chamada longa; há início e nova presença após aviso. O código confirma suporte integrado, sem necessidade de nova chamada real ao provedor; não comprova exibição em cada aparelho do teste.
 
-**Correções:** prompt e pacote menores (o histórico leva até 20 turnos; ver Parte 4, que o limitaria ao atendimento atual); tirar chamadas de Skill que repetem o pacote; e, do lado do gateway, o indicador "digitando" contínuo (Parte 2) para a espera não parecer abandono.
+## 5. Proposta AVS1 — aviso contextual e presença
 
-## 1.8 Lista de problemas, por gravidade
+**Proposta, não contrato publicado. Um bloco gateway + ajuste pequeno de painel.**
 
-| # | Problema | Exemplo | Causa provável | Gravidade | Correção | Onde |
-|---|---|---|---|---|---|---|
-| 1 | Transfere sem tentar | 905, 908 | Prompt | Alta | Proibir transferência por `pedido_para_confirmar` sem recusa de Skill; guarda já ativa | Prompt (+ gateway, feito no HOR2) |
-| 2 | Responde a conversa pessoal e insiste em carrinho velho | 874–896 (7046) | Lista do piloto; prompt | Alta | Tirar o contato do piloto; regra de silêncio para fora do assunto; oferecer carrinho expirado no máximo uma vez | Cadastro; prompt |
-| 3 | Tempo de resposta (23 s de mediana, 47 s no pior) | 903, 929 | Prompt/pacote grandes; chamadas repetidas | Alta | Enxugar prompt; limitar histórico ao atendimento; "digitando" contínuo | Prompt; gateway (Partes 2 e 4) |
-| 4 | Id de item errado → "sem preço" → transferência | 894 | Prompt/modelo | Alta | `item_nao_buscado` (feito no DISP1) + prompt: buscar de novo, nunca transferir | Gateway (feito); prompt |
-| 5 | Unidade sem cardápio oferecida | 851, 889, 900–903 | Gateway e prompt | Alta | `tem_cardapio` e `proxima_abertura` (feitos); prompt precisa obedecer | Gateway (feito); prompt |
-| 6 | Retoma assunto de ontem | 904 ("as 10 Centolla") | Histórico longo no pacote | Média | Histórico só do atendimento atual | Gateway (Parte 4) |
-| 7 | Horário presumido | 902 | Prompt | Média | "O quanto antes" com unidade fechada = "assim que abrir, às 12h", com confirmação | Prompt |
-| 8 | Não pergunta quantidade | 856, 879, 917, 923 | Prompt (regra instável) | Média | Regra única e curta; botões `qtd_<N>_<item_id>` | Prompt |
-| 9 | "Só um instante, estou verificando" em saudação | 900, 921, 928 | Gateway (regra do aviso) + Skyone acima de 20 s | Média | Parte 2 | Gateway |
-| 10 | Conversa nunca termina | Após 859, 884, 920, 932 | Gateway (não há encerramento) | Média | Parte 4 | Gateway |
-| 11 | Perfil de teste publicado | "Sou o Marco, do teste1" | Perfil | Média | Republicar o perfil real | Painel |
-| 12 | Soa como robô (muleta, nome, emoji, travessão) | Manhã de 13/10 | Prompt e perfil | Média | Seção 1.2 | Prompt; perfil |
-| 13 | Resumo duplicado; "taxa" em retirada | 925, 926 | Prompt | Baixa | Resumo uma vez, depois de modalidade e horário | Prompt |
-| 14 | Expõe falha interna | 855 | Prompt | Baixa | Nunca dizer "não consegui adicionar automaticamente" | Prompt |
-| 15 | Chamadas de Skill inúteis | 851, 858 e as `info_unidades` | Prompt | Baixa | Tirar | Prompt |
-| 16 | Botão "Falar com atendente" no menu | 928–934 | Prompt | Baixa | Só oferecer quando o cliente pedir | Prompt |
-| 17 | Só 49 de 205 itens do Pátio Guedala têm descrição | Listas só com preço | Cadastro | Baixa | Preencher descrições (o painel já edita) | Cadastro |
+Preferir `presenca` como padrão: composing por25s, renovar a cada20s com limite absoluto do timeout; cancelar em silêncio, handoff, pausa, erro/cancelamento e fim do turno. Falha de presença nunca gera mensagem compensatória nem bloqueia atendimento.
 
-## 1.9 O que está funcionando bem
+Permitir modo `presenca_e_texto_contextual` para quem realmente quiser texto. Nunca enviar texto em primeira mensagem de atendimento, retomada, saudação isolada, assunto pessoal, opt-out, lote de encerramento, pausa ou transferência. Fora dessas situações, exigir **pendência estruturada anterior válida** (`busca`, `carrinho`, `confirmacao`) ou Skill iniciada no turno que demonstre busca/pedido. Não inferir “no meio de algo” apenas porque existe carrinho antigo. Se não for possível classificar com segurança antes da resposta, não enviar texto.
 
-- Número real do pedido em 5 de 5; nenhum anúncio falso.
-- Preços, itens, status e previsão sempre iguais às Skills.
-- Listas com 9 + "Ver mais", categorias na ordem do cardápio, descrição do item vinda do catálogo (nada inventado).
-- Silêncio com ❤️ no agradecimento final, inclusive depois do aviso de "pedido pronto" (932).
-- Junta mensagens picotadas numa resposta só (862, 865, 911, 930).
-- Reconhece carrinho devolvido por recusa da loja (875) e pergunta antes de recomeçar (906).
-- Respondeu certo sobre o feriado quando perguntado (866).
-- Depois de 13/10 11:40, só oferece a unidade com cardápio.
-- Trocou o nome do cliente quando ele se corrigiu (930).
-- Pausa correta quando um atendente responde pelo celular (897–899).
-
----
-
-# PARTE 2 — "Só um instante, estou verificando"
-
-## 2.1 Como funciona hoje (lido no código)
-
-| Aspecto | Hoje |
+| Campo proposto na configuração efetiva do agente | Proposta / validação |
 |---|---|
-| Gatilho | A consulta ao Skyone não terminou depois de `slow_notice_s` segundos. Nada a ver com o conteúdo da mensagem nem com o tempo de ausência do cliente |
-| Tempo | `slow_notice_s`: padrão **20 s**; o By Koji usa o padrão (configurável por agente, 0 a 300) |
-| Texto | `aviso_demora`: fixo, padrão **"Só um instante, estou verificando."**; configurável, um texto só, sem variação |
-| Quantas vezes | No máximo **1 por turno** |
-| Quando não sai | (a) turno refeito; (b) o lote parece só agradecimento ("obrigado", "ok", 👍); (c) o bot enviou qualquer mensagem nessa conversa nos últimos `aviso_demora_janela_s` (padrão 120 s); (d) texto vazio |
-| "Digitando…" | **Já existe e já é usado:** com envio real em canal uazapi, o gateway chama `POST /message/presence` (`composing`) quando a consulta começa, por **25 s**, e de novo depois do aviso. A uazapi aceita até 5 minutos por pedido e cancela ao enviar mensagem |
+| `aviso_espera_modo` | `off`, `presenca`, `presenca_e_texto_contextual`; padrão presenca |
+| `slow_notice_s` | Reusar campo existente; sugestão25s, sem trocar agora; limite atual0–300; modo off explícito evita interpretar0 como desligado |
+| `aviso_demora_janela_s` | Reusar janela atual120s; teto já existente3600 |
+| `aviso_espera_textos` | 2–5 textos curtos opcionais; padrão por contexto, até160 caracteres, sem promessa de prazo |
 
-Por que aparece justamente no "oi" depois de um tempo: a regra (c) protege o meio da conversa (o bot falou há menos de 2 minutos), mas quem volta depois de uma pausa está sempre fora dessa janela. Como hoje até um "Oi" leva 22 s no Skyone, o aviso sai.
+Exemplos: busca “Já te trago as opções 😊”; pedido “Só mais um pouquinho, estou conferindo seu pedido.” Evitar “verificando” e falsa afirmação de ação: só usar a variante de pedido quando esse contexto estiver provado. Rodízio por atendimento, sem repetir o último texto. Uma parte0 por turno, compartilhando a mesma idempotência existente.
 
-## 2.2 Levantamento desde 12/10
+Pacote proposto: `atendimento` (seção7) + `pendencia_atual`; não pedir ao Skyone uma chamada extra para classificar aviso. Tarefa agendada de presença é efêmera, com token de execução e cancelamento; aviso textual continua durável/único. Evento `atendimento.aviso_espera` com modo/contexto/turno e motivo de supressão, sem corpo pessoal obrigatório.
 
-**4 vezes, todas em 13/10.** Em 12/10 nenhuma, porque o Skyone ficava abaixo de 20 s.
+Decisões: **recomendo presença sem texto como padrão**,25s apenas para modo textual, e classificador conservador que possa suprimir demais em vez de interromper uma saudação. Aceitação: 900/921/928 nunca recebem aviso textual;918 pode; falha/queda/reprocessamento não duplica parte0 nem mantém composing indefinidamente.
 
-| Turno | Hora | Mensagem | Ausência antes | Skyone | Situação |
-|---|---|---|---|---|---|
-| 900 | 11:26 | "Oi" | 14 h | 22,9 s | Saudação, conversa retomada |
-| 918 | 11:51 | toque "Finalizar pedido" | 6 min | 27,7 s | Meio do pedido |
-| 921 | 12:00 | "Ola" | 6 min | 22,7 s | Saudação |
-| 928 | 13:59 | "Oi" | 1 h 53 | 22,2 s | Saudação |
+## 6. Proposta FUP1 — follow-up gerado pelo agente
 
-3 das 4 em saudação. O "digitando" cobre só os primeiros 25 s: nos turnos de 30 a 47 s ele some antes de a resposta chegar. **Não tenho registro de alguém ter confirmado, no celular, que o "digitando…" aparece**; o código chama a uazapi e ela responde sem erro, mas a confirmação visual precisa ser sua.
+**Dois blocos gateway: FUP1-a estado/agendamento/cancelamento; FUP1-b geração/envio/métricas. Painel depois dos contratos fechados. Desligado por padrão.** ENC1-a (identidade do atendimento) deve vir antes: telefone/conversation_id sozinho não identifica qual atendimento está pendente.
 
-## 2.3 Proposta (bloco DEM1, pequeno)
+### Elegibilidade e cancelamento
 
-1. **"Digitando…" contínuo.** Um pedido só, com a duração do limite de tempo do agente (hoje 60 s), em vez de 25 s. Cancela sozinho quando a resposta sai; é retirado em silêncio e transferência sem texto.
-2. **Mensagem só no meio de algo.** O aviso em texto sai apenas se **todas** valerem:
-   - passou `aviso_demora_s` (proposta: **30 s**);
-   - a conversa está "em andamento": o bot falou nos últimos `aviso_demora_andamento_min` (proposta: 10) **e** há carrinho aberto com itens ou a última mensagem do bot foi pergunta ou opções;
-   - o lote não é saudação ("oi", "olá", "bom dia", "boa tarde", "opa", só emoji) nem agradecimento;
-   - não é o primeiro turno de um atendimento novo ou retomado (liga com a Parte 4);
-   - ainda não saiu aviso nesta conversa nos últimos 5 minutos.
-3. **Textos variados.** Lista configurável (até 6); o gateway sorteia sem repetir o último usado na conversa. Padrão proposto, sem "verificando":
-   - "Já te respondo 😊"
-   - "Só mais um instantinho"
-   - "Estou vendo aqui pra você"
-   - "Um momento, por favor"
-4. **Modo configurável por agente:** `desligado` (só "digitando"), `em_andamento` (regra acima; proposta de padrão) ou `sempre` (como hoje).
+Só agendar após resposta **enviada com sucesso**, última mensagem efetiva de texto do agente, sem entrada posterior, e pendência estruturada aceita pelo gateway: pergunta de pedido, carrinho ou resumo aguardando confirmação. Reação não arma nem renova timer. `acao=nenhuma` ou terminar com “?” não bastam. O agente sugere pendência; gateway rejeita se pedido já fechou, atendimento encerrou/transferiu, equipe assumiu, cliente pediu para parar, assunto pessoal ou silêncio. Consultar status e carrinho atuais sob trava; não usar texto do histórico como fonte do total.
 
-**Campos novos (comportamentos versionados, grupo `mensagens`):** `aviso_demora_modo`, `aviso_demora_s` (substitui `slow_notice_s`, que continua aceito), `aviso_demora_textos` (lista; `aviso_demora` continua aceito como texto único), `aviso_demora_andamento_min`. No pacote nada muda. Métrica nova: avisos enviados por modo e turnos acima do limite.
+Qualquer entrada do cliente cancela a sequência, inclusive áudio/anexo/clique, antes de classificar o conteúdo. Pedido fechado/cancelado, transferência, pausa por humano, encerramento, agente/tenant/canal inativo, mudança que desliga FUP e opt-out cancelam trabalhos pendentes. Não retomar automaticamente FUP cancelado quando uma pausa expirar. Uma **nova pergunta elegível enviada** pode iniciar nova sequência, limitada por atendimento e por contato/dia para evitar abuso.
 
-**Decisões:**
+### Contrato proposto
 
-| # | Decisão | Proposta |
-|---|---|---|
-| D1 | Modo padrão | `em_andamento`. Alternativa: `desligado`, só com "digitando" |
-| D2 | Tempo | 30 s (o Skyone tem mediana de 23 s; com 20 s o aviso sairia em metade dos turnos elegíveis) |
-| D3 | Textos | Os 4 acima, editáveis no painel |
-| D4 | "Digitando" pela duração inteira do turno | Sim. Preciso que você confirme no celular que ele aparece |
+Configuração via caminhos administrativos existentes de atendimento/configuração do tenant/agente (ampliar allowlist/versionamento; **campos abaixo não existem ainda**), retornada também em `configuracao_efetiva` com origem:
 
----
+| Campo | Padrão proposto / regra |
+|---|---|
+| `follow_up_ativo` | false |
+| `follow_up_escopo` | `pedido_em_andamento` (padrão) ou `pergunta_pendente` |
+| `follow_up_maximo` |1; permitir0–2 (0 desliga) |
+| `follow_up_primeiro_min` |15, inteiro5–1440 |
+| `follow_up_segundo_min` |30, intervalo após **envio confirmado do primeiro**, inteiro5–1440; só se máximo2 |
+| `follow_up_janela` | grade semanal; sugestão09:00–20:00 todos os dias, explicitamente no fuso da unidade; se sem unidade, fuso da empresa |
+| `follow_up_fora_unidade` | `cancelar` (padrão) ou `adiar_abertura`; adiar no máximo24h e revalidar tudo |
+| `follow_up_limite_dia` |2 por contato/tenant, somando agentes; plataforma pode reduzir |
 
-# PARTE 3 — Follow-up quando o cliente para de responder (FUP1)
+Janela efetiva é **interseção** da janela FUP com horário da unidade, exceções/pausa/ativo. `sem_horario`: não presumir aberta; padrão não envia, registra suspensão para revisão. Sem unidade em pergunta geral: janela da empresa explicitamente configurada. Não deslocar um follow-up indefinidamente; idade máxima da pendência24h. Se fechou, recomendo cancelar em vez de mensagem “a loja fechou”; a opção de adiamento atende operação que queira retorno na abertura. Agendamento futuro não autoriza mensagem na madrugada.
 
-Hoje não existe nada disso em execução. O modelo de agente tem um campo `followups_padrao` desde o início, que nunca foi usado.
-
-## 3.1 Quando agenda
-
-Ao concluir um turno, o gateway agenda o 1º follow-up se **todas** valerem:
-
-- o turno foi respondido e a resposta saiu;
-- a ação foi `nenhuma` (nunca depois de `silencio`, `encerrar`, `transferir_humano`, `pedido_fechado` ou `notificar_equipe`);
-- nenhum pedido foi fechado nesse turno;
-- há **pendência**, conforme o escopo configurado:
-  - `pedido`: carrinho aberto com itens (inclui resumo aguardando confirmação);
-  - `qualquer_pergunta`: o anterior, ou a resposta terminou com pergunta ou opções;
-- a conversa não está pausada nem aguardando atendente;
-- o contato não pediu para parar (3.5);
-- follow-up ligado para o agente e a conversa dentro do piloto, se houver.
-
-Tipo de pendência gravado: `confirmacao` (resumo enviado), `carrinho` (itens no carrinho, sem resumo) ou `pergunta`.
-
-## 3.2 Quando envia
-
-- **Tempos:** 1º após `followup_1_min` (proposta 15); 2º, opcional, `followup_2_min` depois do 1º (proposta 60; 0 = não há). Máximo `followup_max` (proposta 2; teto 3).
-- **Na hora de enviar, confere de novo**, sob a trava da conversa: cliente não escreveu, pendência continua (carrinho ainda aberto e com itens), sem pausa, sem pedido fechado, sem opt-out. Se algo mudou, cancela.
-- **Janela de horário:** `followup_janela` (proposta 09:00–22:00, fuso da empresa). Fora dela, não envia.
-- **Loja fechada:** conforme `followup_loja_fechada`:
-  - `nao_enviar` (proposta): cancela;
-  - `enviar_adaptado`: envia, e o pacote diz que a unidade fechou, para o agente adaptar ("seu pedido ficou guardado; abrimos amanhã às 12h").
-- **Limite por conversa:** no máximo `followup_max` por atendimento e 3 por dia.
-- **Só dentro de 24 h** da última mensagem do cliente.
-
-## 3.3 Conteúdo: gerado pelo agente
-
-O gateway cria um turno de sistema, como já faz com `tarefa: "notificar"`, com `tarefa: "follow_up"`. O pacote é o de sempre (carrinho, unidades, calendário, histórico) mais:
+Retorno novo do agente em turno normal:
 
 ```json
-"tarefa": "follow_up",
-"follow_up": {
-  "sequencia": 1, "maximo": 2,
-  "minutos_sem_resposta": 15,
-  "pendente": "confirmacao",
-  "ultima_mensagem_do_agente": "Resumo do pedido: 2 Baterá Shake — R$ 116. Retirada no Pátio Guedala. Confirmar o pedido?",
-  "unidade_aberta": true,
-  "ultimo": false
-}
+{"pendencia":{"tipo":"confirmar_pedido","pergunta":"Confirma este resumo?","aguarda_cliente":true}}
 ```
 
-- **O agente devolve** `resposta` (um balão curto, com botões se quiser) e `acao: "nenhuma"`; ou `acao: "silencio"` com `motivo: "follow_up_desnecessario"` para não mandar nada.
-- **O gateway recusa** nesse turno: `fechar_pedido`, `adicionar_item`, `esvaziar_carrinho` e `transferir_humano` (follow-up não age pelo cliente). Skills de consulta são permitidas.
-- **Sem aviso de demora e sem refazer** nesse turno.
-- Se o Skyone falhar, **não envia nada** (não usa a mensagem de falha) e cancela.
+Tipos fechados propostos: `escolher_item`, `quantidade`, `entrega`, `confirmar_pedido`, `pergunta_geral`; string curta, não instrução executável. Gateway atribui `pendencia_id`, versão e ligação ao atendimento/última saída. Não permitir que o modelo invente carrinho ou defina o horário do disparo.
 
-## 3.4 O que cancela
-
-Qualquer mensagem do cliente; pedido fechado; transferência; pausa por atendente (inclusive resposta pelo celular); encerramento; carrinho esvaziado ou expirado; opt-out; agente saindo do modo de envio real; follow-up desligado. Cada cancelamento grava o motivo.
-
-## 3.5 Opt-out
-
-- **Como é detectado:** pelo agente (campo novo no Retorno, `parar_followup: true`, quando o cliente pede para não receber mais mensagens) e por uma rede de proteção do gateway para frases diretas ("pare", "parar", "não quero mais mensagens", "não me mande mais", "sair").
-- **Efeito:** grava no contato `sem_followup` (com data e origem). Vale só para follow-up: avisos do pedido que o cliente fez (confirmado, pronto) continuam saindo.
-- **Reversão:** pelo painel, ou se o cliente pedir para voltar a receber.
-
-## 3.6 Configuração (o que o [PAINEL] precisa)
-
-Comportamentos versionados do atendimento (rascunho → publicar, como os demais), grupo novo `followup`:
-
-| Campo | Tipo | Padrão proposto |
-|---|---|---|
-| `followup` | `on` / `off` | `off` na plataforma; ligado por agente |
-| `followup_escopo` | `pedido` / `qualquer_pergunta` | `pedido` |
-| `followup_1_min` | 5 a 720 | 15 |
-| `followup_2_min` | 0 a 1440 (0 = sem 2º) | 60 |
-| `followup_max` | 1 a 3 | 2 |
-| `followup_janela` | `{"inicio": "09:00", "fim": "22:00"}` | 09:00–22:00 |
-| `followup_loja_fechada` | `nao_enviar` / `enviar_adaptado` | `nao_enviar` |
-
-Rotas novas na API admin:
-- `GET /tenants/{t}/followups?conversation_id=&status=&desde=` — lista (agendado, enviado, cancelado com motivo, respondido);
-- `POST /tenants/{t}/conversas/{id}/followup/cancelar` — cancela o que está agendado;
-- no detalhe da conversa: `proximo_followup` (quando e qual);
-- no contato: `sem_followup` (ler e alterar).
-
-**Tarefas agendadas:** tabela `followups` (conversa, sequência, pendência, `agendado_para`, status, motivo, turno gerado, respondido em, pedido recuperado); o agendador que já existe envia os vencidos a cada ciclo.
-
-## 3.7 Métricas
-
-`followups`: agendados, enviados (por sequência), cancelados (por motivo), **respondidos** (cliente escreveu em até 2 h depois do envio), **pedidos recuperados** (pedido fechado no mesmo atendimento depois de um follow-up enviado), opt-outs, e taxa de recuperação.
-
-## 3.8 Decisões
-
-| # | Decisão | Proposta |
-|---|---|---|
-| F1 | Escopo padrão | `pedido` (carrinho com itens). `qualquer_pergunta` fica disponível, desligado |
-| F2 | Tempos e máximo | 15 min, depois 60 min; máximo 2 |
-| F3 | Loja fechada | Não enviar. Alternativa: enviar adaptado |
-| F4 | Janela de horário | 09:00–22:00, além do horário da unidade |
-| F5 | Skills no turno de follow-up | Só consulta; o gateway recusa as que mudam carrinho ou pedido |
-| F6 | Opt-out | Vale só para follow-up; avisos do próprio pedido continuam |
-| F7 | Como o opt-out é detectado | Campo do agente + frases diretas no gateway |
-| F8 | Depois do último follow-up sem resposta | O atendimento encerra por inatividade (Parte 4) |
-
-**Dependências:** o prompt do Skyone precisa tratar `tarefa: "follow_up"`; a noção de "atendimento" da Parte 4 simplifica o limite e as métricas.
-
----
-
-# PARTE 4 — Encerramento do atendimento (ENC1)
-
-## 4.1 Como é hoje
-
-- **`acao: "encerrar"`:** grava `encerrada_em` e o `desfecho` na conversa, e dispara o evento `conversa.encerrada`. Aconteceu 1 vez no período (turno 873).
-- **Qualquer mensagem nova do cliente reabre** a mesma conversa: `encerrada_em` e `desfecho` são apagados (auditoria `conversa.reaberta`). Não fica registro de que houve um atendimento anterior, além da auditoria.
-- **Pedido fechado + "obrigado":** o agente silencia e a conversa fica **aberta para sempre**. Aconteceu 4 vezes.
-- **Inatividade:** não existe encerramento. A única regra automática é a de conversa "vazia" (o cliente só mandou anexo que o gateway não lê): encerra depois de 30 minutos.
-- **Estado atual do By Koji:** 120 conversas, 10 encerradas (todas "vazia"), 110 "abertas".
-- **Efeitos:**
-  - o histórico enviado ao agente (até 20 turnos) atravessa dias, e o agente retoma assunto velho (turno 904, "as 10 Centolla");
-  - `retomada: true` só depois de 12 horas; entre 10 minutos e 12 horas o agente não sabe que é uma volta;
-  - o carrinho só expira (6 h) quando o cliente volta a escrever;
-  - o painel não distingue quem está sendo atendido de quem falou na semana passada.
-
-## 4.2 Proposta: o atendimento como unidade
-
-A conversa continua sendo o fio com o contato. Dentro dela, cada **atendimento** tem começo e fim.
-
-Tabela nova `atendimentos`: conversa, agente, `iniciado_em`, `encerrado_em`, `motivo` (`concluido`, `inatividade`, `transferido`, `vazia`), `desfecho` (o do agente), pedidos fechados, turnos, follow-ups, primeira resposta em. A conversa aponta o atendimento atual.
-
-### Encerramento por conclusão (`concluido`)
-
-- O agente devolve `acao: "encerrar"` → encerra na hora (como hoje).
-- **Pedido fechado e o cliente agradece** (silêncio com `agradecimento_final`) → encerra na hora.
-- Pedido fechado e ninguém fala mais → encerra depois de `encerrar_apos_pedido_min` (proposta 10).
-- Não manda mensagem (o agente já respondeu ou reagiu).
-- Os avisos do pedido (confirmado, pronto) continuam saindo depois do encerramento e **não** abrem atendimento.
-
-### Encerramento por inatividade (`inatividade`)
-
-- A última mensagem foi do agente, o cliente não respondeu e passou: `encerrar_inatividade_min` depois do último follow-up (proposta 30), ou, sem follow-up, `encerrar_inatividade_min` depois da última mensagem (proposta 60).
-- **Despedida:** proposta de **não mandar** por padrão (com follow-up, o cliente já recebeu até dois lembretes; mais uma mensagem é insistência). Campo opcional `encerrar_mensagem` para quem quiser um texto curto.
-- **Carrinho:** fica guardado como hoje, até `carrinho_expira_h` (6 h). Na volta, o pacote informa o carrinho guardado ou `carrinho_expirado`, como já faz.
-- O relógio não corre enquanto a conversa está pausada ou aguardando atendente.
-
-### Encerramento por transferência (`transferido`)
-
-- O atendimento do agente termina quando a conversa é transferida ou um atendente assume. O que acontece depois é atendimento humano.
-- Quando a conversa volta ao bot e o cliente escreve, começa um atendimento novo.
-
-### Retorno do cliente
-
-Mensagem do cliente com a conversa sem atendimento aberto → **atendimento novo**. O pacote passa a dizer:
+Pacote de geração:
 
 ```json
-"atendimento": {
-  "novo": true,
-  "numero": 4,
-  "anterior": {"encerrado_em": "2026-10-13T12:06:10-03:00", "motivo": "concluido", "desfecho": "pedido_feito",
-               "ha": "há 1 hora e 53 minutos",
-               "ultimo_pedido": {"numero": "17450", "status": "em_preparo"}}
-}
+{"tarefa":"follow_up","request_id":"UUID-estavel-da-tentativa","session_id":"mesmo-UUID",
+ "atendimento":{"id":"...","novo":false},
+ "follow_up":{"numero":1,"maximo":2,"pendencia_id":"...","tipo":"confirmar_pedido",
+ "ultima_pergunta":"...","ultima_saida_em":"ISO","tempo_sem_resposta_s":900},
+ "historico":[],"contexto_modulos":{"pedidos":{"carrinho":"snapshot atual"}},
+ "unidades":"situação atual","perfil_atendimento":"perfil publicado"}
 ```
 
-- `novo: true` só no primeiro turno do atendimento; nos seguintes, `false`. `anterior` é `null` no primeiro contato.
-- **Histórico:** o pacote leva só as mensagens do atendimento atual. Do anterior vai apenas o resumo acima. É isso que impede "retomar assunto velho" e também encurta o pacote (tempo).
-- **Sem aviso de demora** no primeiro turno de um atendimento (Parte 2).
-- **Carrinho guardado:** continua em `contexto_modulos.pedidos.carrinho`; o prompt decide se oferece (uma vez, e só se a mensagem do cliente for sobre pedido).
+Usar histórico real limitado, IDs tenant/agente/conversa e calendário como no turno normal; os valores ilustrativos acima não são payload pronto. Instrução: uma pergunta curta baseada no que ficou pendente, sem fechar pedido nem prometer estoque/preço antigo. Skills de **consulta somente**; bloquear alterações de carrinho/pedido nesta tarefa por capacidade/token restrito ligado ao request, não só prompt. Permitir `silencio` com motivo e cancelar tentativa. Desabilitar botões que confirmem compra sem nova manifestação do cliente; sem transferência automática causada por follow-up. Falha Skyone: não enviar fallback ao cliente, registrar falha e parar sequência, sem insistência automática.
 
-### Como conversa com o que já existe
+### Execução durável, opt-out e métricas
 
-| Existente | Com o ENC1 |
-|---|---|
-| `encerrada_em` / `desfecho` da conversa | Passam a espelhar o último atendimento; continuam no painel |
-| `retomada` (12 h) | Continua existindo; passa a ser `true` sempre que `atendimento.novo` |
-| `tempo_desde_ultima` | Inalterado |
-| `carrinho_expirado` / `itens_expirados` | Inalterados |
-| Pausa por atendente, aguardando atendente | Encerram o atendimento do agente como `transferido`; relógio de inatividade parado |
-| Equipe fora do horário (transferência sem pausa) | O atendimento segue aberto, porque o bot continua atendendo |
-| Conversa "vazia" (30 min) | Vira um motivo de encerramento do atendimento |
-| Follow-up (Parte 3) | Limite e métricas por atendimento; inatividade conta a partir do último |
-| Evento `conversa.encerrada` | Continua, agora com `motivo` |
+Registro persistente proposto `follow_up_tarefas`: tenant/atendimento/conversa/agente, pendência/versão, ordinal, `previsto_em`, estado (`agendado`, `gerando`, `pronto`, `enviando`, `enviado`, `cancelado`, `falhou`, `incerto`), motivo, request_id e parte de envio. Unicidade `(tenant,atendimento,pendencia,ordinal)`. Redis só índice reconstruível. Scheduler usa fila existente; última checagem sob trava **antes da chamada e imediatamente antes de enviar**, comparando última entrada/versão/pausa/pedido. Entrada durante geração cancela envio. Queda após envio incerto não repete automaticamente: mesmo tratamento de entrega incerta existente. Segundo timer nasce só após envio confirmado; reconciliação não cria sequência duplicada.
 
-### Painel e métricas
+Opt-out em contato/tenant (persiste entre atendimentos e agentes), com data/origem/evidência mínima. Expressão inequívoca “não quero mais mensagens” suspende FUP imediatamente; “pare” isolado também suspende proativamente, embora bot possa esclarecer o atendimento solicitado. “Não quero mais esse item” não é opt-out global. Nenhuma resposta futura revoga silenciosamente opt-out; reativação só por pedido explícito ou ação administrativa auditada. Diferenciar consentimento para follow-up de aviso transacional do pedido. Membro pode registrar opt-out; reativar/configurar só admin/plataforma, X-Actor/X-Role da sessão no painel.
 
-- **Estado da conversa:** `em_atendimento`, `aguardando_cliente` (o agente falou por último), `aguardando_atendente`, `com_atendente`, `encerrada` (com motivo e desfecho).
-- **Rotas:** `GET /tenants/{t}/atendimentos` (filtros por motivo, período, com pedido), `GET /conversas/{id}` com a lista de atendimentos, `POST /conversas/{id}/encerrar` (manual, com motivo).
-- **Configuração** (versionada, grupo `encerramento`): `encerrar_apos_pedido_min` (10), `encerrar_inatividade_min` (60; 30 depois de follow-up), `encerrar_mensagem` (vazio), `historico_do_atendimento` (`on`).
-- **Métricas:** atendimentos por motivo (conclusão × inatividade × transferência), duração média e mediana, turnos por atendimento, tempo até a primeira resposta, atendimentos com pedido, pedidos por atendimento.
+API proposta: leitura de FUP agendados no detalhe da conversa; `POST …/conversas/{id}/follow-ups/cancelar` com motivo; preferências do contato em contrato próprio (não inventar campos na rota atual sem fechar). Eventos `follow_up.agendado/enviado/cancelado/falhou/respondido`; métricas por período/agente e modo mock/live, sem texto pessoal. Respondido = primeira entrada após envio dentro de24h; recuperado = pedido fechado no mesmo atendimento após resposta ao FUP, dentro de24h, uma contagem por pedido; é atribuição operacional, **não causalidade comprovada**. Separar custo, opt-outs, entrega incerta e conversão espontânea.
 
-## 4.3 Decisões
+Decisões recomendadas: máximo técnico2, padrão1; segundo após30min do primeiro; pedido_em_andamento por padrão; sem despedida/fallback diante de falha; cancelamento no fechamento da loja; opt-out por contato/tenant. Testar com relógio controlado, corrida entrada×envio, queda worker/Redis, idempotência, troca de agente/tenant, horário de verão e nenhum disparo fora da janela.
 
-| # | Decisão | Proposta |
-|---|---|---|
-| E1 | Despedida no encerramento por inatividade | Não mandar por padrão; texto opcional configurável |
-| E2 | Tempo de inatividade | 60 min sem follow-up; 30 min depois do último follow-up |
-| E3 | Pedido fechado + agradecimento encerra na hora | Sim; sem agradecimento, depois de 10 min |
-| E4 | Histórico só do atendimento atual | Sim, com o resumo do anterior. Alternativa: manter os últimos 4 turnos do anterior |
-| E5 | Resposta do cliente a um aviso de pedido ("obrigado" depois de "pedido pronto") | Abre atendimento novo normalmente; o pacote traz `anterior.ultimo_pedido`, e o agente silencia com ❤️ como hoje |
+## 7. Proposta ENC1 — começo e fim do atendimento
 
----
+### O que existe
 
-# Tamanho e ordem sugerida
+`encerrar_conversa` grava `encerrada_em` e `desfecho` uma única vez; nova mensagem do cliente zera ambos e audita reabertura. Ação `encerrar` chama essa função; fechamento de pedido + agradecimento em `silencio` **não** encerra por essa regra. Há limpeza de conversas **vazias**, padrão30min, para contatos só com conteúdo que o gateway não processa; não é timeout geral de atendimento. Foram cinco eventos `conversa.encerrada` de limpeza no recorte; não somar isso automaticamente à açãoencerrar do873: caminhos de auditoria/evento são diferentes.
 
-| Bloco | Conteúdo | Tamanho | Depende de |
-|---|---|---|---|
-| DEM1 | Aviso de demora novo e "digitando" contínuo | Pequeno (1 bloco) | Confirmar o "digitando" no celular |
-| ENC1-a | Atendimentos, encerramento por conclusão, inatividade e transferência, campo `atendimento` e histórico por atendimento | Médio (1 bloco, com migração) | Prompt ler `atendimento` |
-| ENC1-b | Rotas do painel, estados e métricas | Pequeno a médio (1 bloco) | ENC1-a |
-| FUP1-a | Agendamento, cancelamento, `tarefa: follow_up`, opt-out, configuração | Médio a grande (1 bloco, com migração) | ENC1-a; prompt tratar `follow_up` |
-| FUP1-b | Rotas do painel e métricas de recuperação | Pequeno (1 bloco) | FUP1-a |
+`retomada` usa intervalo superior a12h; não equivale a atendimento encerrado. `tempo_desde_ultima` já informa intervalo, mas sem identidade de sessão. Carrinho expira depois do limite configurado (padrão6h), conferido na próxima mensagem; não é job que dispara FUP. Histórico por conversa continua atravessando reaberturas. Isso explica o risco de retomar assunto velho, embora cada caso dependa do pacote.
 
-Ordem sugerida: **DEM1 → ENC1-a → FUP1-a → ENC1-b e FUP1-b**. O ENC1-a vem antes do follow-up porque define o que é "pendente" e o que é "fim", e porque o histórico por atendimento ataca o tempo de resposta, que é o problema mais sentido hoje.
+### Modelo proposto e contrato
 
-Nada disto foi implementado.
+**ENC1-a: atendimento identificado + fechamento/reabertura; ENC1-b: inatividade e métricas, integrado ao FUP.** Preservar `conversation_id` para canal/contato; criar `atendimento_id` distinto, sequência e trilha imutável. Estados `aberto`, `aguardando_cliente`, `em_atendimento_humano`, `encerrado`; `motivo_encerramento=concluido|inatividade|transferido|vazio|manual`. Transferência termina sessão do **bot**, não abandona atendimento humano: registrar handoff e separar tempo do bot/tempo humano. Reabertura não apaga encerramento anterior.
 
----
+- Conclusão: `acao=encerrar` com desfecho coerente e sem pendência; ou pedido fechado + agradecimento final + ausência de outro carrinho/pergunta. **Fechar pedido sozinho não encerra obrigatoriamente**: cliente pode acompanhar/alterar dúvida. Confirmação/recusa da loja é evento transacional, não reinício automático do atendimento.
+- Inatividade: prazo desde última pergunta elegível enviada; padrão60min sem FUP. Com FUP, prazo desde último follow-up enviado (sugestão30min) e nunca antes de esgotar/cancelar a sequência. Se cliente está aguardando resposta do bot/Skill/humano, não encerrar como “cliente inativo”. Pausa humana fica fora do timer de bot.
+- Despedida: **padrão nenhuma** por inatividade; pode optar por texto curto, uma vez, só dentro da janela e sem opt-out. Nunca chamar Skyone só para dizer tchau. Para conclusão, aproveitar texto/reação existente, não adicionar balão extra.
+- Carrinho: guardar até TTL existente, sem renovar por FUP/despedida. Encerramento não fecha pedido, não reserva estoque, não apaga itens automaticamente. Guardar carrinho expirado como referência limitada, sem reativá-lo automaticamente. Ao voltar, reconsultar preços/disponibilidade e pedir escolha explícita se contexto for pertinente.
 
-# Apêndice A — Linha do tempo turno a turno
+Configuração proposta por agente, herdável/versionada: `encerramento_ativo=true`, `encerramento_inatividade_min=60` (5–1440), `encerramento_apos_follow_up_min=30` (5–1440), `encerramento_despedida_inatividade=false`, `encerramento_texto` opcional até160 caracteres. Reusar `carrinho_expira_h`; não criar TTL concorrente. Valores iniciais são proposta, não alteração autorizada.
 
-Horário de São Paulo. "Skyone" é o tempo do agente; "Total" vai da última mensagem do cliente até a resposta sair. Respostas longas foram cortadas em 150 caracteres. Antes de 12/10 19:20 o gateway só registrava as Skills que mudam carrinho ou pedido. O conteúdo das mensagens pessoais do final 7046 foi omitido, e os nomes de terceiros, trocados por marcação.
+Pacote em nova sessão:
 
-### Conversa de final 7046 — 12/10
+```json
+{"atendimento":{"id":"novo-id","novo":true,"motivo_inicio":"retorno_apos_encerramento",
+ "anterior":{"motivo":"inatividade","encerrado_em":"ISO","ha_segundos":3600}},
+ "atendimento_novo":true,
+ "carrinho_guardado":{"existe":true,"expirado":false,"oferecer":false}}
+```
 
-| Turno | Hora | Cliente | Resposta do agente | Retorno | Botões | Skills | Skyone (s) | Total (s) |
-|---|---|---|---|---|---|---|---|---|
-| 849 | 16:19 | (conversa pessoal: link de loja ou recado; conteúdo omitido) | — (ignorado: conversa pausada) | — | — | — | — | 4,3 |
-| 874 | 20:45 | (conversa pessoal: link de loja ou recado; conteúdo omitido) | "Boa noite, <nome tirado da mensagem> 😊" / "Vi que você tinha começado um pedido com 1 Edamame no seu carrinho mais cedo. Quer que eu monte de novo ou começar do zero?" | acao nenhuma | botões (2): Montar de novo, Começar do zero | — | 15,0 | 19,9 |
-| 880 | 20:58 | (conversa pessoal: link de loja ou recado; conteúdo omitido) | "Oi, <nome tirado da mensagem> 😊" / "Vi que você tinha começado um pedido com 1 Edamame no seu carrinho mais cedo. Quer que eu monte de novo ou começar do zero?" | acao nenhuma | botões (2): Montar de novo, Começar do zero | — | 17,3 | 23,5 |
-| 885 | 21:04 | (conversa pessoal: link de loja ou recado; conteúdo omitido) | (descartada, turno refeito) "Perfeito, <nome tirado da mensagem> 😊" / "Vi que você tinha começado um pedido com 1 Edamame no seu carrinho mais cedo. Quer que eu monte de novo ou começar do zero?" | acao nenhuma | botões (2): Montar de novo, Começar do zero | — | 17,4 | 21,7 |
-| 886 | 21:05 | (conversa pessoal: link de loja ou recado; conteúdo omitido) | "Boa noite, <nome tirado da mensagem> 😊" / "Vi que você tinha começado um pedido com 1 Edamame. Quer que eu monte de novo ou começar do zero?" | acao nenhuma | botões (2): Montar de novo, Começar do zero | — | 18,3 | 37,5 |
-| 896 | 22:34 | (conversa pessoal: link de loja ou recado; conteúdo omitido) | "Oi <nome>, vi o link do sofá — massa! 😊 Eu aqui cuido só dos pedidos e não consigo ajudar com compras de móveis." / "Voltando ao seu pedido: vi que você tinha 1 Edamame no carrinho que expirou. Quer que eu monte de novo ou começar do zero?" | acao nenhuma | botões (2): Montar de novo, Começar do zero | — | 17,2 | 20,2 |
-| 897 | 22:43 | (conversa pessoal: link de loja ou recado; conteúdo omitido) | — (ignorado: conversa pausada) | — | — | — | — | 4,8 |
-| 898 | 22:53 | (conversa pessoal: link de loja ou recado; conteúdo omitido) | — (ignorado: conversa pausada) | — | — | — | — | 5,3 |
-| 899 | 23:14 | (conversa pessoal: link de loja ou recado; conteúdo omitido) | — (ignorado: conversa pausada) | — | — | — | — | 4,4 |
+`atendimento_novo` vale no primeiro turno efetivamente entregue da sessão, e é persistido para não perder na retomada do worker. `retomada`/`tempo_desde_ultima` continuam por compatibilidade, mas não decidem abertura. Instrução: saudação natural, perguntar necessidade atual; histórico antigo vai em resumo explicitamente histórico, não como pergunta pendente. Oferta de carrinho só após intenção de pedir/continuar e revalidação. Não oferecer carrinho em link pessoal nem em “oi” automaticamente. `acoes_recentes` deve distinguir atendimento anterior para não considerar Skill antiga como consentimento novo.
 
-### Conversa de final 1513 — 12/10
+API admin proposta: lista/detalhe de conversas com `atendimento_id`, estado, início, encerramento, motivo e próxima tarefa; rota histórica `GET …/conversas/{id}/atendimentos?cursor=`. Ações explícitas `encerrar` e `reabrir` por admin/membro da própria empresa, sem permitir corpo alterar actor/tenant. Publicar contratos e escopos antes do painel. Mantêm-se assumir/devolver e pausa; assumir cancela FUP, devolver não o rearma sem nova saída elegível. Configuração só admin/plataforma.
 
-| Turno | Hora | Cliente | Resposta do agente | Retorno | Botões | Skills | Skyone (s) | Total (s) |
-|---|---|---|---|---|---|---|---|---|
-| 851 | 19:44 | "Oi" | "Oi! Sou o Marco, do teste1 😊" / "De qual unidade você quer pedir?" | acao nenhuma | botões (3): Einstein, Vila Nova Conceição, Pátio Guedala | esvaziar_carrinho → ok | 13,3 | 19,7 |
-| 852 | 19:44 | toque: "Pátio Guedala" | "Você escolheu o Pátio Guedala, que está aberto agora e fecha às 22h hoje." / "Quer começar escolhendo o que gostaria de pedir?" | acao nenhuma | — | info_unidades → ok | 10,0 | 14,2 |
-| 853 | 19:45 | "O que vocês tem ?" | "Temos várias categorias no Pátio Guedala:" / "Almoço executivo, Bebidas sem álcool, Cervejas, Coquetéis autorais e mais. Qual categoria você quer ver?" | acao nenhuma | lista (10): Almoço executivo, Bebidas sem álcool, Cervejas, Coquetéis autorais, Coquetéis clássicos, Degustação e combina… | buscar_catalogo → ok | 12,8 | 17,7 |
-| 854 | 19:45 | toque: "Almoço executivo" | "Na categoria Almoço Executivo temos: Almoço executivo (1 entrada + 1 prato principal + 1 sobremesa) por R$ 124; válido de segunda a sexta, exceto fer…" / "Quer adicionar esse almoço ao seu pedido?" | acao nenhuma | botões (2): Sim, Não | buscar_catalogo → ok | 11,7 | 16,0 |
-| 855 | 19:46 | toque: "Sim" | "Parece que não consegui adicionar o Almoço Executivo automaticamente, mas já encontrei para você: é 1 entrada + 1 prato principal + 1 sobremesa, por …" / "Quer que eu coloque esse Almoço Executivo no seu pedido?" | acao nenhuma | botões (2): Sim, Não | adicionar_item → item_inexistente, buscar_catalogo → ok | 12,6 | 16,8 |
-| 856 | 19:47 | toque: "Sim" | "Adicionei 1 Almoço Executivo no seu pedido, que inclui 1 entrada, 1 prato principal e 1 sobremesa por R$ 124." / "Vai ser entrega ou retirada?" | acao nenhuma; reação 😊 (bloqueada: sem_texto) | botões (2): Entrega, Retirada | buscar_catalogo → ok, adicionar_item → ok | 11,7 | 16,5 |
-| 857 | 19:47 | toque: "Retirada" | "Anotei retirada para o seu Almoço Executivo no Pátio Guedala." / "Posso mostrar o resumo do pedido para você confirmar?" | acao nenhuma; reação 😊 (bloqueada: sem_texto) | botões (3): Confirmar pedido, Alterar pedido, Cancelar | definir_entrega → ok | 11,3 | 16,1 |
-| 858 | 19:47 | toque: "Confirmar pedido" | "Seu pedido número 99781 está registrado e a unidade Pátio Guedala vai conferir. Você receberá todas as atualizações por aqui 😊" / "Se precisar de algo mais, estou à disposição!" | acao nenhuma; reação 😊 (bloqueada: sem_texto) | — | info_unidades → ok, definir_entrega → ok, fechar_pedido → ok | 16,0 | 20,5 |
-| 859 | 19:48 | "Obrigado" | — (nada enviado) | acao silencio; motivo agradecimento_final; reação ❤️ (aplicada) | — | — | 6,5 | 11,5 |
-| 860 | 20:01 | "Como está meu pedido ?" | "Seu pedido nº 99781 está sendo preparado na unidade Pátio Guedala e ficará pronto em cerca de 45 minutos." | acao nenhuma | — | consultar_pedido → ok | 12,0 | 16,3 |
-| 861 | 20:23 | "Oi" | (descartada, turno refeito) "Oi! Sou o Marco, do teste1 😊" / "Quer fazer um pedido? De qual unidade você quer, Einstein, Vila Nova Conceição, Pátio Guedala ou Morumbi?" | acao nenhuma | lista (4): Einstein, Vila Nova Conceição, Pátio Guedala, Morumbi | info_unidades → ok, ver_carrinho → ok | 12,8 | 17,0 |
-| 862 | 20:23 | "Oi" + "Vocês abrem" + "Hoje ?" | "Oi! Sou o Marco, da teste1 😊" / "Hoje, sim, temos unidades abertas: Einstein até às 22h, Vila Nova Conceição até às 22h30, e Pátio Guedala até às 22h." | acao nenhuma | — | info_unidades → ok | 9,2 | 21,3 |
-| 863 | 20:30 | "Oi" | "Oi! Quer pedir algo ou gostaria de saber mais sobre nosso cardápio?" | acao nenhuma | — | — | 8,1 | 9,6 |
-| 864 | 20:30 | "Vocês" | (descartada, turno refeito) "Quer ver nosso cardápio? De qual unidade você quer pedir?" / "Temos Einstein, Vila Nova Conceição e Pátio Guedala abertos agora." | acao nenhuma | botões (3): Einstein, Vila Nova Conceição, Pátio Guedala | buscar_catalogo → campo:unidade | 8,9 | 13,8 |
-| 865 | 20:31 | "Vocês" + "Abrem hoje ?" | "Sim, hoje estamos abertos! As unidades Einstein, Vila Nova Conceição e Pátio Guedala funcionam até às 22h, 22h30 e 22h, respectivamente." / "Quer pedir de qual dessas unidades?" | acao nenhuma | botões (3): Einstein, Vila Nova Conceição, Pátio Guedala | info_unidades → ok | 9,1 | 19,6 |
-| 866 | 20:31 | "Mas hoje seria feriado ou não ?" | "Sim, hoje é feriado: Nossa Senhora Aparecida, dia 12 de outubro." / "Mesmo assim, as unidades Einstein, Vila Nova Conceição e Pátio Guedala estão abertas até o final da noite." | acao nenhuma | — | info_unidades → ok | 10,3 | 12,0 |
-| 867 | 20:34 | "Me envia o cardápio completo com os valores por favor" | "Posso sim! Me diz de qual unidade você quer o cardápio com preços 😊" / "De qual delas?" | acao nenhuma | botões (3): Einstein, Vila Nova Conceição, Pátio Guedala | — | 15,7 | 20,0 |
-| 868 | 20:35 | toque: "Pátio Guedala" | "Perfeito! Aqui estão as categorias do cardápio do Pátio Guedala 😊" / "Qual categoria você quer ver?" | acao nenhuma | lista (10): Almoço executivo, Bebidas sem álcool, Cervejas, Coquetéis autorais, Coquetéis clássicos, Degustação e combina… | buscar_catalogo → ok | 26,8 | 31,2 |
-| 869 | 20:36 | toque: "Almoço executivo" | "Achei 1 opção em Almoço executivo no Pátio Guedala 😊" / "Almoço executivo — R$ 124 · 1 entrada + 1 prato principal + 1 sobremesa (segunda a sexta, exceto feriados). Quer adicionar ao pedido?" | acao nenhuma | lista (1): Almoço executivo | buscar_catalogo → ok | 19,4 | 23,8 |
-| 870 | 20:36 | toque: "Almoço executivo" | "Anotei 1 Almoço executivo no seu pedido 😊" / "Vai ser entrega ou retirada?" | acao nenhuma | botões (2): Entrega, Retirada | buscar_catalogo → ok, adicionar_item → ok | 20,1 | 24,5 |
-| 871 | 20:37 | toque: "Retirada" | "Resumo do pedido: 1x Almoço executivo — R$ 124. Retirada na unidade Pátio Guedala." / "Quer confirmar o pedido? 😊" | acao nenhuma | botões (3): Confirmar pedido, Alterar pedido, Cancelar | definir_entrega → ok | 20,4 | 24,8 |
-| 872 | 20:37 | toque: "Confirmar pedido" | "Prontinho! Seu pedido é o nº 12873 — total R$ 124 😊" / "A unidade Pátio Guedala vai conferir e te avisar por aqui. Quer mais alguma coisa?" | acao nenhuma | — | info_unidades → ok, fechar_pedido → ok | 22,6 | 26,8 |
-| 873 | 20:38 | "Apenas isso mesmo obrigado" | "Que bom! 😊" / "Obrigado — até a próxima. teste" | acao encerrar; desfecho pedido_feito | — | — | 16,5 | 22,8 |
-| 875 | 20:54 | "Oi" | "Boa noite! 😊 Vi que seus itens continuam no carrinho: 1x Almoço executivo para retirada no Pátio Guedala." / "Quer confirmar o pedido, alterar algo ou cancelar?" | acao nenhuma | botões (3): Confirmar pedido, Alterar pedido, Cancelar | — | 16,4 | 22,8 |
-| 876 | 20:55 | toque: "Alterar pedido" | "Beleza — vamos alterar seu pedido 😊" / "O que você quer mudar no pedido? Você pode pedir pra adicionar ou remover itens, trocar de unidade/retirada ou alterar o horário." | acao nenhuma | — | — | 20,3 | 24,7 |
-| 877 | 20:55 | "Me envia o cardápio" | "Aqui está o cardápio do Pátio Guedala 😊" / "Voltando ao seu pedido: 1x Almoço executivo para retirada no Pátio Guedala. O que você quer alterar no pedido?" | acao nenhuma | lista (9): Almoço executivo, Bebidas sem álcool, Cervejas, Coquetéis autorais, Coquetéis clássicos, Degustação e combina… | buscar_catalogo → ok | 28,7 | 34,5 |
-| 878 | 20:56 | toque: "Entradas quentes" | "Voltando ao seu pedido: 1x Almoço executivo para retirada no Pátio Guedala." / "Aqui estão as entradas quentes — qual você quer adicionar? 😊" | acao nenhuma | lista (10): Ebitem Spicy, Edamame, Guioza Tradicional, Guioza Vegetariano, Kimpira Gobo, Nasu no Missô, Nira to Ika Itame… | buscar_catalogo → ok | 23,0 | 27,4 |
-| 879 | 20:57 | toque: "Shiitake Batayaki" | "Prontinho — adicionei Shiitake Batayaki ao seu pedido 😊" / "Quer adicionar mais itens ou finalizar o pedido?" | acao nenhuma | botões (2): Adicionar mais itens, Finalizar pedido | buscar_catalogo → ok, adicionar_item → ok | 24,2 | 28,9 |
-| 881 | 20:58 | toque: "Finalizar pedido" | "Perfeito — só falta o horário para finalizar o pedido 🙂" / "Quer para o quanto antes ou prefere escolher um horário?" | acao nenhuma | botões (2): O quanto antes, Escolher horário | — | 22,1 | 26,2 |
-| 882 | 20:58 | toque: "O quanto antes" | "Perfeito — aqui está o resumo do seu pedido 😊" / "1x Almoço executivo R$124 · 1x Shiitake Batayaki R$61. Total R$185. Retirada — O quanto antes. Confirmar pedido, alterar ou cancelar?" | acao nenhuma | botões (3): Confirmar pedido, Alterar pedido, Cancelar | definir_entrega → ok | 22,2 | 26,8 |
-| 883 | 20:59 | toque: "Confirmar pedido" | "Pronto — seu pedido é o nº 48806 😊" / "Pátio Guedala vai conferir e te atualiza por aqui." | acao nenhuma | — | info_unidades → ok, fechar_pedido → ok | 23,2 | 27,5 |
-| 884 | 20:59 | "Obrigado" | — (nada enviado) | acao silencio; motivo agradecimento_final; reação ❤️ (aplicada) | — | — | 13,9 | 32,0 |
-| 887 | 21:21 | "Oi" | "Oi! Qual é o seu nome para eu te chamar? 😊" / "Quer ver o cardápio, acompanhar um pedido ou pedir algo agora?" | acao nenhuma | botões (3): Ver cardápio, Acompanhar pedido, Fazer pedido | — | 18,9 | 24,8 |
-| 888 | 21:21 | "Marco" | "Prazer, Marco! 😊" / "Quer ver o cardápio, acompanhar um pedido ou pedir algo agora?" | acao nenhuma | botões (3): Ver cardápio, Acompanhar pedido, Fazer pedido | — | 12,5 | 18,1 |
-| 889 | 21:22 | toque: "Ver cardápio" | "Ótimo! 🍽️" / "De qual unidade você quer ver o cardápio?" | acao nenhuma | botões (3): Einstein, Vila Nova Conceição, Pátio Guedala | — | 22,3 | 26,6 |
-| 890 | 21:22 | toque: "Pátio Guedala" | "Ótimo — aqui estão as categorias do Pátio Guedala 🍣" / "Também temos: Makizushi e Baterá, Pratos quentes, Sakês importados — garrafas, Sashimis — 3 fatias, Sobremesas, Sushis — 1 unidade, Temakis — cone e …" | acao nenhuma | lista (10): Almoço executivo, Bebidas sem álcool, Cervejas, Coquetéis autorais, Coquetéis clássicos, Degustação e combina… | info_unidades → ok, buscar_catalogo → ok | 24,8 | 29,0 |
-| 891 | 21:23 | toque: "Kaizen — porções" | "Ótima escolha, Marco! Aqui estão os itens de Kaizen — porções 🍣" / "Qual você quer?" | acao nenhuma | lista (5): Centolla, Hotategai, Ika, Ikura, Uni | buscar_catalogo → ok | 17,1 | 21,3 |
-| 892 | 21:24 | toque: "Centolla" | "Centolla — R$ 198." / "Quantos você vai querer?" | acao nenhuma | botões (3): 1, 2, Outra quantidade | buscar_catalogo → ok | 16,1 | 20,5 |
-| 893 | 21:24 | toque: "Outra quantidade" | "Beleza, Marco! Quantas Centolla você quer?" | acao nenhuma | — | — | 10,7 | 14,2 |
-| 894 | 21:25 | "10" | "Certo — 10 Centolla. Preciso confirmar um detalhe com a equipe: esse item não tem preço cadastrado aqui 😊." / "Vou transferir para a equipe confirmar; eles continuam o atendimento por aqui em instantes." | acao transferir_humano; motivo pedido_para_confirmar | — | adicionar_item → sem_preco | 28,1 | 33,7 |
-| 895 | 21:26 | "Você mandou o preço de R$ 198 como não tem o preço cadastrado ?" | — (ignorado: conversa pausada) | — | — | — | — | 2,8 |
+Tarefa `encerrar_inatividade`: guarda última entrada/saída e versão de atendimento; revalida sob trava; adia se lote/entrega em andamento; única por atendimento/versão. Fora do horário pode marcar encerrado sem mandar texto. Equipe fora do horário conserva solicitação/handoff, não converte automaticamente para FUP de venda. Mensagem do cliente concorrente sempre invalida timer antigo antes de abrir sessão nova.
 
-### Conversa de final 1513 — 13/10
+Métricas: atendimentos iniciados/encerrados por motivo, duração mediana/p90/média (início→fim), tempo de bot, espera de cliente e espera de humano separados; abertos são censurados, não entram como duração zero. Transferência é handoff, não “pedido recuperado” nem resolução do atendimento global. Carrinho preservado e acompanhamento de pedido não devem duplicar contagem de pedidos.
 
-| Turno | Hora | Cliente | Resposta do agente | Retorno | Botões | Skills | Skyone (s) | Total (s) |
-|---|---|---|---|---|---|---|---|---|
-| 900 | 11:26 | "Oi" | "Bom dia, Marco! 😊 Nenhuma unidade está aberta agora — a próxima abertura é da Einstein às 11:30." / "Quer que eu agende seu pedido para depois da abertura ou prefere escolher outra unidade?" | acao nenhuma; aviso de demora enviado | botões (2): Agendar, Outra unidade | — | 22,9 | 29,7 |
-| 901 | 11:27 | toque: "Agendar" | "Perfeito — vou agendar para depois da abertura da Einstein, que é às 11:30 😊" / "Qual horário você prefere?" | acao nenhuma | botões (2): O quanto antes, Escolher horário | — | 17,5 | 22,4 |
-| 902 | 11:28 | toque: "O quanto antes" | "Combinado, Marco — agendei para hoje às 11:30 na Einstein 😊" / "Vai ser entrega ou retirada?" | acao nenhuma | botões (2): Entrega, Retirada | definir_entrega → ok | 30,3 | 35,4 |
-| 903 | 11:28 | toque: "Retirada" | "Marco, a Einstein ainda não recebe pedidos por aqui 😊" / "Quer que eu mude seu pedido para Pátio Guedala (que tem cardápio)?" | acao nenhuma | botões (2): Sim, Outra unidade | definir_entrega → ok | 47,1 | 51,7 |
-| 904 | 11:30 | toque: "Sim" | "Beleza, Marco — mudei seu pedido para Pátio Guedala; continua retirada para hoje às 11:30 😊" / "Quer que eu tente incluir as 10 Centolla de novo ou prefere ver o cardápio?" | acao nenhuma | botões (2): Incluir Centolla, Ver cardápio | definir_entrega → ok | 31,1 | 35,9 |
-| 905 | 11:30 | toque: "Incluir Centolla" | "Marco, desculpe — não consegui incluir as Centolla no seu pedido. Vou chamar a equipe para confirmar e eles continuam o atendimento por aqui em insta…" / "A equipe vai continuar o atendimento e confirmar a inclusão da Centolla no seu pedido." | acao transferir_humano; motivo pedido_para_confirmar | — | — | 23,6 | 28,1 |
-| 906 | 11:32 | "Quero fazer um novo pedido" | "Certo, Marco 😊" / "Quer começar um pedido novo do zero ou continuar com o pedido agendado para hoje às 11:30 no Pátio Guedala?" | acao nenhuma | botões (2): Continuar, Começar do zero | — | 23,2 | 29,6 |
-| 907 | 11:32 | toque: "Começar do zero" | "Beleza, Marco — começamos do zero 😊" / "Quer ver o cardápio do Pátio Guedala ou prefere me dizer o que quer pedir?" | acao nenhuma | botões (2): Ver cardápio, Dizer o que quero | esvaziar_carrinho → ok | 36,2 | 40,6 |
-| 908 | 11:33 | toque: "Ver cardápio" | "Marco, desculpe — vou transferir para a equipe confirmar o cardápio e eles continuam o atendimento por aqui em instantes 🙏" | acao transferir_humano; motivo pedido_para_confirmar | — | — | 25,3 | 28,9 |
-| 909 | 11:39 | "Ola" | — (ignorado: conversa pausada) | — | — | — | — | 4,3 |
-| 910 | 11:40 | "Ola" | (descartada, turno refeito) "Bom dia, Marco! 😊" / "Quer ver o cardápio do Pátio Guedala ou prefere me dizer o que quer pedir?" | acao nenhuma | botões (2): Ver cardápio, Dizer o que quero | — | 18,2 | 22,5 |
-| 911 | 11:40 | "Ola" + "Quero fazer um pedido" | "Bom dia, Marco! O Pátio Guedala está fechado agora — volta a abrir hoje ao meio‑dia. 😊" / "Quer agendar para depois da abertura ou prefere pedir de outra unidade?" | acao nenhuma | botões (2): Agendar, Outra unidade | info_unidades → ok | 32,4 | 51,8 |
-| 912 | 11:41 | toque: "Agendar" | "Perfeito, Marco — vou agendar para o Pátio Guedala (abre hoje ao meio‑dia) 😊" / "Qual horário você quer para o agendamento?" | acao nenhuma | — | — | 14,9 | 17,4 |
-| 913 | 11:41 | "13:00" | "Perfeito, Marco — agendei para hoje às 13h no Pátio Guedala 😊" / "Vai ser entrega ou retirada?" | acao nenhuma | botões (2): Entrega, Retirada | definir_entrega → ok | 22,3 | 28,6 |
-| 914 | 11:42 | toque: "Retirada" | "Combinado — retirada hoje às 13h no Pátio Guedala 😊" / "Quer ver o cardápio ou prefere me dizer o que quer pedir?" | acao nenhuma | botões (2): Ver cardápio, Dizer o que quero | definir_entrega → ok | 22,2 | 26,6 |
-| 915 | 11:43 | toque: "Ver cardápio" | "Perfeito, Marco — aqui estão as categorias do cardápio do Pátio Guedala 😊" / "Qual categoria você quer ver? Também temos: Pratos quentes, Sobremesas, Bebidas sem álcool, Cervejas, Coquetéis autorais, Coquetéis clássicos, Licore…" | acao nenhuma | lista (10): Almoço executivo, Entradas quentes, Entradas frias e carpacc, Degustação e combinados, Temakis — cone, Sashim… | buscar_catalogo → ok | 29,6 | 34,1 |
-| 916 | 11:44 | toque: "Temakis — cone" | "Perfeito, Marco — estes são os Temakis (cone) do Pátio Guedala 😊" / "Qual você quer?" | acao nenhuma | lista (10): Califórnia, Centolla, Ebi de Camarão, Ebitem, Hotate, Ikura, Maguro, Massagô, Shake, Ver mais | buscar_catalogo → ok | 31,4 | 36,3 |
-| 917 | 11:45 | toque: "Ebitem" | "Anotei 1 Ebitem no seu pedido, Marco 😊" / "Quer incluir mais algum item?" | acao nenhuma | botões (2): Adicionar mais itens, Finalizar pedido | buscar_catalogo → ok, adicionar_item → ok | 19,4 | 23,9 |
-| 918 | 11:51 | toque: "Finalizar pedido" | "Resumo do pedido: 1 Ebitem — R$ 45. Retirada hoje às 13h no Pátio Guedala. Total R$ 45." / "Confirmar o pedido, Marco? 😊" | acao nenhuma; aviso de demora enviado | botões (3): Confirmar pedido, Alterar pedido, Cancelar | info_unidades → ok | 27,7 | 32,1 |
-| 919 | 11:53 | toque: "Confirmar pedido" | "Perfeito, Marco — seu pedido é o nº 29695. A unidade Pátio Guedala vai conferir e você receberá as atualizações por aqui 😊" / "Quer que eu te ajude com mais alguma coisa?" | acao nenhuma | — | fechar_pedido → ok | 18,6 | 23,1 |
-| 920 | 11:53 | "Obrigado" | — (nada enviado) | acao silencio; motivo agradecimento_final; reação ❤️ (aplicada) | — | — | 10,4 | 15,2 |
-| 921 | 12:00 | "Ola" | "Boa tarde, Marco 😊" / "Como posso ajudar você agora?" | acao nenhuma; aviso de demora enviado | — | — | 22,7 | 29,3 |
-| 922 | 12:01 | "Quero fazer um pedido" | "Beleza, Marco — vamos pedir do Pátio Guedala 😊" / "O que você quer pedir?" | acao nenhuma | — | — | 12,8 | 18,6 |
-| 923 | 12:01 | "Ebiten" | "Anotei 1 Ebitem no seu pedido, Marco 😊" / "Quer incluir mais algum item?" | acao nenhuma | botões (2): Adicionar mais itens, Finalizar pedido | buscar_catalogo → ok, adicionar_item → ok | 22,1 | 29,1 |
-| 924 | 12:02 | toque: "Finalizar pedido" | "Certo, Marco — será entrega ou retirada? 😊" | acao nenhuma | botões (2): Entrega, Retirada | — | 12,4 | 16,5 |
-| 925 | 12:04 | toque: "Retirada" | "Perfeito, Marco — resumo do pedido: 1 Ebitem — R$ 45. Retirada no Pátio Guedala; horário ainda não definido." / "Quer que eu coloque para o quanto antes ou prefere escolher um horário?" | acao nenhuma | botões (2): O quanto antes, Escolher horário | definir_entrega → ok | 27,3 | 32,2 |
-| 926 | 12:05 | toque: "O quanto antes" | "Marco, resumo do pedido: 1 Ebitem — R$ 45. Retirada no Pátio Guedala; horário: O quanto antes." / "Total: R$ 45 (taxa a confirmar). Confirmar o pedido? 😊" | acao nenhuma | botões (3): Confirmar pedido, Alterar pedido, Cancelar | definir_entrega → ok | 23,8 | 28,3 |
-| 927 | 12:05 | toque: "Confirmar pedido" | "Marco, seu pedido é o nº 17450. A unidade vai conferir e você receberá as atualizações por aqui 😊" / "Quer que eu ajude com mais alguma coisa?" | acao nenhuma | — | info_unidades → ok, fechar_pedido → ok | 24,6 | 28,7 |
-| 928 | 13:59 | "Oi" | "Boa tarde, Marco 😊" / "O que você quer fazer agora?" | acao nenhuma; aviso de demora enviado | botões (3): Fazer pedido, Acompanhar pedido, Falar com atendente | — | 22,2 | 28,2 |
-| 929 | 14:00 | toque: "Acompanhar pedido" | (descartada, turno refeito) "Seu pedido nº 17450 está em preparo na unidade Pátio Guedala." / "Quer que eu fale com um atendente ou prefere voltar ao menu? 😊" | acao nenhuma | botões (2): Falar com atendente, Voltar ao menu | consultar_pedido → ok | 34,5 | 37,3 |
-| 930 | 14:00 | toque: "Acompanhar pedido" + "Meu nome é Carlos" | "Oi Carlos — seu pedido nº 17450 está sendo preparado no Pátio Guedala 😊" / "É 1 Ebitem para retirada (horário: O quanto antes). Quer que eu avise quando estiver pronto?" | acao nenhuma | — | consultar_pedido → ok | 28,0 | 48,1 |
-| 931 | 14:01 | "Me avise quando estiver pronto" | "Combinado, Carlos — eu te aviso por aqui assim que o pedido nº 17450 estiver pronto para retirada 😊" / "Quer mais alguma coisa?" | acao nenhuma | botões (2): Acompanhar pedido, Falar com atendente | — | 21,6 | 23,4 |
-| 932 | 14:03 | "Muito obrigado por avisar" | — (nada enviado) | acao silencio; motivo agradecimento_final; reação ❤️ (aplicada) | — | — | 14,1 | 18,9 |
-| 933 | 14:33 | "Oi" | "Boa tarde, Carlos 😊" / "O que você quer fazer agora?" | acao nenhuma | botões (3): Fazer pedido, Acompanhar pedido, Falar com atendente | — | 16,4 | 23,0 |
-| 934 | 14:33 | toque: "Acompanhar pedido" | "Seu pedido nº 17450 está pronto para retirada na unidade Pátio Guedala 🛍️" / "Quer que eu te avise quando houver alguma atualização?" | acao nenhuma | botões (2): Me avise, Falar com atendente | consultar_pedido → ok | 25,6 | 30,0 |
+## 8. Decisões e ordem recomendada
+
+1. Corrigir **perfil de teste** e confirmar horário de sábado do Einstein; são dados do painel, nenhuma alteração feita aqui.
+2. Aprovar prompt: quantidade explícita, um resumo final, unidade vendável, próximo passo único, silêncio em conversa pessoal e uso moderado de nome/bordões. Não afirmar que v6.7 já corrigiu sem versão/turnos identificados.
+3. AVS1: presença por padrão, texto contextual opcional, exclusão absoluta de saudação/novo atendimento. Um bloco.
+4. ENC1-a antes do FUP: identidade e ciclo do atendimento. Um bloco.
+5. FUP1-a e FUP1-b: dois blocos; ENC1-b fecha timers e métricas de inatividade. Cada etapa testada em simulação antes de habilitar por agente.
+6. Painel recebe campos e eventos **só após contrato fechado**. Mostrar prévia de próximo disparo/fuso, opt-out, motivo de cancelamento e estado humano; servidor verifica papéis. Não planejar relógio decisório no navegador.
+7. Instrumentação: versão de prompt e pacote, correlação das Skills e entrega do canal com retenção limitada. Para medir ganho v6.7, Marco informar versão/horário de publicação e repetir cenários comparáveis (não executado).
+
+**Ponto de parada:** análise concluída com as limitações indicadas; aguardar decisões. Nenhum comportamento ativado, nenhum teste com cliente e nenhuma publicação.
+
+## Anexo A — linha do tempo de todos os turnos
+Horários em America/Sao_Paulo. Resposta abaixo é o retorno **normalizado e persistido**, não o JSON bruto do Skyone. `refeito` não significa resposta enviada; consulte saídas. Skills associadas por conversa e janela agente_inicio–agente_fim; não existe request_id na tabela de Skills. As 60 chamadas do recorte se associaram a uma janela. Campo não registrado é “—”, nunca uma confirmação negativa. O tempo total é o registrado pelo gateway, não recibo no aparelho.
+
+### Conversa final 1513
+
+#### Turno 851 · 12/10 19:44:11 · ok / live
+- Cliente: m2380: Oi.
+- Resposta: Oi! Sou o Marco, do teste1 😊 ⟶ De qual unidade você quer pedir?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "einstein", "titulo": "Einstein"}, {"id": "vila_nova_conceicao", "titulo": "Vila Nova Conceição"}, {"id": "patio_guedala", "titulo": "Pátio Guedala"}], "titulo_lista": "Ver unidades"}.
+- Skills: #1 esvaziar_carrinho → HTTP 200/ok (29 ms), ref=—.
+- Saídas persistidas: m2381 parte 1 texto, enviada, 12/10 19:44:26; m2382 parte 2 texto, enviada, 12/10 19:44:27, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "einstein", "titulo": "Einstein"}, {"id": "vila_nova_conceicao", "titulo": "Vila Nova Conceição"}, {"id": "patio_guedala", "titulo": "Pátio Guedala"}]}.
+- Tempo do agente (proxy de Skyone): 13.275 s; total registrado: 19.684 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 852 · 12/10 19:44:32 · ok / live
+- Cliente: m2383: Pátio Guedala.
+- Resposta: Você escolheu o Pátio Guedala, que está aberto agora e fecha às 22h hoje. ⟶ Quer começar escolhendo o que gostaria de pedir?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: —.
+- Skills: #2 info_unidades → HTTP 200/ok (10 ms), ref=—.
+- Saídas persistidas: m2384 parte 1 texto, enviada, 12/10 19:44:43; m2385 parte 2 texto, enviada, 12/10 19:44:44.
+- Tempo do agente (proxy de Skyone): 9.960 s; total registrado: 14.169 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 853 · 12/10 19:45:20 · ok / live
+- Cliente: m2386: O que vocês tem ?.
+- Resposta: Temos várias categorias no Pátio Guedala: ⟶ Almoço executivo, Bebidas sem álcool, Cervejas, Coquetéis autorais e mais. Qual categoria você quer ver?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "almoco_executivo", "titulo": "Almoço executivo"}, {"id": "bebidas_sem_alcool", "titulo": "Bebidas sem álcool"}, {"id": "cervejas", "titulo": "Cervejas"}, {"id": "coqueteis_autorais", "titulo": "Coquetéis autorais"}, {"id": "coqueteis_classicos", "titulo": "Coquetéis clássicos"}, {"id": "degustacao_e_combinados", "titulo": "Degustação e combinados"}, {"id": "entradas_frias_e_carpaccios", "titulo": "Entradas frias e carpacc"}, {"id": "entradas_quentes", "titulo": "Entradas quentes"}, {"id": "kaizen_porcoes", "titulo": "Kaizen — porções"}, {"id": "licores_dose", "titulo": "Licores — dose"}], "titulo_lista": "Ver categorias"}.
+- Skills: #3 buscar_catalogo → HTTP 200/ok (10 ms), ref=—.
+- Saídas persistidas: m2387 parte 1 texto, enviada, 12/10 19:45:34; m2388 parte 2 texto, enviada, 12/10 19:45:35, menu={"forma": "lista", "motivo": null, "opcoes": [{"id": "almoco_executivo", "titulo": "Almoço executivo"}, {"id": "bebidas_sem_alcool", "titulo": "Bebidas sem álcool"}, {"id": "cervejas", "titulo": "Cervejas"}, {"id": "coqueteis_autorais", "titulo": "Coquetéis autorais"}, {"id": "coqueteis_classicos", "titulo": "Coquetéis clássicos"}, {"id": "degustacao_e_combinados", "titulo": "Degustação e combinados"}, {"id": "entradas_frias_e_carpaccios", "titulo": "Entradas frias e carpacc"}, {"id": "entradas_quentes", "titulo": "Entradas quentes"}, {"id": "kaizen_porcoes", "titulo": "Kaizen — porções"}, {"id": "licores_dose", "titulo": "Licores — dose"}]}.
+- Tempo do agente (proxy de Skyone): 12.776 s; total registrado: 17.689 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 854 · 12/10 19:45:54 · ok / live
+- Cliente: m2389: Almoço executivo.
+- Resposta: Na categoria Almoço Executivo temos: Almoço executivo (1 entrada + 1 prato principal + 1 sobremesa) por R$ 124; válido de segunda a sexta, exceto feriados. ⟶ Quer adicionar esse almoço ao seu pedido?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "sim", "titulo": "Sim"}, {"id": "nao", "titulo": "Não"}]}.
+- Skills: #4 buscar_catalogo → HTTP 200/ok (8 ms), ref=—.
+- Saídas persistidas: m2390 parte 1 texto, enviada, 12/10 19:46:06; m2391 parte 2 texto, enviada, 12/10 19:46:07, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "sim", "titulo": "Sim"}, {"id": "nao", "titulo": "Não"}]}.
+- Tempo do agente (proxy de Skyone): 11.703 s; total registrado: 16.048 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 855 · 12/10 19:46:18 · ok / live
+- Cliente: m2392: Sim.
+- Resposta: Parece que não consegui adicionar o Almoço Executivo automaticamente, mas já encontrei para você: é 1 entrada + 1 prato principal + 1 sobremesa, por R$ 124, válido de segunda a sexta, exceto feriados. ⟶ Quer que eu coloque esse Almoço Executivo no seu pedido?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "sim", "titulo": "Sim"}, {"id": "nao", "titulo": "Não"}]}.
+- Skills: #5 adicionar_item → HTTP 404/item_inexistente (15 ms), ref=—; #6 buscar_catalogo → HTTP 200/ok (22 ms), ref=—.
+- Saídas persistidas: m2393 parte 1 texto, enviada, 12/10 19:46:31; m2394 parte 2 texto, enviada, 12/10 19:46:32, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "sim", "titulo": "Sim"}, {"id": "nao", "titulo": "Não"}]}.
+- Tempo do agente (proxy de Skyone): 12.574 s; total registrado: 16.760 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 856 · 12/10 19:47:02 · ok / live
+- Cliente: m2395: Sim.
+- Resposta: Adicionei 1 Almoço Executivo no seu pedido, que inclui 1 entrada, 1 prato principal e 1 sobremesa por R$ 124. ⟶ Vai ser entrega ou retirada?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: {"emoji": "😊", "motivo": "sem_texto", "resultado": "bloqueada"}.
+- Botões solicitados: {"opcoes": [{"id": "entrega", "titulo": "Entrega"}, {"id": "retirada", "titulo": "Retirada"}]}.
+- Skills: #7 buscar_catalogo → HTTP 200/ok (22 ms), ref=—; #8 adicionar_item → HTTP 200/ok (15 ms), ref=—.
+- Saídas persistidas: m2396 parte 1 texto, enviada, 12/10 19:47:15; m2397 parte 2 texto, enviada, 12/10 19:47:16, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "entrega", "titulo": "Entrega"}, {"id": "retirada", "titulo": "Retirada"}]}.
+- Tempo do agente (proxy de Skyone): 11.701 s; total registrado: 16.474 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 857 · 12/10 19:47:25 · ok / live
+- Cliente: m2398: Retirada.
+- Resposta: Anotei retirada para o seu Almoço Executivo no Pátio Guedala. ⟶ Posso mostrar o resumo do pedido para você confirmar?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: {"emoji": "😊", "motivo": "sem_texto", "resultado": "bloqueada"}.
+- Botões solicitados: {"opcoes": [{"id": "confirmar_pedido", "titulo": "Confirmar pedido"}, {"id": "alterar_pedido", "titulo": "Alterar pedido"}, {"id": "cancelar", "titulo": "Cancelar"}]}.
+- Skills: #9 definir_entrega → HTTP 200/ok (16 ms), ref=—.
+- Saídas persistidas: m2399 parte 1 texto, enviada, 12/10 19:47:37; m2400 parte 2 texto, enviada, 12/10 19:47:38, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "confirmar_pedido", "titulo": "Confirmar pedido"}, {"id": "alterar_pedido", "titulo": "Alterar pedido"}, {"id": "cancelar", "titulo": "Cancelar"}]}.
+- Tempo do agente (proxy de Skyone): 11.336 s; total registrado: 16.055 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 858 · 12/10 19:47:45 · ok / live
+- Cliente: m2401: Confirmar pedido.
+- Resposta: Seu pedido número 99781 está registrado e a unidade Pátio Guedala vai conferir. Você receberá todas as atualizações por aqui 😊 ⟶ Se precisar de algo mais, estou à disposição!.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: {"emoji": "😊", "motivo": "sem_texto", "resultado": "bloqueada"}.
+- Botões solicitados: —.
+- Skills: #10 info_unidades → HTTP 200/ok (6 ms), ref=—; #11 definir_entrega → HTTP 200/ok (8 ms), ref=—; #12 fechar_pedido → HTTP 201/ok (19 ms), ref=—.
+- Saídas persistidas: m2402 parte 1 texto, enviada, 12/10 19:48:03; m2403 parte 2 texto, enviada, 12/10 19:48:03.
+- Tempo do agente (proxy de Skyone): 16.034 s; total registrado: 20.464 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 859 · 12/10 19:48:14 · ok / live
+- Cliente: m2404: Obrigado.
+- Resposta: Sem texto.
+- Ação: silencio; motivo: agradecimento_final; desfecho: —; reação: {"emoji": "❤️", "motivo": null, "resultado": "aplicada"}.
+- Botões solicitados: —.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: Nenhuma vinculada ao request_id.
+- Tempo do agente (proxy de Skyone): 6.472 s; total registrado: 11.523 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 860 · 12/10 20:01:12 · ok / live
+- Cliente: m2406: Como está meu pedido ?.
+- Resposta: Seu pedido nº 99781 está sendo preparado na unidade Pátio Guedala e ficará pronto em cerca de 45 minutos..
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: —.
+- Skills: #13 consultar_pedido → HTTP 200/ok (30 ms), ref=—.
+- Saídas persistidas: m2407 parte 1 texto, enviada, 12/10 20:01:25.
+- Tempo do agente (proxy de Skyone): 12.025 s; total registrado: 16.265 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 861 · 12/10 20:23:06 · refeito / live
+- Cliente: m2409: Oi.
+- Resposta: Oi! Sou o Marco, do teste1 😊 ⟶ Quer fazer um pedido? De qual unidade você quer, Einstein, Vila Nova Conceição, Pátio Guedala ou Morumbi?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "einstein", "titulo": "Einstein"}, {"id": "vila_nova_conceicao", "titulo": "Vila Nova Conceição"}, {"id": "patio_guedala", "titulo": "Pátio Guedala"}, {"id": "morumbi", "titulo": "Morumbi"}], "titulo_lista": "Ver unidades"}.
+- Skills: #14 info_unidades → HTTP 200/ok (47 ms), ref=—; #15 ver_carrinho → HTTP 200/ok (8 ms), ref=—.
+- Saídas persistidas: Nenhuma vinculada ao request_id.
+- Tempo do agente (proxy de Skyone): 12.792 s; total registrado: 17.028 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 862 · 12/10 20:23:18 · ok / live
+- Cliente: m2409: Oi / m2410: Vocês abrem / m2411: Hoje ?.
+- Resposta: Oi! Sou o Marco, da teste1 😊 ⟶ Hoje, sim, temos unidades abertas: Einstein até às 22h, Vila Nova Conceição até às 22h30, e Pátio Guedala até às 22h..
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: —.
+- Skills: #16 info_unidades → HTTP 200/ok (15 ms), ref=—.
+- Saídas persistidas: m2412 parte 1 texto, enviada, 12/10 20:23:29; m2413 parte 2 texto, enviada, 12/10 20:23:30.
+- Tempo do agente (proxy de Skyone): 9.235 s; total registrado: 21.293 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=861.
+
+#### Turno 863 · 12/10 20:30:40 · ok / live
+- Cliente: m2414: Oi.
+- Resposta: Oi! Quer pedir algo ou gostaria de saber mais sobre nosso cardápio?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: —.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2415 parte 1 texto, enviada, 12/10 20:30:49.
+- Tempo do agente (proxy de Skyone): 8.134 s; total registrado: 9.638 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 864 · 12/10 20:30:53 · refeito / live
+- Cliente: m2416: Vocês.
+- Resposta: Quer ver nosso cardápio? De qual unidade você quer pedir? ⟶ Temos Einstein, Vila Nova Conceição e Pátio Guedala abertos agora..
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "einstein", "titulo": "Einstein"}, {"id": "vila_nova_conceicao", "titulo": "Vila Nova Conceição"}, {"id": "patio_guedala", "titulo": "Pátio Guedala"}], "titulo_lista": "Ver unidades"}.
+- Skills: #17 buscar_catalogo → HTTP 400/campo:unidade (35 ms), ref=—.
+- Saídas persistidas: Nenhuma vinculada ao request_id.
+- Tempo do agente (proxy de Skyone): 8.865 s; total registrado: 13.837 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 865 · 12/10 20:31:02 · ok / live
+- Cliente: m2416: Vocês / m2417: Abrem hoje ?.
+- Resposta: Sim, hoje estamos abertos! As unidades Einstein, Vila Nova Conceição e Pátio Guedala funcionam até às 22h, 22h30 e 22h, respectivamente. ⟶ Quer pedir de qual dessas unidades?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "einstein", "titulo": "Einstein"}, {"id": "vila_nova_conceicao", "titulo": "Vila Nova Conceição"}, {"id": "patio_guedala", "titulo": "Pátio Guedala"}], "titulo_lista": "Ver unidades"}.
+- Skills: #18 info_unidades → HTTP 200/ok (23 ms), ref=—.
+- Saídas persistidas: m2418 parte 1 texto, enviada, 12/10 20:31:12; m2419 parte 2 texto, enviada, 12/10 20:31:13, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "einstein", "titulo": "Einstein"}, {"id": "vila_nova_conceicao", "titulo": "Vila Nova Conceição"}, {"id": "patio_guedala", "titulo": "Pátio Guedala"}]}.
+- Tempo do agente (proxy de Skyone): 9.100 s; total registrado: 19.620 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=864.
+
+#### Turno 866 · 12/10 20:31:29 · ok / live
+- Cliente: m2420: Mas hoje seria feriado ou não ?.
+- Resposta: Sim, hoje é feriado: Nossa Senhora Aparecida, dia 12 de outubro. ⟶ Mesmo assim, as unidades Einstein, Vila Nova Conceição e Pátio Guedala estão abertas até o final da noite..
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: —.
+- Skills: #19 info_unidades → HTTP 200/ok (14 ms), ref=—.
+- Saídas persistidas: m2421 parte 1 texto, enviada, 12/10 20:31:40; m2422 parte 2 texto, enviada, 12/10 20:31:41.
+- Tempo do agente (proxy de Skyone): 10.291 s; total registrado: 11.954 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 867 · 12/10 20:34:46 · ok / live
+- Cliente: m2423: Me envia o cardápio completo com os valores por favor.
+- Resposta: Posso sim! Me diz de qual unidade você quer o cardápio com preços 😊 ⟶ De qual delas?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "einstein", "titulo": "Einstein"}, {"id": "vila_nova_conceicao", "titulo": "Vila Nova Conceição"}, {"id": "patio_guedala", "titulo": "Pátio Guedala"}]}.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2424 parte 1 texto, enviada, 12/10 20:35:03; m2425 parte 2 texto, enviada, 12/10 20:35:03, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "einstein", "titulo": "Einstein"}, {"id": "vila_nova_conceicao", "titulo": "Vila Nova Conceição"}, {"id": "patio_guedala", "titulo": "Pátio Guedala"}]}.
+- Tempo do agente (proxy de Skyone): 15.748 s; total registrado: 20.010 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 868 · 12/10 20:35:12 · ok / live
+- Cliente: m2426: Pátio Guedala.
+- Resposta: Perfeito! Aqui estão as categorias do cardápio do Pátio Guedala 😊 ⟶ Qual categoria você quer ver?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "cat_almoco_executivo", "titulo": "Almoço executivo"}, {"id": "cat_bebidas_sem_alcool", "titulo": "Bebidas sem álcool"}, {"id": "cat_cervejas", "titulo": "Cervejas"}, {"id": "cat_coqueteis_autorais", "titulo": "Coquetéis autorais"}, {"id": "cat_coqueteis_classicos", "titulo": "Coquetéis clássicos"}, {"id": "cat_degustacao_e_combinados", "titulo": "Degustação e combinados"}, {"id": "cat_entradas_frias_e_carpaccios", "titulo": "Entradas frias e carpacc"}, {"id": "cat_entradas_quentes", "titulo": "Entradas quentes"}, {"id": "cat_kaizen_porcoes", "titulo": "Kaizen — porções"}, {"id": "cat_licores_dose", "titulo": "Licores — dose"}], "titulo_lista": "Ver categorias"}.
+- Skills: #20 buscar_catalogo → HTTP 200/ok (15 ms), ref=—.
+- Saídas persistidas: m2427 parte 1 texto, enviada, 12/10 20:35:40; m2428 parte 2 texto, enviada, 12/10 20:35:41, menu={"forma": "lista", "motivo": null, "opcoes": [{"id": "cat_almoco_executivo", "titulo": "Almoço executivo"}, {"id": "cat_bebidas_sem_alcool", "titulo": "Bebidas sem álcool"}, {"id": "cat_cervejas", "titulo": "Cervejas"}, {"id": "cat_coqueteis_autorais", "titulo": "Coquetéis autorais"}, {"id": "cat_coqueteis_classicos", "titulo": "Coquetéis clássicos"}, {"id": "cat_degustacao_e_combinados", "titulo": "Degustação e combinados"}, {"id": "cat_entradas_frias_e_carpaccios", "titulo": "Entradas frias e carpacc"}, {"id": "cat_entradas_quentes", "titulo": "Entradas quentes"}, {"id": "cat_kaizen_porcoes", "titulo": "Kaizen — porções"}, {"id": "cat_licores_dose", "titulo": "Licores — dose"}]}.
+- Tempo do agente (proxy de Skyone): 26.796 s; total registrado: 31.181 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 869 · 12/10 20:36:02 · ok / live
+- Cliente: m2429: Almoço executivo.
+- Resposta: Achei 1 opção em Almoço executivo no Pátio Guedala 😊 ⟶ Almoço executivo — R$ 124 · 1 entrada + 1 prato principal + 1 sobremesa (segunda a sexta, exceto feriados). Quer adicionar ao pedido?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "item_666", "titulo": "Almoço executivo", "descricao": "R$ 124 · 1 entrada + 1 prato principal + 1 sobremesa"}], "titulo_lista": "Ver opções"}.
+- Skills: #21 buscar_catalogo → HTTP 200/ok (8 ms), ref=—.
+- Saídas persistidas: m2430 parte 1 texto, enviada, 12/10 20:36:22; m2431 parte 2 texto, enviada, 12/10 20:36:23, menu={"forma": "lista", "motivo": null, "opcoes": [{"id": "item_666", "titulo": "Almoço executivo", "descricao": "R$ 124 · 1 entrada + 1 prato principal + 1 sobremesa"}]}.
+- Tempo do agente (proxy de Skyone): 19.414 s; total registrado: 23.797 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 870 · 12/10 20:36:36 · ok / live
+- Cliente: m2432: Almoço executivo.
+- Resposta: Anotei 1 Almoço executivo no seu pedido 😊 ⟶ Vai ser entrega ou retirada?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "entrega", "titulo": "Entrega"}, {"id": "retirada", "titulo": "Retirada"}]}.
+- Skills: #22 buscar_catalogo → HTTP 200/ok (23 ms), ref=—; #23 adicionar_item → HTTP 200/ok (135 ms), ref=—.
+- Saídas persistidas: m2433 parte 1 texto, enviada, 12/10 20:36:57; m2434 parte 2 texto, enviada, 12/10 20:36:58, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "entrega", "titulo": "Entrega"}, {"id": "retirada", "titulo": "Retirada"}]}.
+- Tempo do agente (proxy de Skyone): 20.107 s; total registrado: 24.493 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 871 · 12/10 20:37:04 · ok / live
+- Cliente: m2435: Retirada.
+- Resposta: Resumo do pedido: 1x Almoço executivo — R$ 124. Retirada na unidade Pátio Guedala. ⟶ Quer confirmar o pedido? 😊.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "confirmar_pedido", "titulo": "Confirmar pedido"}, {"id": "alterar_pedido", "titulo": "Alterar pedido"}, {"id": "cancelar", "titulo": "Cancelar"}]}.
+- Skills: #24 definir_entrega → HTTP 200/ok (29 ms), ref=—.
+- Saídas persistidas: m2436 parte 1 texto, enviada, 12/10 20:37:26; m2437 parte 2 texto, enviada, 12/10 20:37:27, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "confirmar_pedido", "titulo": "Confirmar pedido"}, {"id": "alterar_pedido", "titulo": "Alterar pedido"}, {"id": "cancelar", "titulo": "Cancelar"}]}.
+- Tempo do agente (proxy de Skyone): 20.434 s; total registrado: 24.760 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 872 · 12/10 20:37:34 · ok / live
+- Cliente: m2438: Confirmar pedido.
+- Resposta: Prontinho! Seu pedido é o nº 12873 — total R$ 124 😊 ⟶ A unidade Pátio Guedala vai conferir e te avisar por aqui. Quer mais alguma coisa?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: —.
+- Skills: #25 info_unidades → HTTP 200/ok (7 ms), ref=—; #26 fechar_pedido → HTTP 201/ok (33 ms), ref=—.
+- Saídas persistidas: m2439 parte 1 texto, enviada, 12/10 20:37:58; m2440 parte 2 texto, enviada, 12/10 20:37:58.
+- Tempo do agente (proxy de Skyone): 22.623 s; total registrado: 26.772 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 873 · 12/10 20:38:14 · ok / live
+- Cliente: m2441: Apenas isso mesmo obrigado.
+- Resposta: Que bom! 😊 ⟶ Obrigado — até a próxima. teste.
+- Ação: encerrar; motivo: —; desfecho: pedido_feito; reação: —.
+- Botões solicitados: —.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2442 parte 1 texto, enviada, 12/10 20:38:32; m2443 parte 2 texto, enviada, 12/10 20:38:33.
+- Tempo do agente (proxy de Skyone): 16.484 s; total registrado: 22.808 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 875 · 12/10 20:54:27 · ok / live
+- Cliente: m2448: Oi.
+- Resposta: Boa noite! 😊 Vi que seus itens continuam no carrinho: 1x Almoço executivo para retirada no Pátio Guedala. ⟶ Quer confirmar o pedido, alterar algo ou cancelar?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "confirmar_pedido", "titulo": "Confirmar pedido"}, {"id": "alterar_pedido", "titulo": "Alterar pedido"}, {"id": "cancelar", "titulo": "Cancelar"}]}.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2449 parte 1 texto, enviada, 12/10 20:54:45; m2450 parte 2 texto, enviada, 12/10 20:54:46, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "confirmar_pedido", "titulo": "Confirmar pedido"}, {"id": "alterar_pedido", "titulo": "Alterar pedido"}, {"id": "cancelar", "titulo": "Cancelar"}]}.
+- Tempo do agente (proxy de Skyone): 16.402 s; total registrado: 22.846 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 876 · 12/10 20:55:02 · ok / live
+- Cliente: m2451: Alterar pedido.
+- Resposta: Beleza — vamos alterar seu pedido 😊 ⟶ O que você quer mudar no pedido? Você pode pedir pra adicionar ou remover itens, trocar de unidade/retirada ou alterar o horário..
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: —.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2452 parte 1 texto, enviada, 12/10 20:55:23; m2453 parte 2 texto, enviada, 12/10 20:55:24.
+- Tempo do agente (proxy de Skyone): 20.316 s; total registrado: 24.664 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 877 · 12/10 20:55:39 · ok / live
+- Cliente: m2454: Me envia o cardápio.
+- Resposta: Aqui está o cardápio do Pátio Guedala 😊 ⟶ Voltando ao seu pedido: 1x Almoço executivo para retirada no Pátio Guedala. O que você quer alterar no pedido?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "cat_almoco_executivo", "titulo": "Almoço executivo"}, {"id": "cat_bebidas_sem_alcool", "titulo": "Bebidas sem álcool"}, {"id": "cat_cervejas", "titulo": "Cervejas"}, {"id": "cat_coqueteis_autorais", "titulo": "Coquetéis autorais"}, {"id": "cat_coqueteis_classicos", "titulo": "Coquetéis clássicos"}, {"id": "cat_degustacao_combinados", "titulo": "Degustação e combinados"}, {"id": "cat_entradas_frias_carpaccios", "titulo": "Entradas frias e carpacc"}, {"id": "cat_entradas_quentes", "titulo": "Entradas quentes"}, {"id": "cat_kaizen_porcoes", "titulo": "Kaizen — porções"}], "titulo_lista": "Ver categorias"}.
+- Skills: #27 buscar_catalogo → HTTP 200/ok (31 ms), ref=—.
+- Saídas persistidas: m2455 parte 1 texto, enviada, 12/10 20:56:09; m2456 parte 2 texto, enviada, 12/10 20:56:10, menu={"forma": "lista", "motivo": null, "opcoes": [{"id": "cat_almoco_executivo", "titulo": "Almoço executivo"}, {"id": "cat_bebidas_sem_alcool", "titulo": "Bebidas sem álcool"}, {"id": "cat_cervejas", "titulo": "Cervejas"}, {"id": "cat_coqueteis_autorais", "titulo": "Coquetéis autorais"}, {"id": "cat_coqueteis_classicos", "titulo": "Coquetéis clássicos"}, {"id": "cat_degustacao_combinados", "titulo": "Degustação e combinados"}, {"id": "cat_entradas_frias_carpaccios", "titulo": "Entradas frias e carpacc"}, {"id": "cat_entradas_quentes", "titulo": "Entradas quentes"}, {"id": "cat_kaizen_porcoes", "titulo": "Kaizen — porções"}]}.
+- Tempo do agente (proxy de Skyone): 28.686 s; total registrado: 34.456 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 878 · 12/10 20:56:38 · ok / live
+- Cliente: m2457: Entradas quentes.
+- Resposta: Voltando ao seu pedido: 1x Almoço executivo para retirada no Pátio Guedala. ⟶ Aqui estão as entradas quentes — qual você quer adicionar? 😊.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "item_687", "titulo": "Ebitem Spicy", "descricao": "R$ 68"}, {"id": "item_685", "titulo": "Edamame", "descricao": "R$ 34"}, {"id": "item_692", "titulo": "Guioza Tradicional", "descricao": "R$ 54"}, {"id": "item_693", "titulo": "Guioza Vegetariano", "descricao": "R$ 46"}, {"id": "item_686", "titulo": "Kimpira Gobo", "descricao": "R$ 36"}, {"id": "item_690", "titulo": "Nasu no Missô", "descricao": "R$ 37"}, {"id": "item_694", "titulo": "Nira to Ika Itame", "descricao": "R$ 64"}, {"id": "item_689", "titulo": "Shiitake Batayaki", "descricao": "R$ 61"}, {"id": "item_688", "titulo": "Shimeji Batayaki", "descricao": "R$ 61"}, {"id": "item_691", "titulo": "Tomorokoshi no Tempurá", "descricao": "R$ 38"}], "titulo_lista": "Ver entradas quentes"}.
+- Skills: #28 buscar_catalogo → HTTP 200/ok (710 ms), ref=—.
+- Saídas persistidas: m2458 parte 1 texto, enviada, 12/10 20:57:02; m2459 parte 2 texto, enviada, 12/10 20:57:03, menu={"forma": "lista", "motivo": null, "opcoes": [{"id": "item_687", "titulo": "Ebitem Spicy", "descricao": "R$ 68"}, {"id": "item_685", "titulo": "Edamame", "descricao": "R$ 34"}, {"id": "item_692", "titulo": "Guioza Tradicional", "descricao": "R$ 54"}, {"id": "item_693", "titulo": "Guioza Vegetariano", "descricao": "R$ 46"}, {"id": "item_686", "titulo": "Kimpira Gobo", "descricao": "R$ 36"}, {"id": "item_690", "titulo": "Nasu no Missô", "descricao": "R$ 37"}, {"id": "item_694", "titulo": "Nira to Ika Itame", "descricao": "R$ 64"}, {"id": "item_689", "titulo": "Shiitake Batayaki", "descricao": "R$ 61"}, {"id": "item_688", "titulo": "Shimeji Batayaki", "descricao": "R$ 61"}, {"id": "item_691", "titulo": "Tomorokoshi no Tempurá", "descricao": "R$ 38"}]}.
+- Tempo do agente (proxy de Skyone): 23.030 s; total registrado: 27.359 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 879 · 12/10 20:57:35 · ok / live
+- Cliente: m2460: Shiitake Batayaki.
+- Resposta: Prontinho — adicionei Shiitake Batayaki ao seu pedido 😊 ⟶ Quer adicionar mais itens ou finalizar o pedido?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "adicionar_mais_itens", "titulo": "Adicionar mais itens"}, {"id": "finalizar_pedido", "titulo": "Finalizar pedido"}]}.
+- Skills: #29 buscar_catalogo → HTTP 200/ok (23 ms), ref=—; #30 adicionar_item → HTTP 200/ok (17 ms), ref=—.
+- Saídas persistidas: m2462 parte 1 texto, enviada, 12/10 20:58:00; m2463 parte 2 texto, enviada, 12/10 20:58:01, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "adicionar_mais_itens", "titulo": "Adicionar mais itens"}, {"id": "finalizar_pedido", "titulo": "Finalizar pedido"}]}.
+- Tempo do agente (proxy de Skyone): 24.232 s; total registrado: 28.897 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 881 · 12/10 20:58:13 · ok / live
+- Cliente: m2464: Finalizar pedido.
+- Resposta: Perfeito — só falta o horário para finalizar o pedido 🙂 ⟶ Quer para o quanto antes ou prefere escolher um horário?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "o_quanto_antes", "titulo": "O quanto antes"}, {"id": "escolher_horario", "titulo": "Escolher horário"}]}.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2467 parte 1 texto, enviada, 12/10 20:58:36; m2468 parte 2 texto, enviada, 12/10 20:58:37, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "o_quanto_antes", "titulo": "O quanto antes"}, {"id": "escolher_horario", "titulo": "Escolher horário"}]}.
+- Tempo do agente (proxy de Skyone): 22.084 s; total registrado: 26.212 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 882 · 12/10 20:58:43 · ok / live
+- Cliente: m2469: O quanto antes.
+- Resposta: Perfeito — aqui está o resumo do seu pedido 😊 ⟶ 1x Almoço executivo R$124 · 1x Shiitake Batayaki R$61. Total R$185. Retirada — O quanto antes. Confirmar pedido, alterar ou cancelar?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "confirmar_pedido", "titulo": "Confirmar pedido"}, {"id": "alterar_pedido", "titulo": "Alterar pedido"}, {"id": "cancelar", "titulo": "Cancelar"}]}.
+- Skills: #31 definir_entrega → HTTP 200/ok (14 ms), ref=—.
+- Saídas persistidas: m2470 parte 1 texto, enviada, 12/10 20:59:06; m2471 parte 2 texto, enviada, 12/10 20:59:07, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "confirmar_pedido", "titulo": "Confirmar pedido"}, {"id": "alterar_pedido", "titulo": "Alterar pedido"}, {"id": "cancelar", "titulo": "Cancelar"}]}.
+- Tempo do agente (proxy de Skyone): 22.201 s; total registrado: 26.798 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 883 · 12/10 20:59:12 · ok / live
+- Cliente: m2472: Confirmar pedido.
+- Resposta: Pronto — seu pedido é o nº 48806 😊 ⟶ Pátio Guedala vai conferir e te atualiza por aqui..
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: —.
+- Skills: #32 info_unidades → HTTP 200/ok (9 ms), ref=—; #33 fechar_pedido → HTTP 201/ok (20 ms), ref=—.
+- Saídas persistidas: m2474 parte 1 texto, enviada, 12/10 20:59:36; m2475 parte 2 texto, enviada, 12/10 20:59:37.
+- Tempo do agente (proxy de Skyone): 23.222 s; total registrado: 27.545 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 884 · 12/10 20:59:37 · ok / live
+- Cliente: m2473: Obrigado.
+- Resposta: Sem texto.
+- Ação: silencio; motivo: agradecimento_final; desfecho: —; reação: {"emoji": "❤️", "motivo": null, "resultado": "aplicada"}.
+- Botões solicitados: —.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: Nenhuma vinculada ao request_id.
+- Tempo do agente (proxy de Skyone): 13.901 s; total registrado: 31.959 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 887 · 12/10 21:21:16 · ok / live
+- Cliente: m2482: Oi.
+- Resposta: Oi! Qual é o seu nome para eu te chamar? 😊 ⟶ Quer ver o cardápio, acompanhar um pedido ou pedir algo agora?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "ver_cardapio", "titulo": "Ver cardápio"}, {"id": "acompanhar_pedido", "titulo": "Acompanhar pedido"}, {"id": "fazer_pedido", "titulo": "Fazer pedido"}]}.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2483 parte 1 texto, enviada, 12/10 21:21:36; m2484 parte 2 texto, enviada, 12/10 21:21:37, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "ver_cardapio", "titulo": "Ver cardápio"}, {"id": "acompanhar_pedido", "titulo": "Acompanhar pedido"}, {"id": "fazer_pedido", "titulo": "Fazer pedido"}]}.
+- Tempo do agente (proxy de Skyone): 18.944 s; total registrado: 24.842 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 888 · 12/10 21:21:58 · ok / live
+- Cliente: m2485: Marco.
+- Resposta: Prazer, Marco! 😊 ⟶ Quer ver o cardápio, acompanhar um pedido ou pedir algo agora?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "ver_cardapio", "titulo": "Ver cardápio"}, {"id": "acompanhar_pedido", "titulo": "Acompanhar pedido"}, {"id": "fazer_pedido", "titulo": "Fazer pedido"}]}.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2486 parte 1 texto, enviada, 12/10 21:22:11; m2487 parte 2 texto, enviada, 12/10 21:22:12, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "ver_cardapio", "titulo": "Ver cardápio"}, {"id": "acompanhar_pedido", "titulo": "Acompanhar pedido"}, {"id": "fazer_pedido", "titulo": "Fazer pedido"}]}.
+- Tempo do agente (proxy de Skyone): 12.520 s; total registrado: 18.071 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 889 · 12/10 21:22:20 · ok / live
+- Cliente: m2488: Ver cardápio.
+- Resposta: Ótimo! 🍽️ ⟶ De qual unidade você quer ver o cardápio?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "einstein", "titulo": "Einstein"}, {"id": "vila_nova_conceicao", "titulo": "Vila Nova Conceição"}, {"id": "patio_guedala", "titulo": "Pátio Guedala"}], "titulo_lista": "Ver unidades"}.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2489 parte 1 texto, enviada, 12/10 21:22:43; m2490 parte 2 texto, enviada, 12/10 21:22:44, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "einstein", "titulo": "Einstein"}, {"id": "vila_nova_conceicao", "titulo": "Vila Nova Conceição"}, {"id": "patio_guedala", "titulo": "Pátio Guedala"}]}.
+- Tempo do agente (proxy de Skyone): 22.306 s; total registrado: 26.562 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 890 · 12/10 21:22:55 · ok / live
+- Cliente: m2491: Pátio Guedala.
+- Resposta: Ótimo — aqui estão as categorias do Pátio Guedala 🍣 ⟶ Também temos: Makizushi e Baterá, Pratos quentes, Sakês importados — garrafas, Sashimis — 3 fatias, Sobremesas, Sushis — 1 unidade, Temakis — cone e Whiskies — dose. Qual categoria você quer ver?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "cat_almoco_executivo", "titulo": "Almoço executivo"}, {"id": "cat_bebidas_sem_alcool", "titulo": "Bebidas sem álcool"}, {"id": "cat_cervejas", "titulo": "Cervejas"}, {"id": "cat_coqueteis_autorais", "titulo": "Coquetéis autorais"}, {"id": "cat_coqueteis_classicos", "titulo": "Coquetéis clássicos"}, {"id": "cat_degustacao_e_combinados", "titulo": "Degustação e combinados"}, {"id": "cat_entradas_frias_e_carpaccios", "titulo": "Entradas frias e carpacc"}, {"id": "cat_entradas_quentes", "titulo": "Entradas quentes"}, {"id": "cat_kaizen_porcoes", "titulo": "Kaizen — porções"}, {"id": "cat_licores_dose", "titulo": "Licores — dose"}], "titulo_lista": "Ver categorias"}.
+- Skills: #34 info_unidades → HTTP 200/ok (31 ms), ref=—; #35 buscar_catalogo → HTTP 200/ok (10 ms), ref=—.
+- Saídas persistidas: m2492 parte 1 texto, enviada, 12/10 21:23:21; m2493 parte 2 texto, enviada, 12/10 21:23:22, menu={"forma": "lista", "motivo": null, "opcoes": [{"id": "cat_almoco_executivo", "titulo": "Almoço executivo"}, {"id": "cat_bebidas_sem_alcool", "titulo": "Bebidas sem álcool"}, {"id": "cat_cervejas", "titulo": "Cervejas"}, {"id": "cat_coqueteis_autorais", "titulo": "Coquetéis autorais"}, {"id": "cat_coqueteis_classicos", "titulo": "Coquetéis clássicos"}, {"id": "cat_degustacao_e_combinados", "titulo": "Degustação e combinados"}, {"id": "cat_entradas_frias_e_carpaccios", "titulo": "Entradas frias e carpacc"}, {"id": "cat_entradas_quentes", "titulo": "Entradas quentes"}, {"id": "cat_kaizen_porcoes", "titulo": "Kaizen — porções"}, {"id": "cat_licores_dose", "titulo": "Licores — dose"}]}.
+- Tempo do agente (proxy de Skyone): 24.834 s; total registrado: 29.027 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 891 · 12/10 21:23:58 · ok / live
+- Cliente: m2494: Kaizen — porções.
+- Resposta: Ótima escolha, Marco! Aqui estão os itens de Kaizen — porções 🍣 ⟶ Qual você quer?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "item_775", "titulo": "Centolla", "descricao": "R$ 198"}, {"id": "item_777", "titulo": "Hotategai", "descricao": "R$ 66"}, {"id": "item_778", "titulo": "Ika", "descricao": "R$ 44"}, {"id": "item_774", "titulo": "Ikura", "descricao": "R$ 112"}, {"id": "item_776", "titulo": "Uni", "descricao": "R$ 110"}], "titulo_lista": "Ver itens"}.
+- Skills: #36 buscar_catalogo → HTTP 200/ok (9 ms), ref=—.
+- Saídas persistidas: m2495 parte 1 texto, enviada, 12/10 21:24:16; m2496 parte 2 texto, enviada, 12/10 21:24:17, menu={"forma": "lista", "motivo": null, "opcoes": [{"id": "item_775", "titulo": "Centolla", "descricao": "R$ 198"}, {"id": "item_777", "titulo": "Hotategai", "descricao": "R$ 66"}, {"id": "item_778", "titulo": "Ika", "descricao": "R$ 44"}, {"id": "item_774", "titulo": "Ikura", "descricao": "R$ 112"}, {"id": "item_776", "titulo": "Uni", "descricao": "R$ 110"}]}.
+- Tempo do agente (proxy de Skyone): 17.094 s; total registrado: 21.348 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 892 · 12/10 21:24:30 · ok / live
+- Cliente: m2497: Centolla.
+- Resposta: Centolla — R$ 198. ⟶ Quantos você vai querer?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "qtd_1", "titulo": "1"}, {"id": "qtd_2", "titulo": "2"}, {"id": "qtd_outra", "titulo": "Outra quantidade"}]}.
+- Skills: #37 buscar_catalogo → HTTP 200/ok (24 ms), ref=—.
+- Saídas persistidas: m2498 parte 1 texto, enviada, 12/10 21:24:47; m2499 parte 2 texto, enviada, 12/10 21:24:48, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "qtd_1", "titulo": "1"}, {"id": "qtd_2", "titulo": "2"}, {"id": "qtd_outra", "titulo": "Outra quantidade"}]}.
+- Tempo do agente (proxy de Skyone): 16.130 s; total registrado: 20.540 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 893 · 12/10 21:24:55 · ok / live
+- Cliente: m2500: Outra quantidade.
+- Resposta: Beleza, Marco! Quantas Centolla você quer?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: —.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2501 parte 1 texto, enviada, 12/10 21:25:07.
+- Tempo do agente (proxy de Skyone): 10.745 s; total registrado: 14.197 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 894 · 12/10 21:25:17 · ok / live
+- Cliente: m2502: 10.
+- Resposta: Certo — 10 Centolla. Preciso confirmar um detalhe com a equipe: esse item não tem preço cadastrado aqui 😊. ⟶ Vou transferir para a equipe confirmar; eles continuam o atendimento por aqui em instantes..
+- Ação: transferir_humano; motivo: pedido_para_confirmar; desfecho: —; reação: —.
+- Botões solicitados: —.
+- Skills: #38 adicionar_item → HTTP 422/sem_preco (10 ms), ref=—.
+- Saídas persistidas: m2503 parte 1 texto, enviada, 12/10 21:25:46; m2504 parte 2 texto, enviada, 12/10 21:25:47.
+- Tempo do agente (proxy de Skyone): 28.057 s; total registrado: 33.686 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 895 · 12/10 21:26:35 · ignorado / live
+- Cliente: m2505: Você mandou o preço de R$ 198 como não tem o preço cadastrado ?.
+- Resposta: Sem texto.
+- Ação: —; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: —.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: Nenhuma vinculada ao request_id.
+- Tempo do agente (proxy de Skyone): 0.004 s; total registrado: 2.763 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 900 · 13/10 11:26:00 · ok / live
+- Cliente: m2548: Oi.
+- Resposta: Bom dia, Marco! 😊 Nenhuma unidade está aberta agora — a próxima abertura é da Einstein às 11:30. ⟶ Quer que eu agende seu pedido para depois da abertura ou prefere escolher outra unidade?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "agendar", "titulo": "Agendar"}, {"id": "outra_unidade", "titulo": "Outra unidade"}]}.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2549 parte 0 texto, enviada, 13/10 11:26:23; m2550 parte 1 texto, enviada, 13/10 11:26:24; m2551 parte 2 texto, enviada, 13/10 11:26:25, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "agendar", "titulo": "Agendar"}, {"id": "outra_unidade", "titulo": "Outra unidade"}]}.
+- Tempo do agente (proxy de Skyone): 22.931 s; total registrado: 29.678 s; aviso de demora: True; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 901 · 13/10 11:27:35 · ok / live
+- Cliente: m2552: Agendar.
+- Resposta: Perfeito — vou agendar para depois da abertura da Einstein, que é às 11:30 😊 ⟶ Qual horário você prefere?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "o_quanto_antes", "titulo": "O quanto antes"}, {"id": "escolher_horario", "titulo": "Escolher horário"}]}.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2553 parte 1 texto, enviada, 13/10 11:27:54; m2554 parte 2 texto, enviada, 13/10 11:27:55, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "o_quanto_antes", "titulo": "O quanto antes"}, {"id": "escolher_horario", "titulo": "Escolher horário"}]}.
+- Tempo do agente (proxy de Skyone): 17.461 s; total registrado: 22.378 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 902 · 13/10 11:28:04 · ok / live
+- Cliente: m2555: O quanto antes.
+- Resposta: Combinado, Marco — agendei para hoje às 11:30 na Einstein 😊 ⟶ Vai ser entrega ou retirada?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "entrega", "titulo": "Entrega"}, {"id": "retirada", "titulo": "Retirada"}]}.
+- Skills: #39 definir_entrega → HTTP 200/ok (230 ms), ref={"unidade": "einstein"}.
+- Saídas persistidas: m2556 parte 1 texto, enviada, 13/10 11:28:35; m2557 parte 2 texto, enviada, 13/10 11:28:36, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "entrega", "titulo": "Entrega"}, {"id": "retirada", "titulo": "Retirada"}]}.
+- Tempo do agente (proxy de Skyone): 30.325 s; total registrado: 35.384 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 903 · 13/10 11:28:46 · ok / live
+- Cliente: m2558: Retirada.
+- Resposta: Marco, a Einstein ainda não recebe pedidos por aqui 😊 ⟶ Quer que eu mude seu pedido para Pátio Guedala (que tem cardápio)?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "sim", "titulo": "Sim"}, {"id": "outra_unidade", "titulo": "Outra unidade"}]}.
+- Skills: #40 definir_entrega → HTTP 200/ok (38 ms), ref={"modalidade": "retirada"}.
+- Saídas persistidas: m2559 parte 1 texto, enviada, 13/10 11:29:35; m2560 parte 2 texto, enviada, 13/10 11:29:35, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "sim", "titulo": "Sim"}, {"id": "outra_unidade", "titulo": "Outra unidade"}]}.
+- Tempo do agente (proxy de Skyone): 47.073 s; total registrado: 51.699 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 904 · 13/10 11:30:04 · ok / live
+- Cliente: m2561: Sim.
+- Resposta: Beleza, Marco — mudei seu pedido para Pátio Guedala; continua retirada para hoje às 11:30 😊 ⟶ Quer que eu tente incluir as 10 Centolla de novo ou prefere ver o cardápio?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "incluir_centolla", "titulo": "Incluir Centolla"}, {"id": "ver_cardapio", "titulo": "Ver cardápio"}]}.
+- Skills: #41 definir_entrega → HTTP 200/ok (40 ms), ref={"unidade": "patio_guedala"}.
+- Saídas persistidas: m2562 parte 1 texto, enviada, 13/10 11:30:36; m2563 parte 2 texto, enviada, 13/10 11:30:37, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "incluir_centolla", "titulo": "Incluir Centolla"}, {"id": "ver_cardapio", "titulo": "Ver cardápio"}]}.
+- Tempo do agente (proxy de Skyone): 31.099 s; total registrado: 35.949 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 905 · 13/10 11:30:44 · ok / live
+- Cliente: m2564: Incluir Centolla.
+- Resposta: Marco, desculpe — não consegui incluir as Centolla no seu pedido. Vou chamar a equipe para confirmar e eles continuam o atendimento por aqui em instantes 🙏 ⟶ A equipe vai continuar o atendimento e confirmar a inclusão da Centolla no seu pedido..
+- Ação: transferir_humano; motivo: pedido_para_confirmar; desfecho: —; reação: —.
+- Botões solicitados: —.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2565 parte 1 texto, enviada, 13/10 11:31:08; m2566 parte 2 texto, enviada, 13/10 11:31:09.
+- Tempo do agente (proxy de Skyone): 23.551 s; total registrado: 28.075 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 906 · 13/10 11:32:07 · ok / live
+- Cliente: m2567: Quero fazer um novo pedido.
+- Resposta: Certo, Marco 😊 ⟶ Quer começar um pedido novo do zero ou continuar com o pedido agendado para hoje às 11:30 no Pátio Guedala?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "continuar", "titulo": "Continuar"}, {"id": "comecar_do_zero", "titulo": "Começar do zero"}]}.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2568 parte 1 texto, enviada, 13/10 11:32:31; m2569 parte 2 texto, enviada, 13/10 11:32:32, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "continuar", "titulo": "Continuar"}, {"id": "comecar_do_zero", "titulo": "Começar do zero"}]}.
+- Tempo do agente (proxy de Skyone): 23.173 s; total registrado: 29.558 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 907 · 13/10 11:32:41 · ok / live
+- Cliente: m2570: Começar do zero.
+- Resposta: Beleza, Marco — começamos do zero 😊 ⟶ Quer ver o cardápio do Pátio Guedala ou prefere me dizer o que quer pedir?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "ver_cardapio", "titulo": "Ver cardápio"}, {"id": "dizer_item", "titulo": "Dizer o que quero"}]}.
+- Skills: #42 esvaziar_carrinho → HTTP 200/ok (38 ms), ref=—.
+- Saídas persistidas: m2571 parte 1 texto, enviada, 13/10 11:33:19; m2572 parte 2 texto, enviada, 13/10 11:33:19, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "ver_cardapio", "titulo": "Ver cardápio"}, {"id": "dizer_item", "titulo": "Dizer o que quero"}]}.
+- Tempo do agente (proxy de Skyone): 36.201 s; total registrado: 40.569 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 908 · 13/10 11:33:26 · ok / live
+- Cliente: m2573: Ver cardápio.
+- Resposta: Marco, desculpe — vou transferir para a equipe confirmar o cardápio e eles continuam o atendimento por aqui em instantes 🙏.
+- Ação: transferir_humano; motivo: pedido_para_confirmar; desfecho: —; reação: —.
+- Botões solicitados: —.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2574 parte 1 texto, enviada, 13/10 11:33:52.
+- Tempo do agente (proxy de Skyone): 25.336 s; total registrado: 28.878 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 909 · 13/10 11:39:50 · ignorado / live
+- Cliente: m2575: Ola.
+- Resposta: Sem texto.
+- Ação: —; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: —.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: Nenhuma vinculada ao request_id.
+- Tempo do agente (proxy de Skyone): 0.009 s; total registrado: 4.320 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 910 · 13/10 11:40:11 · refeito / live
+- Cliente: m2576: Ola.
+- Resposta: Bom dia, Marco! 😊 ⟶ Quer ver o cardápio do Pátio Guedala ou prefere me dizer o que quer pedir?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "ver_cardapio", "titulo": "Ver cardápio"}, {"id": "dizer_o_que_quero", "titulo": "Dizer o que quero"}]}.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: Nenhuma vinculada ao request_id.
+- Tempo do agente (proxy de Skyone): 18.170 s; total registrado: 22.529 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 911 · 13/10 11:40:29 · ok / live
+- Cliente: m2576: Ola / m2577: Quero fazer um pedido.
+- Resposta: Bom dia, Marco! O Pátio Guedala está fechado agora — volta a abrir hoje ao meio‑dia. 😊 ⟶ Quer agendar para depois da abertura ou prefere pedir de outra unidade?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "agendar", "titulo": "Agendar"}, {"id": "outra_unidade", "titulo": "Outra unidade"}]}.
+- Skills: #43 info_unidades → HTTP 200/ok (17 ms), ref={"unidade": "patio_guedala"}.
+- Saídas persistidas: m2578 parte 1 texto, enviada, 13/10 11:41:03; m2579 parte 2 texto, enviada, 13/10 11:41:04, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "agendar", "titulo": "Agendar"}, {"id": "outra_unidade", "titulo": "Outra unidade"}]}.
+- Tempo do agente (proxy de Skyone): 32.418 s; total registrado: 51.833 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=910.
+
+#### Turno 912 · 13/10 11:41:17 · ok / live
+- Cliente: m2580: Agendar.
+- Resposta: Perfeito, Marco — vou agendar para o Pátio Guedala (abre hoje ao meio‑dia) 😊 ⟶ Qual horário você quer para o agendamento?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: —.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2581 parte 1 texto, enviada, 13/10 11:41:34; m2582 parte 2 texto, enviada, 13/10 11:41:34.
+- Tempo do agente (proxy de Skyone): 14.927 s; total registrado: 17.375 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 913 · 13/10 11:41:56 · ok / live
+- Cliente: m2583: 13:00.
+- Resposta: Perfeito, Marco — agendei para hoje às 13h no Pátio Guedala 😊 ⟶ Vai ser entrega ou retirada?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "entrega", "titulo": "Entrega"}, {"id": "retirada", "titulo": "Retirada"}]}.
+- Skills: #44 definir_entrega → HTTP 200/ok (42 ms), ref={"unidade": "patio_guedala"}.
+- Saídas persistidas: m2584 parte 1 texto, enviada, 13/10 11:42:20; m2585 parte 2 texto, enviada, 13/10 11:42:21, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "entrega", "titulo": "Entrega"}, {"id": "retirada", "titulo": "Retirada"}]}.
+- Tempo do agente (proxy de Skyone): 22.277 s; total registrado: 28.569 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 914 · 13/10 11:42:58 · ok / live
+- Cliente: m2586: Retirada.
+- Resposta: Combinado — retirada hoje às 13h no Pátio Guedala 😊 ⟶ Quer ver o cardápio ou prefere me dizer o que quer pedir?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "ver_cardapio", "titulo": "Ver cardápio"}, {"id": "dizer_o_que_quero", "titulo": "Dizer o que quero"}]}.
+- Skills: #45 definir_entrega → HTTP 200/ok (9 ms), ref={"modalidade": "retirada"}.
+- Saídas persistidas: m2587 parte 1 texto, enviada, 13/10 11:43:21; m2588 parte 2 texto, enviada, 13/10 11:43:22, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "ver_cardapio", "titulo": "Ver cardápio"}, {"id": "dizer_o_que_quero", "titulo": "Dizer o que quero"}]}.
+- Tempo do agente (proxy de Skyone): 22.168 s; total registrado: 26.591 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 915 · 13/10 11:43:32 · ok / live
+- Cliente: m2589: Ver cardápio.
+- Resposta: Perfeito, Marco — aqui estão as categorias do cardápio do Pátio Guedala 😊 ⟶ Qual categoria você quer ver? Também temos: Pratos quentes, Sobremesas, Bebidas sem álcool, Cervejas, Coquetéis autorais, Coquetéis clássicos, Licores — dose, Whiskies — dose e Sakês importados — garrafas..
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "cat_almoco_executivo", "titulo": "Almoço executivo"}, {"id": "cat_entradas_quentes", "titulo": "Entradas quentes"}, {"id": "cat_entradas_frias_e_carpaccios", "titulo": "Entradas frias e carpacc"}, {"id": "cat_degustacao_e_combinados", "titulo": "Degustação e combinados"}, {"id": "cat_temakis_cone", "titulo": "Temakis — cone"}, {"id": "cat_sashimis_3_fatias", "titulo": "Sashimis — 3 fatias"}, {"id": "cat_sushis_1_unidade", "titulo": "Sushis — 1 unidade"}, {"id": "cat_kaizen_porcoes", "titulo": "Kaizen — porções"}, {"id": "cat_makizushi_e_batera", "titulo": "Makizushi e Baterá"}, {"id": "ver_mais_categorias", "titulo": "Ver mais categorias"}], "titulo_lista": "Ver categorias"}.
+- Skills: #46 buscar_catalogo → HTTP 200/ok (12 ms), ref={"unidade": "patio_guedala", "categorias": true, "qtd_resultados": 18}.
+- Saídas persistidas: m2591 parte 1 texto, enviada, 13/10 11:44:02; m2592 parte 2 texto, enviada, 13/10 11:44:03, menu={"forma": "lista", "motivo": null, "opcoes": [{"id": "cat_almoco_executivo", "titulo": "Almoço executivo"}, {"id": "cat_entradas_quentes", "titulo": "Entradas quentes"}, {"id": "cat_entradas_frias_e_carpaccios", "titulo": "Entradas frias e carpacc"}, {"id": "cat_degustacao_e_combinados", "titulo": "Degustação e combinados"}, {"id": "cat_temakis_cone", "titulo": "Temakis — cone"}, {"id": "cat_sashimis_3_fatias", "titulo": "Sashimis — 3 fatias"}, {"id": "cat_sushis_1_unidade", "titulo": "Sushis — 1 unidade"}, {"id": "cat_kaizen_porcoes", "titulo": "Kaizen — porções"}, {"id": "cat_makizushi_e_batera", "titulo": "Makizushi e Baterá"}, {"id": "ver_mais_categorias", "titulo": "Ver mais categorias"}]}.
+- Tempo do agente (proxy de Skyone): 29.645 s; total registrado: 34.137 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 916 · 13/10 11:44:21 · ok / live
+- Cliente: m2594: Temakis — cone.
+- Resposta: Perfeito, Marco — estes são os Temakis (cone) do Pátio Guedala 😊 ⟶ Qual você quer?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "item_720", "titulo": "Califórnia", "descricao": "R$ 30"}, {"id": "item_723", "titulo": "Centolla", "descricao": "R$ 82"}, {"id": "item_719", "titulo": "Ebi de Camarão", "descricao": "R$ 45"}, {"id": "item_718", "titulo": "Ebitem", "descricao": "R$ 45 · camarão empanado"}, {"id": "item_716", "titulo": "Hotate", "descricao": "R$ 55 · vieira"}, {"id": "item_728", "titulo": "Ikura", "descricao": "R$ 73"}, {"id": "item_725", "titulo": "Maguro", "descricao": "R$ 37 · atum"}, {"id": "item_721", "titulo": "Massagô", "descricao": "R$ 47"}, {"id": "item_724", "titulo": "Shake", "descricao": "R$ 34 · salmão"}, {"id": "ver_mais", "titulo": "Ver mais"}], "titulo_lista": "Temakis — cone"}.
+- Skills: #47 buscar_catalogo → HTTP 200/ok (31 ms), ref={"pagina": 1, "unidade": "patio_guedala", "categoria": "Temakis — cone", "categorias": false, "qtd_resultados": 10}.
+- Saídas persistidas: m2595 parte 1 texto, enviada, 13/10 11:44:54; m2596 parte 2 texto, enviada, 13/10 11:44:55, menu={"forma": "lista", "motivo": null, "opcoes": [{"id": "item_720", "titulo": "Califórnia", "descricao": "R$ 30"}, {"id": "item_723", "titulo": "Centolla", "descricao": "R$ 82"}, {"id": "item_719", "titulo": "Ebi de Camarão", "descricao": "R$ 45"}, {"id": "item_718", "titulo": "Ebitem", "descricao": "R$ 45 · camarão empanado"}, {"id": "item_716", "titulo": "Hotate", "descricao": "R$ 55 · vieira"}, {"id": "item_728", "titulo": "Ikura", "descricao": "R$ 73"}, {"id": "item_725", "titulo": "Maguro", "descricao": "R$ 37 · atum"}, {"id": "item_721", "titulo": "Massagô", "descricao": "R$ 47"}, {"id": "item_724", "titulo": "Shake", "descricao": "R$ 34 · salmão"}, {"id": "ver_mais", "titulo": "Ver mais"}]}.
+- Tempo do agente (proxy de Skyone): 31.438 s; total registrado: 36.314 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 917 · 13/10 11:45:18 · ok / live
+- Cliente: m2597: Ebitem.
+- Resposta: Anotei 1 Ebitem no seu pedido, Marco 😊 ⟶ Quer incluir mais algum item?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "adicionar_mais_itens", "titulo": "Adicionar mais itens"}, {"id": "finalizar_pedido", "titulo": "Finalizar pedido"}]}.
+- Skills: #48 buscar_catalogo → HTTP 200/ok (39 ms), ref={"unidade": "patio_guedala", "categorias": false, "qtd_resultados": 2}; #49 adicionar_item → HTTP 200/ok (43 ms), ref={"item_id": 718, "item_nome": "Ebitem", "quantidade": 1, "item_unidade": "patio_guedala"}.
+- Saídas persistidas: m2598 parte 1 texto, enviada, 13/10 11:45:38; m2599 parte 2 texto, enviada, 13/10 11:45:39, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "adicionar_mais_itens", "titulo": "Adicionar mais itens"}, {"id": "finalizar_pedido", "titulo": "Finalizar pedido"}]}.
+- Tempo do agente (proxy de Skyone): 19.447 s; total registrado: 23.891 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 918 · 13/10 11:51:38 · ok / live
+- Cliente: m2600: Finalizar pedido.
+- Resposta: Resumo do pedido: 1 Ebitem — R$ 45. Retirada hoje às 13h no Pátio Guedala. Total R$ 45. ⟶ Confirmar o pedido, Marco? 😊.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "confirmar_pedido", "titulo": "Confirmar pedido"}, {"id": "alterar_pedido", "titulo": "Alterar pedido"}, {"id": "cancelar", "titulo": "Cancelar"}]}.
+- Skills: #50 info_unidades → HTTP 200/ok (12 ms), ref={"unidade": "patio_guedala"}.
+- Saídas persistidas: m2601 parte 0 texto, enviada, 13/10 11:52:00; m2602 parte 1 texto, enviada, 13/10 11:52:07; m2603 parte 2 texto, enviada, 13/10 11:52:08, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "confirmar_pedido", "titulo": "Confirmar pedido"}, {"id": "alterar_pedido", "titulo": "Alterar pedido"}, {"id": "cancelar", "titulo": "Cancelar"}]}.
+- Tempo do agente (proxy de Skyone): 27.706 s; total registrado: 32.104 s; aviso de demora: True; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 919 · 13/10 11:53:11 · ok / live
+- Cliente: m2604: Confirmar pedido.
+- Resposta: Perfeito, Marco — seu pedido é o nº 29695. A unidade Pátio Guedala vai conferir e você receberá as atualizações por aqui 😊 ⟶ Quer que eu te ajude com mais alguma coisa?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: —.
+- Skills: #51 fechar_pedido → HTTP 201/ok (33 ms), ref={"numero": "29695"}.
+- Saídas persistidas: m2605 parte 1 texto, enviada, 13/10 11:53:31; m2606 parte 2 texto, enviada, 13/10 11:53:32.
+- Tempo do agente (proxy de Skyone): 18.589 s; total registrado: 23.104 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 920 · 13/10 11:53:52 · ok / live
+- Cliente: m2607: Obrigado.
+- Resposta: Sem texto.
+- Ação: silencio; motivo: agradecimento_final; desfecho: —; reação: {"emoji": "❤️", "motivo": null, "resultado": "aplicada"}.
+- Botões solicitados: —.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: Nenhuma vinculada ao request_id.
+- Tempo do agente (proxy de Skyone): 10.355 s; total registrado: 15.158 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 921 · 13/10 12:00:24 · ok / live
+- Cliente: m2610: Ola.
+- Resposta: Boa tarde, Marco 😊 ⟶ Como posso ajudar você agora?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: —.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2611 parte 0 texto, enviada, 13/10 12:00:47; m2612 parte 1 texto, enviada, 13/10 12:00:49; m2613 parte 2 texto, enviada, 13/10 12:00:50.
+- Tempo do agente (proxy de Skyone): 22.701 s; total registrado: 29.259 s; aviso de demora: True; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 922 · 13/10 12:01:02 · ok / live
+- Cliente: m2614: Quero fazer um pedido.
+- Resposta: Beleza, Marco — vamos pedir do Pátio Guedala 😊 ⟶ O que você quer pedir?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: —.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2615 parte 1 texto, enviada, 13/10 12:01:15; m2616 parte 2 texto, enviada, 13/10 12:01:16.
+- Tempo do agente (proxy de Skyone): 12.768 s; total registrado: 18.587 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 923 · 13/10 12:01:44 · ok / live
+- Cliente: m2617: Ebiten.
+- Resposta: Anotei 1 Ebitem no seu pedido, Marco 😊 ⟶ Quer incluir mais algum item?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "adicionar_mais_itens", "titulo": "Adicionar mais itens"}, {"id": "finalizar_pedido", "titulo": "Finalizar pedido"}]}.
+- Skills: #52 buscar_catalogo → HTTP 200/ok (56 ms), ref={"unidade": "patio_guedala", "categorias": false, "qtd_resultados": 2}; #53 adicionar_item → HTTP 200/ok (21 ms), ref={"item_id": 718, "item_nome": "Ebitem", "quantidade": 1, "item_unidade": "patio_guedala"}.
+- Saídas persistidas: m2618 parte 1 texto, enviada, 13/10 12:02:08; m2619 parte 2 texto, enviada, 13/10 12:02:09, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "adicionar_mais_itens", "titulo": "Adicionar mais itens"}, {"id": "finalizar_pedido", "titulo": "Finalizar pedido"}]}.
+- Tempo do agente (proxy de Skyone): 22.103 s; total registrado: 29.067 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 924 · 13/10 12:02:53 · ok / live
+- Cliente: m2620: Finalizar pedido.
+- Resposta: Certo, Marco — será entrega ou retirada? 😊.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "entrega", "titulo": "Entrega"}, {"id": "retirada", "titulo": "Retirada"}]}.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2621 parte 1 texto, enviada, 13/10 12:03:07, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "entrega", "titulo": "Entrega"}, {"id": "retirada", "titulo": "Retirada"}]}.
+- Tempo do agente (proxy de Skyone): 12.439 s; total registrado: 16.473 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 925 · 13/10 12:04:20 · ok / live
+- Cliente: m2622: Retirada.
+- Resposta: Perfeito, Marco — resumo do pedido: 1 Ebitem — R$ 45. Retirada no Pátio Guedala; horário ainda não definido. ⟶ Quer que eu coloque para o quanto antes ou prefere escolher um horário?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "o_quanto_antes", "titulo": "O quanto antes"}, {"id": "escolher_horario", "titulo": "Escolher horário"}]}.
+- Skills: #54 definir_entrega → HTTP 200/ok (11 ms), ref={"modalidade": "retirada"}.
+- Saídas persistidas: m2623 parte 1 texto, enviada, 13/10 12:04:49; m2624 parte 2 texto, enviada, 13/10 12:04:50, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "o_quanto_antes", "titulo": "O quanto antes"}, {"id": "escolher_horario", "titulo": "Escolher horário"}]}.
+- Tempo do agente (proxy de Skyone): 27.312 s; total registrado: 32.210 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 926 · 13/10 12:05:03 · ok / live
+- Cliente: m2625: O quanto antes.
+- Resposta: Marco, resumo do pedido: 1 Ebitem — R$ 45. Retirada no Pátio Guedala; horário: O quanto antes. ⟶ Total: R$ 45 (taxa a confirmar). Confirmar o pedido? 😊.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "confirmar_pedido", "titulo": "Confirmar pedido"}, {"id": "alterar_pedido", "titulo": "Alterar pedido"}, {"id": "cancelar", "titulo": "Cancelar"}]}.
+- Skills: #55 definir_entrega → HTTP 200/ok (16 ms), ref=—.
+- Saídas persistidas: m2626 parte 1 texto, enviada, 13/10 12:05:27; m2627 parte 2 texto, enviada, 13/10 12:05:28, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "confirmar_pedido", "titulo": "Confirmar pedido"}, {"id": "alterar_pedido", "titulo": "Alterar pedido"}, {"id": "cancelar", "titulo": "Cancelar"}]}.
+- Tempo do agente (proxy de Skyone): 23.775 s; total registrado: 28.263 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 927 · 13/10 12:05:40 · ok / live
+- Cliente: m2628: Confirmar pedido.
+- Resposta: Marco, seu pedido é o nº 17450. A unidade vai conferir e você receberá as atualizações por aqui 😊 ⟶ Quer que eu ajude com mais alguma coisa?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: —.
+- Skills: #56 info_unidades → HTTP 200/ok (14 ms), ref={"unidade": "patio_guedala"}; #57 fechar_pedido → HTTP 201/ok (22 ms), ref={"numero": "17450"}.
+- Saídas persistidas: m2629 parte 1 texto, enviada, 13/10 12:06:05; m2630 parte 2 texto, enviada, 13/10 12:06:06.
+- Tempo do agente (proxy de Skyone): 24.612 s; total registrado: 28.718 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 928 · 13/10 13:59:34 · ok / live
+- Cliente: m2638: Oi.
+- Resposta: Boa tarde, Marco 😊 ⟶ O que você quer fazer agora?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "fazer_pedido", "titulo": "Fazer pedido"}, {"id": "acompanhar_pedido", "titulo": "Acompanhar pedido"}, {"id": "falar_com_atendente", "titulo": "Falar com atendente"}]}.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2639 parte 0 texto, enviada, 13/10 13:59:56; m2640 parte 1 texto, enviada, 13/10 13:59:57; m2641 parte 2 texto, enviada, 13/10 13:59:58, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "fazer_pedido", "titulo": "Fazer pedido"}, {"id": "acompanhar_pedido", "titulo": "Acompanhar pedido"}, {"id": "falar_com_atendente", "titulo": "Falar com atendente"}]}.
+- Tempo do agente (proxy de Skyone): 22.193 s; total registrado: 28.158 s; aviso de demora: True; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 929 · 13/10 14:00:18 · refeito / live
+- Cliente: m2642: Acompanhar pedido.
+- Resposta: Seu pedido nº 17450 está em preparo na unidade Pátio Guedala. ⟶ Quer que eu fale com um atendente ou prefere voltar ao menu? 😊.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "falar_com_atendente", "titulo": "Falar com atendente"}, {"id": "voltar_ao_menu", "titulo": "Voltar ao menu"}]}.
+- Skills: #58 consultar_pedido → HTTP 200/ok (35 ms), ref={"numero": "17450"}.
+- Saídas persistidas: Nenhuma vinculada ao request_id.
+- Tempo do agente (proxy de Skyone): 34.527 s; total registrado: 37.302 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 930 · 13/10 14:00:52 · ok / live
+- Cliente: m2642: Acompanhar pedido / m2643: Meu nome é Carlos.
+- Resposta: Oi Carlos — seu pedido nº 17450 está sendo preparado no Pátio Guedala 😊 ⟶ É 1 Ebitem para retirada (horário: O quanto antes). Quer que eu avise quando estiver pronto?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: —.
+- Skills: #59 consultar_pedido → HTTP 200/ok (10 ms), ref={"numero": "17450"}.
+- Saídas persistidas: m2644 parte 1 texto, enviada, 13/10 14:01:22; m2645 parte 2 texto, enviada, 13/10 14:01:22.
+- Tempo do agente (proxy de Skyone): 28.033 s; total registrado: 48.063 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=929.
+
+#### Turno 931 · 13/10 14:01:39 · ok / live
+- Cliente: m2646: Me avise quando estiver pronto.
+- Resposta: Combinado, Carlos — eu te aviso por aqui assim que o pedido nº 17450 estiver pronto para retirada 😊 ⟶ Quer mais alguma coisa?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "acompanhar_pedido", "titulo": "Acompanhar pedido"}, {"id": "falar_atendente", "titulo": "Falar com atendente"}]}.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2647 parte 1 texto, enviada, 13/10 14:02:01; m2648 parte 2 texto, enviada, 13/10 14:02:02, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "acompanhar_pedido", "titulo": "Acompanhar pedido"}, {"id": "falar_atendente", "titulo": "Falar com atendente"}]}.
+- Tempo do agente (proxy de Skyone): 21.550 s; total registrado: 23.358 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 932 · 13/10 14:03:08 · ok / live
+- Cliente: m2650: Muito obrigado por avisar.
+- Resposta: Sem texto.
+- Ação: silencio; motivo: agradecimento_final; desfecho: —; reação: {"emoji": "❤️", "motivo": null, "resultado": "aplicada"}.
+- Botões solicitados: —.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: Nenhuma vinculada ao request_id.
+- Tempo do agente (proxy de Skyone): 14.129 s; total registrado: 18.936 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 933 · 13/10 14:33:20 · ok / live
+- Cliente: m2654: Oi.
+- Resposta: Boa tarde, Carlos 😊 ⟶ O que você quer fazer agora?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "fazer_pedido", "titulo": "Fazer pedido"}, {"id": "acompanhar_pedido", "titulo": "Acompanhar pedido"}, {"id": "falar_atendente", "titulo": "Falar com atendente"}]}.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2655 parte 1 texto, enviada, 13/10 14:33:38; m2656 parte 2 texto, enviada, 13/10 14:33:39, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "fazer_pedido", "titulo": "Fazer pedido"}, {"id": "acompanhar_pedido", "titulo": "Acompanhar pedido"}, {"id": "falar_atendente", "titulo": "Falar com atendente"}]}.
+- Tempo do agente (proxy de Skyone): 16.450 s; total registrado: 23.035 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 934 · 13/10 14:33:54 · ok / live
+- Cliente: m2657: Acompanhar pedido.
+- Resposta: Seu pedido nº 17450 está pronto para retirada na unidade Pátio Guedala 🛍️ ⟶ Quer que eu te avise quando houver alguma atualização?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "me_avise", "titulo": "Me avise"}, {"id": "falar_com_atendente", "titulo": "Falar com atendente"}]}.
+- Skills: #60 consultar_pedido → HTTP 200/ok (29 ms), ref={"numero": "17450"}.
+- Saídas persistidas: m2658 parte 1 texto, enviada, 13/10 14:34:21; m2659 parte 2 texto, enviada, 13/10 14:34:22, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "me_avise", "titulo": "Me avise"}, {"id": "falar_com_atendente", "titulo": "Falar com atendente"}]}.
+- Tempo do agente (proxy de Skyone): 25.561 s; total registrado: 29.972 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+### Conversa final 3428
+
+#### Turno 850 · 12/10 19:34:36 · ok / mock
+- Cliente: m2378: oi.
+- Resposta: Resposta simulada..
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: —.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2379 parte 1 texto, enviada, 12/10 19:34:36.
+- Tempo do agente (proxy de Skyone): 0.054 s; total registrado: 4.236 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+### Conversa final 7046
+
+#### Turno 849 · 12/10 16:19:16 · ignorado / live
+- Cliente: (mensagem pessoal; conteúdo omitido).
+- Resposta: Sem texto.
+- Ação: —; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: —.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: Nenhuma vinculada ao request_id.
+- Tempo do agente (proxy de Skyone): 0.036 s; total registrado: 4.297 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 874 · 12/10 20:45:40 · ok / live
+- Cliente: (mensagem pessoal; conteúdo omitido).
+- Resposta: Boa noite, <nome tirado da mensagem> 😊 ⟶ Vi que você tinha começado um pedido com 1 Edamame no seu carrinho mais cedo. Quer que eu monte de novo ou começar do zero?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "montar_de_novo", "titulo": "Montar de novo"}, {"id": "comecar_do_zero", "titulo": "Começar do zero"}]}.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2445 parte 1 texto, enviada, 12/10 20:45:56; m2446 parte 2 texto, enviada, 12/10 20:45:57, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "montar_de_novo", "titulo": "Montar de novo"}, {"id": "comecar_do_zero", "titulo": "Começar do zero"}]}.
+- Tempo do agente (proxy de Skyone): 14.970 s; total registrado: 19.856 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 880 · 12/10 20:58:01 · ok / live
+- Cliente: (mensagem pessoal; conteúdo omitido).
+- Resposta: Oi, <nome tirado da mensagem> 😊 ⟶ Vi que você tinha começado um pedido com 1 Edamame no seu carrinho mais cedo. Quer que eu monte de novo ou começar do zero?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "montar_de_novo", "titulo": "Montar de novo"}, {"id": "comecar_do_zero", "titulo": "Começar do zero"}]}.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2465 parte 1 texto, enviada, 12/10 20:58:20; m2466 parte 2 texto, enviada, 12/10 20:58:20, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "montar_de_novo", "titulo": "Montar de novo"}, {"id": "comecar_do_zero", "titulo": "Começar do zero"}]}.
+- Tempo do agente (proxy de Skyone): 17.342 s; total registrado: 23.453 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 885 · 12/10 21:04:57 · refeito / live
+- Cliente: (mensagem pessoal; conteúdo omitido).
+- Resposta: Perfeito, <nome tirado da mensagem> 😊 ⟶ Vi que você tinha começado um pedido com 1 Edamame no seu carrinho mais cedo. Quer que eu monte de novo ou começar do zero?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "montar_de_novo", "titulo": "Montar de novo"}, {"id": "comecar_do_zero", "titulo": "Começar do zero"}]}.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: Nenhuma vinculada ao request_id.
+- Tempo do agente (proxy de Skyone): 17.405 s; total registrado: 21.692 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 886 · 12/10 21:05:15 · ok / live
+- Cliente: (mensagem pessoal; conteúdo omitido).
+- Resposta: Boa noite, <nome tirado da mensagem> 😊 ⟶ Vi que você tinha começado um pedido com 1 Edamame. Quer que eu monte de novo ou começar do zero?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "montar_de_novo", "titulo": "Montar de novo"}, {"id": "comecar_do_zero", "titulo": "Começar do zero"}]}.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2479 parte 1 texto, enviada, 12/10 21:05:34; m2480 parte 2 texto, enviada, 12/10 21:05:35, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "montar_de_novo", "titulo": "Montar de novo"}, {"id": "comecar_do_zero", "titulo": "Começar do zero"}]}.
+- Tempo do agente (proxy de Skyone): 18.273 s; total registrado: 37.498 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=885.
+
+#### Turno 896 · 12/10 22:34:12 · ok / live
+- Cliente: (mensagem pessoal; conteúdo omitido).
+- Resposta: Oi <nome>, vi o link do sofá — massa! 😊 Eu aqui cuido só dos pedidos e não consigo ajudar com compras de móveis. ⟶ Voltando ao seu pedido: vi que você tinha 1 Edamame no carrinho que expirou. Quer que eu monte de novo ou começar do zero?.
+- Ação: nenhuma; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: {"opcoes": [{"id": "montar_de_novo", "titulo": "Montar de novo"}, {"id": "comecar_do_zero", "titulo": "Começar do zero"}]}.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: m2507 parte 1 texto, enviada, 12/10 22:34:31; m2508 parte 2 texto, enviada, 12/10 22:34:32, menu={"forma": "botao", "motivo": null, "opcoes": [{"id": "montar_de_novo", "titulo": "Montar de novo"}, {"id": "comecar_do_zero", "titulo": "Começar do zero"}]}.
+- Tempo do agente (proxy de Skyone): 17.225 s; total registrado: 20.194 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 897 · 12/10 22:43:44 · ignorado / live
+- Cliente: (mensagem pessoal; conteúdo omitido).
+- Resposta: Sem texto.
+- Ação: —; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: —.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: Nenhuma vinculada ao request_id.
+- Tempo do agente (proxy de Skyone): 0.034 s; total registrado: 4.824 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 898 · 12/10 22:53:00 · ignorado / live
+- Cliente: (mensagem pessoal; conteúdo omitido).
+- Resposta: Sem texto.
+- Ação: —; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: —.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: Nenhuma vinculada ao request_id.
+- Tempo do agente (proxy de Skyone): 0.454 s; total registrado: 5.316 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+#### Turno 899 · 12/10 23:14:52 · ignorado / live
+- Cliente: (mensagem pessoal; conteúdo omitido).
+- Resposta: Sem texto.
+- Ação: —; motivo: —; desfecho: —; reação: —.
+- Botões solicitados: —.
+- Skills: Nenhuma registrada na janela.
+- Saídas persistidas: Nenhuma vinculada ao request_id.
+- Tempo do agente (proxy de Skyone): 0.012 s; total registrado: 4.425 s; aviso de demora: False; guardas: anúncio=—, transferência=—; refeito_de=—.
+
+## Anexo B — mensagens fora dos turnos e outras conversas
+
+**Omitido do repositório.** O anexo original listava 102 mensagens de 15 conversas, quase todas pessoais (o número do WhatsApp também é usado para conversa particular) e sem relação com o atendimento do By Koji: recados de família, mensagens de terceiros e avisos de cobrança. Esse conteúdo não deve ficar no histórico do git.
+
+A versão integral deste documento, com o anexo, está fora do repositório, em `/home/twadmin/backups/gateway/docs-fora-do-git/ANALISE_COMPORTAMENTO_1.integral-20261013.md` (acesso só do usuário do servidor).
+
+O que o anexo mostrava, sem o conteúdo: 13 conversas sem nenhum turno do agente (o piloto só responde aos contatos permitidos); nelas, mensagens de quem usa o número (origem `humano`), mensagens recebidas, anexos que o gateway não lê e modelos de mensagem de empresas. Na conversa de final 1513, os 4 avisos automáticos de pedido e as 4 reações ❤️ citados na seção 2.
