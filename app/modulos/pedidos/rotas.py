@@ -142,7 +142,10 @@ async def entrega(request:Request,conversation_id:str,dados:Entrega,ctx=Depends(
     r=await escrever(request,t,conversation_id,lambda c: servico.entrega(c,t,conversation_id,enviados),
         'definir_entrega',{'detalhe':', '.join(sorted(enviados))})
     # DISP1: com o horário novo, algum item do carrinho deixou de ser servido? O agente avisa o cliente na hora, não só no fechamento.
-    if isinstance(r,dict): r['itens_indisponiveis']=r['carrinho']['itens_indisponiveis']
+    if isinstance(r,dict):
+        r['itens_indisponiveis']=r['carrinho']['itens_indisponiveis']
+        # HOR2: a unidade (ou o relógio) mudou e o horário guardado não serve mais para ela? Avisa na hora, sem recusar a troca.
+        r['aviso_horario']=r['carrinho']['horario_aviso']
     return r
 
 

@@ -57,6 +57,9 @@ DIGITANDO_S=25
 # Refazer o turno (UX2/UX3.1): no máximo dois por turno; o segundo só enquanto o turno original começou há até 30 s.
 MAX_REFAZER=2
 TETO_REFAZER_S=30
+# HOR2: recado ao agente quando ele transfere por "pedido_para_confirmar" sem nenhuma Skill ter recusado nada no turno.
+AVISO_TRANSFERENCIA=('Você pediu transferência por pedido_para_confirmar, mas nenhuma Skill recusou nada neste turno. '
+                     'Chame a Skill necessária (buscar_catalogo, adicionar_item) antes; só transfira se ela recusar, ou explique o motivo real.')
 
 
 # Palavras de quem só está encerrando ou agradecendo. Saudações ("oi", "bom dia", "tudo bem") e
@@ -507,17 +510,23 @@ return 1
                     if reservada: await vaga.renovar(cfg)
                     turno=await self._responder(tenant,conversa,conv,cfg)
                     if turno is None: return 'vazio'
-                # PED2: o agente disse que fechou o pedido sem fechar_pedido de sucesso → refaz uma vez, com aviso no pacote.
-                if await self._anuncio_falso(tenant,conversa,cfg,turno):
-                    from modulos.pedidos import anuncio
-                    await self.db.execute("UPDATE turnos SET anuncio_falso='refeito' WHERE tenant_id=$1 AND id=$2",tenant,turno['id'])
+                # Guardas do turno: uma só vez por turno, a resposta é descartada e o turno refeito com um recado no pacote.
+                # PED2: o agente disse que fechou o pedido sem fechar_pedido de sucesso.
+                # HOR2: o agente transferiu por "pedido_para_confirmar" sem nenhuma Skill ter recusado nada.
+                from modulos.pedidos import anuncio
+                recado=coluna=None
+                if await self._anuncio_falso(tenant,conversa,cfg,turno): recado,coluna=anuncio.AVISO_AO_AGENTE,'anuncio_falso'
+                elif await self._transferencia_sem_recusa(tenant,conversa,cfg,turno): recado,coluna=AVISO_TRANSFERENCIA,'transferencia_sem_recusa'
+                if recado:
+                    await self.db.execute(f"UPDATE turnos SET {coluna}='refeito' WHERE tenant_id=$1 AND id=$2",tenant,turno['id'])
                     await self._descartar(tenant,conversa,turno)
                     await self.redis.eval("if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('EXPIRE',KEYS[1],ARGV[2]) else return 0 end",1,lock,token,cfg['timeout_s']+90)
                     if reservada: await vaga.renovar(cfg)
-                    turno=await self._responder(tenant,conversa,conv,cfg,recado=anuncio.AVISO_AO_AGENTE)
+                    turno=await self._responder(tenant,conversa,conv,cfg,recado=recado)
                     if turno is None: return 'vazio'
-            # Repetiu (ou o turno foi retomado depois de uma queda): o texto do agente não sai.
+            # Repetiu (ou o turno foi retomado depois de uma queda): o anúncio falso não sai; a transferência segue, com alerta.
             if await self._anuncio_falso(tenant,conversa,cfg,turno): turno=await self._segurar_anuncio(tenant,conversa,cfg,turno)
+            elif await self._transferencia_sem_recusa(tenant,conversa,cfg,turno): turno=await self._manter_transferencia(tenant,conversa,cfg,turno)
             await self._concluir(tenant,conversa,cfg,turno,await self._enviar_partes(tenant,conversa,cfg,turno))
             return 'concluido'
         finally:
@@ -589,16 +598,51 @@ return 1
             if 'pedidos' not in (modelo or {}).get('modulos',()) or not await self.db.fetchval(
                     "SELECT ativo FROM modulos_tenant WHERE tenant_id=$1 AND modulo='pedidos'",tenant): return None
             # Turno refeito: vale o fechar_pedido feito desde a primeira tentativa.
-            desde=turno['agente_inicio'];anterior=turno['refeito_de']
-            for _ in range(MAX_REFAZER+2):
-                if anterior is None: break
-                o=await self.db.fetchrow('SELECT refeito_de,agente_inicio FROM turnos WHERE tenant_id=$1 AND id=$2',tenant,anterior)
-                if o is None: break
-                desde=min(desde,o['agente_inicio']);anterior=o['refeito_de']
-            return await anuncio.avaliar(self.db,tenant,conversa,resultado,desde)
+            return await anuncio.avaliar(self.db,tenant,conversa,resultado,await self._inicio_da_cadeia(tenant,turno))
         except Exception:
             log.warning('Anúncio de pedido não conferido; a resposta segue')
             return None
+
+    async def _inicio_da_cadeia(self,tenant,turno):
+        """Início do primeiro turno quando este é refeito de outro(s): as Skills chamadas desde lá contam para este."""
+        desde=turno['agente_inicio'];anterior=turno['refeito_de']
+        for _ in range(MAX_REFAZER+2):
+            if anterior is None: break
+            o=await self.db.fetchrow('SELECT refeito_de,agente_inicio FROM turnos WHERE tenant_id=$1 AND id=$2',tenant,anterior)
+            if o is None: break
+            desde=min(desde,o['agente_inicio']);anterior=o['refeito_de']
+        return desde
+
+    async def _transferencia_sem_recusa(self,tenant,conversa,cfg,turno):
+        """O turno transfere por "pedido_para_confirmar" sem que nenhuma Skill tenha recusado nada nele (HOR2)?
+        Esse motivo existe para o item que o gateway recusou (sem preço…); sem recusa, o agente não tentou.
+        Só para agente com o módulo de pedidos. Falha na conferência não segura a resposta."""
+        if turno['origem']!='cliente' or turno['status']!='ok' or turno['transferencia_sem_recusa']=='mantida': return False
+        try:
+            resultado=json.loads(turno['resposta']) if isinstance(turno['resposta'],str) else (turno['resposta'] or {})
+            if resultado.get('acao')!='transferir_humano' or resultado.get('motivo')!='pedido_para_confirmar': return False
+            modelo=await self.repo.modelo(tenant,cfg['modelo_id'],cfg['modelo_versao'])
+            if 'pedidos' not in (modelo or {}).get('modulos',()) or not await self.db.fetchval(
+                    "SELECT ativo FROM modulos_tenant WHERE tenant_id=$1 AND modulo='pedidos'",tenant): return False
+            return not await self.db.fetchval('''SELECT EXISTS(SELECT 1 FROM skill_registro WHERE tenant_id=$1 AND conversation_id=$2
+                AND status>=400 AND criado_em>=$3)''',tenant,conversa,await self._inicio_da_cadeia(tenant,turno))
+        except Exception:
+            log.warning('Transferência não conferida; a resposta segue')
+            return False
+
+    async def _manter_transferencia(self,tenant,conversa,cfg,turno):
+        """O agente repetiu a transferência sem recusa de Skill: ela segue (pode haver razão que o gateway não vê) e a operação é avisada."""
+        async with self.db.acquire() as conn,conn.transaction():
+            turno=await conn.fetchrow("UPDATE turnos SET transferencia_sem_recusa='mantida' WHERE tenant_id=$1 AND id=$2 RETURNING *",tenant,turno['id'])
+            await auditar(conn,tenant,'sistema','transbordo.sem_recusa',conversa)
+        log.warning('Transferência por pedido_para_confirmar sem recusa de Skill, mantida depois de refazer (empresa %s, turno %s)',tenant,turno['id'])
+        try:
+            from nucleo.alertas import Alertas
+            await Alertas(self.redis,self.http,self.db,self.prefixo).avisar('aviso','transferência sem tentativa',
+                f'Empresa: {tenant} · agente: {cfg["id"]} · turno {turno["id"]} · conversa de final {conversa[-4:]}\n'
+                'O agente transferiu por "pedido para confirmar" sem nenhuma Skill ter recusado nada, mesmo depois de refazer o turno.')
+        except Exception: log.warning('Alerta de transferência sem tentativa não enviado')
+        return turno
 
     async def _segurar_anuncio(self,tenant,conversa,cfg,turno):
         """Troca a resposta do turno pelo texto fixo com o botão "Confirmar pedido" e avisa a operação.

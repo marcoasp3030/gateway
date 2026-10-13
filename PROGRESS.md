@@ -1247,3 +1247,8 @@ PY
 - PATCH do item ampliado (nome, descrição, preço, ativo, categoria, disponibilidade; `atualizado_em` → 409 com o item atual); GET individual; GET de categorias da unidade; prévia de disponibilidade sem gravar; `disponivel_agora`/`indisponivel_motivo`/`data_referencia` nas leituras; histórico em `gestao_alteracoes`.
 - Testes: `tests/test_cat2.py` (2). Limites registrados: categoria some quando fica sem itens; reimportar CSV sobrescreve a edição do painel.
 - **CAT2 implantado em 13/10/2026 02:44 UTC:** `gateway:39a4a25`, schema 40 (sem migração), trava com 274 passed (0 falhas, 0 pulados). Volta: `gateway:d9b079c`. Backup: `pre-cat2-20261013T024344Z`.
+
+## HOR2 — próxima abertura com cardápio, horário na troca de unidade e transferência sem tentativa — 2026-10-13
+
+- Análise das conversas de 13/10 entregue (transferências sem tentar, unidade sem cardápio oferecida, horário presumido, Skyone com o dobro do tempo, perfil de teste).
+- Itens 6, 7 e 8 aprovados e implementados: `proxima_abertura` da raiz só com unidades com cardápio; `horario_aviso` no carrinho e `aviso_horario` no `definir_entrega`; guarda de transferência por `pedido_para_confirmar` sem recusa de Skill (refaz 1 vez; repetiu → segue com alerta). Migração 041. Testes em `tests/test_hor2.py` (2). Contrato em `docs/ESPEC_HOR2.md`.

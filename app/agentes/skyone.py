@@ -134,7 +134,13 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
         contexto['solicitacoes'] = await abertas(repo.db,tenant_id,conversa_id)
     # CFG1-c: situação da empresa e da equipe agora, e o que está ligado neste agente. Sempre presentes.
     from nucleo import expediente
-    empresa_agora = await expediente.da_empresa(repo.db,tenant_id,tenant['timezone'],agora)
+    # HOR2: a próxima abertura que vai ao agente é a de uma unidade onde dá para pedir (tem_cardapio). Empresa sem nenhum
+    # item para pedir (sem catálogo) continua com a de qualquer unidade.
+    from nucleo.horarios import itens_no_cardapio
+    cardapio = {codigo for codigo,n in (await itens_no_cardapio(repo.db,tenant_id)).items() if n>0}
+    empresa_agora = await expediente.da_empresa(repo.db,tenant_id,tenant['timezone'],agora,cardapio or None)
+    abertura = {**empresa_agora,**empresa_agora['do_cardapio']} if cardapio and empresa_agora['fora'] and empresa_agora['do_cardapio'] else \
+               ({**empresa_agora,'proxima':None} if cardapio and empresa_agora['fora'] else empresa_agora)
     equipe_agora = await expediente.da_equipe(repo.db,tenant_id,cfg,tenant['timezone'],agora,empresa_agora)
     com_menu = cfg.get('botoes_interativos')=='on' and (canal or {}).get('tipo')=='uazapi'
     com_reacao = cfg.get('reacoes')=='on' and (canal or {}).get('tipo')=='uazapi'
@@ -142,9 +148,9 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
     return {
         # CAL1: hoje + 7 dias com dia da semana, feriado e o que muda nas unidades. O agente não calcula datas.
         'calendario':await calendario.do_pacote(repo.db,tenant_id,tenant['timezone'],agora),
-        'unidades':await unidades(repo.db,tenant_id,tenant['timezone']),
+        'unidades':await unidades(repo.db,tenant_id,tenant['timezone'],agora),
         'contexto_modulos':contexto,
-        'fora_do_horario':empresa_agora['fora'],'proxima_abertura':expediente.proxima_abertura(empresa_agora),
+        'fora_do_horario':empresa_agora['fora'],'proxima_abertura':expediente.proxima_abertura(abertura),
         'equipe_disponivel':equipe_agora['disponivel'],'retorno_equipe':expediente.retorno_equipe(equipe_agora),
         'recursos':{'botoes':com_menu,'lista':com_menu,'reacoes':com_reacao,'emojis_de_reacao':list(cfg.get('reacoes_emojis') or []) if com_reacao else [],
                     'notificar_equipe':cfg.get('notificar_equipe')=='on'},

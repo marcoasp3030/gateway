@@ -178,6 +178,11 @@ async def metricas(request:Request,tenant_id:str,agente:str|None=None):
     # PED2: turnos em que o agente anunciou pedido fechado sem fechar_pedido de sucesso (refeitos com aviso; segurados = texto do agente não enviado).
     falsos=await request.app.state.db.fetchrow("""SELECT count(*) FILTER (WHERE anuncio_falso='refeito') AS refeitos,count(*) FILTER (WHERE anuncio_falso='segurado') AS segurados
         FROM turnos WHERE tenant_id=$1 AND anuncio_falso IS NOT NULL AND ($2::text IS NULL OR agente_id=$2)""",tenant_id,agente)
+    semrec=await request.app.state.db.fetchrow("""SELECT count(*) FILTER (WHERE transferencia_sem_recusa='refeito') AS refeitas,
+        count(*) FILTER (WHERE transferencia_sem_recusa='mantida') AS mantidas
+        FROM turnos WHERE tenant_id=$1 AND transferencia_sem_recusa IS NOT NULL AND ($2::text IS NULL OR agente_id=$2)""",tenant_id,agente)
     return {**dict(linha),'fila':fila,'botoes':botoes,'picotadas':picotadas,'solicitacoes':solicitacoes,
             'reacoes':reacoes,'fora_do_horario':horario,'transbordo':transbordo,
-            'anuncios_falsos_refeitos':falsos['refeitos'],'anuncios_falsos_segurados':falsos['segurados']}
+            'anuncios_falsos_refeitos':falsos['refeitos'],'anuncios_falsos_segurados':falsos['segurados'],
+            # HOR2: transferências por pedido_para_confirmar sem recusa de Skill (refeitas com aviso; mantidas = o agente repetiu).
+            'transferencias_sem_recusa_refeitas':semrec['refeitas'],'transferencias_sem_recusa_mantidas':semrec['mantidas']}

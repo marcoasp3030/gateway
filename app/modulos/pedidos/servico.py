@@ -81,7 +81,7 @@ async def retrato(conn,tenant,conversa):
     c=await aberto(conn,tenant,conversa)
     if c is None:
         return {'conversation_id':conversa,'unidade':None,'modalidade':None,'endereco':None,'horario':None,
-                'agendado_para':None,'horario_vencido':False,'observacao':None,
+                'agendado_para':None,'horario_vencido':False,'horario_aviso':None,'observacao':None,
                 'maioridade_confirmada':False,'itens':[],'numero_itens':0,'subtotal':None,'taxa_entrega':None,'total':None,
                 'pedido_minimo':None,'tem_alcoolico':False,'itens_indisponiveis':[],'faltando':['itens','modalidade'],'pode_fechar':False,'atualizado_em':None}
     ls=await linhas(conn,tenant,c['id'])
@@ -103,10 +103,13 @@ async def retrato(conn,tenant,conversa):
     if tem_alcool and not c['maioridade_confirmada']: faltando.append('maioridade_confirmada')
     # PED2: horário marcado que já passou não fecha pedido; o agente pergunta outro.
     fuso=await fuso_da_unidade(conn,tenant,u);quando=agendamento.do_carrinho(c,fuso);passou=agendamento.vencido(quando)
-    if passou: faltando.append('horario')
+    # HOR2: o horário guardado ainda vale para a unidade do carrinho? (já passou, ou a unidade não funciona nessa hora —
+    # acontece quando a unidade muda depois de o horário ser marcado). Mesmo formato dos motivos de horário.
+    aviso=await aviso_do_horario(conn,tenant,u,fuso,quando)
+    if passou or aviso: faltando.append('horario')
     if fora: faltando.append('item_indisponivel')
     return {'conversation_id':conversa,'unidade':c['unidade'],'modalidade':c['modalidade'],'endereco':c['endereco'],'horario':c['horario'],
-            'agendado_para':agendamento.iso(quando,fuso),'horario_vencido':passou,
+            'agendado_para':agendamento.iso(quando,fuso),'horario_vencido':passou,'horario_aviso':aviso,
             'observacao':c['observacao'],'maioridade_confirmada':c['maioridade_confirmada'],'itens':itens,
             'numero_itens':sum(l['quantidade'] for l in ls),'subtotal':dinheiro(subtotal),'taxa_entrega':dinheiro(taxa),
             'total':dinheiro(subtotal+(taxa or 0)) if subtotal is not None else None,
@@ -116,6 +119,13 @@ async def retrato(conn,tenant,conversa):
             'faltando':faltando,'pode_fechar':not faltando,
             # Última alteração do carrinho (item ou entrega): diz se ele é desta conversa ou antigo.
             'atualizado_em':c['atualizado_em'].isoformat(timespec='seconds')}
+
+
+async def aviso_do_horario(conn,tenant,u,fuso,quando):
+    """None, ou {"motivo": "horario_passado"|"horario_fora_funcionamento", + os detalhes da recusa} para o horário do carrinho."""
+    if quando is None: return None
+    motivo,detalhes=await agendamento.conferir(conn,tenant,u,fuso,quando)
+    return {'motivo':motivo,**detalhes} if motivo in ('horario_passado','horario_fora_funcionamento') else None
 
 
 async def indisponiveis(conn,tenant,conversa,ls):

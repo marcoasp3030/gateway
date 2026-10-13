@@ -41,21 +41,26 @@ def variaveis_desconhecidas(campo,texto):
     return sorted({v for v in re.findall(r'\{(\w*)\}',texto or '') if v not in VARIAVEIS.get(campo,())})
 
 
-async def da_empresa(db,tenant,fuso,agora=None):
-    """{"fora": bool, "proxima": ISO|None, "unidade": nome|None, "codigo": código|None, "fuso": fuso da unidade}."""
+async def da_empresa(db,tenant,fuso,agora=None,com_cardapio=None):
+    """{"fora": bool, "proxima": ISO|None, "unidade": nome|None, "codigo": código|None, "fuso": fuso da unidade}.
+    Com `com_cardapio` (códigos das unidades que têm item para pedir), vem também "do_cardapio": a próxima abertura
+    só entre essas unidades, no mesmo formato (ou None)."""
     agora=agora or datetime.now(timezone.utc)
     unidades=await db.fetch('SELECT * FROM tenant_unidades WHERE tenant_id=$1 AND ativo ORDER BY id',tenant)
-    proxima=None;fechadas=0
+    proxima=None;do_cardapio=None;fechadas=0
+    def antes(quando,atual): return atual is None or datetime.fromisoformat(quando)<datetime.fromisoformat(atual['proxima'])
     for u in unidades:
         s=await H.situacao_da_unidade(db,tenant,u,fuso,agora)
         if s['aberta_agora'] is False:
             fechadas+=1
             quando=s.get('proxima_abertura') or s.get('pausada_ate')
-            if quando and (proxima is None or datetime.fromisoformat(quando)<datetime.fromisoformat(proxima['proxima'])):
-                proxima={'proxima':quando,'unidade':u['nome'],'codigo':u['codigo'],'fuso':u['fuso'] or fuso}
+            if not quando: continue
+            esta={'proxima':quando,'unidade':u['nome'],'codigo':u['codigo'],'fuso':u['fuso'] or fuso}
+            if antes(quando,proxima): proxima=esta
+            if com_cardapio is not None and u['codigo'] in com_cardapio and antes(quando,do_cardapio): do_cardapio=esta
     fora=bool(unidades) and fechadas==len(unidades)
-    if not fora: return {'fora':False,'proxima':None,'unidade':None,'codigo':None,'fuso':fuso}
-    return {'fora':True,**(proxima or {'proxima':None,'unidade':None,'codigo':None,'fuso':fuso})}
+    if not fora: return {'fora':False,'proxima':None,'unidade':None,'codigo':None,'fuso':fuso,'do_cardapio':None}
+    return {'fora':True,**(proxima or {'proxima':None,'unidade':None,'codigo':None,'fuso':fuso}),'do_cardapio':do_cardapio}
 
 
 def proxima_abertura(situacao):

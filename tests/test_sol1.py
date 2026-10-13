@@ -188,7 +188,12 @@ def test_notificar_equipe_nao_pausa_protecao_e_painel(tmp_path):
                 e=await estado(c5);assert e['pausada'] and e['aguardando_motivo']=='transferido_pelo_agente' and tuple(await turno(c5))[:2]==('transferir_humano',None) and await sols(c5)==[]
                 # Outros motivos nunca convertem, mesmo com carrinho: pediu_humano, reclamacao, pagamento, pedido_para_confirmar pausam.
                 for n,motivo in enumerate(('pediu_humano','reclamacao','pagamento','pedido_para_confirmar')):
-                    cx=await conversa(f'm{n}');await item(cx);await rodar(cx,fala('Vou transferir.',acao='transferir_humano',motivo=motivo))
+                    cx=await conversa(f'm{n}');await item(cx);transferir=fala('Vou transferir.',acao='transferir_humano',motivo=motivo)
+                    async def com_recusa(payload,transferir=transferir,cx=cx):
+                        # HOR2: pedido_para_confirmar só passa direto quando alguma Skill recusou algo no turno (aqui, um item sem preço).
+                        await pool.execute("INSERT INTO skill_registro(tenant_id,conversation_id,skill,metodo,status,motivo,duracao_ms) VALUES ('bykoji',$1,'adicionar_item','POST',422,'sem_preco',1)",cx)
+                        return await transferir(payload)
+                    await rodar(cx,com_recusa if motivo=='pedido_para_confirmar' else transferir)
                     assert (await estado(cx))['pausada'] and tuple(await turno(cx))[:2]==('transferir_humano',None) and await sols(cx)==[],motivo
 
                 # 5) Destino marcado como grupo externo mascara o telefone; sem destino cadastrado grava a solicitação e não cria alerta.
