@@ -1240,3 +1240,9 @@ PY
 - 13/10/2026: diagnóstico do teste com o prompt v6.3 entregue (turno 894: `adicionar_item` com id errado → `sem_preco` → transferência). `docs/ESPEC_DISP1.md` ganhou a seção 6 (registro com `ref`, `unidade_diferente` antes do preço, proteção `item_nao_buscado`, `tem_cardapio`), com as decisões 10 a 14. **Nada implementado.**
 - **DISP1 aprovado e implementado (13/10/2026):** disponibilidade do item (dias, feriado, horário) na busca, no carrinho, no `definir_entrega` e no `fechar_pedido`; proteção `item_nao_buscado` (30 min); `unidade_diferente` antes do preço; `ref` no registro das Skills; `tem_cardapio`/`itens_no_cardapio`; paginação e ordem das categorias; PATCH de item e colunas opcionais no CSV. Migração 040. Testes em `tests/test_disp1.py` (5). Contrato final em `docs/ESPEC_DISP1.md`, seção 8.
 - **DISP1 implantado em 13/10/2026 01:05 UTC:** `gateway:d9b079c`, schema 40, trava com 272 passed (0 falhas, 0 pulados). Volta: `gateway:7784585`. Backup: `pre-disp1-20261013T010526Z`. Os 4 almoços executivos do By Koji entraram com dias e feriado; **a faixa de horário ficou pendente** (veio em branco na ordem do Marco).
+
+## CAT2 — edição do catálogo pelo painel e disponibilidade atual na API admin — 2026-10-13
+
+- Decisões do Marco (9 itens) implementadas; contrato para o [PAINEL] em `docs/ESPEC_CAT2.md`. Sem migração.
+- PATCH do item ampliado (nome, descrição, preço, ativo, categoria, disponibilidade; `atualizado_em` → 409 com o item atual); GET individual; GET de categorias da unidade; prévia de disponibilidade sem gravar; `disponivel_agora`/`indisponivel_motivo`/`data_referencia` nas leituras; histórico em `gestao_alteracoes`.
+- Testes: `tests/test_cat2.py` (2). Limites registrados: categoria some quando fica sem itens; reimportar CSV sobrescreve a edição do painel.

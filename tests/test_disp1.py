@@ -83,7 +83,7 @@ def test_disponibilidade_na_busca_no_carrinho_e_no_fechamento(monkeypatch):
 
             # Contrato admin: só admin ou plataforma; valida; null tira a restrição; item de outra empresa não existe.
             assert (await client.patch(item,json={'disponibilidade':ALMOCO})).status_code==403
-            for ruim in ({'disponibilidade':{'dias_semana':['segunda']}},{'disponibilidade':{'horario':[['11:30']]}},{'disponibilidade':ALMOCO,'preco':1},{}):
+            for ruim in ({'disponibilidade':{'dias_semana':['segunda']}},{'disponibilidade':{'horario':[['11:30']]}},{'disponibilidade':ALMOCO,'unidade':'morumbi'},{}):
                 assert (await client.patch(item,json=ruim,headers=ADMIN)).status_code==400,ruim
             r=await client.patch(item,json={'disponibilidade':ALMOCO},headers=ADMIN);assert r.status_code==200,r.text
             assert r.json()['disponibilidade']=={**ALMOCO,'resumo':RESUMO} and r.json()['nome']=='Edamame'

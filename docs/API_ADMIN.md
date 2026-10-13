@@ -229,6 +229,8 @@ Estado persistente por agente: três falhas consecutivas em cinco minutos abrem 
 
 **Disponibilidade do item (DISP1, `docs/ESPEC_DISP1.md` seção 8.5):** `PATCH /tenants/{t}/catalogo/itens/{item_id}` com `{"disponibilidade": {"dias_semana": ["seg",…], "exceto_feriado": true, "horario": [["11:30","15:00"]]} | null}` — só `X-Role: admin` ou `plataforma`; devolve o item com `disponibilidade.resumo`. `GET …/catalogo/itens` devolve `disponibilidade`. O CSV aceita as colunas opcionais `dias_semana`, `exceto_feriado` e `horario` no fim. `GET …/skills/registro` devolve `ref` (item, unidade, nome do item, quantidade, página — nunca texto do cliente).
 
+**Edição do catálogo e disponibilidade atual (CAT2, `docs/ESPEC_CAT2.md`):** `GET /tenants/{t}/catalogo/itens/{item_id}`; `PATCH` do mesmo caminho com `nome`, `descricao`, `preco`, `ativo`, `categoria`, `disponibilidade` (opcionais e independentes; só admin/plataforma) e `atualizado_em` para concorrência (409 com `item` atual); `GET /tenants/{t}/catalogo/categorias?unidade=`; `POST /tenants/{t}/catalogo/disponibilidade/previa`. Todo item nas leituras traz `disponivel_agora`, `indisponivel_motivo` e `data_referencia`. Alterações em `GET …/gestao/alteracoes?entidade=catalogo_item`.
+
 **Gestão G1 — horários da unidade** (`docs/ESPEC_GESTAO.md`). Todas sob `/admin/v1/tenants/{t}/unidades`, rede interna, chave do painel e `X-Actor`.
 
 | Rota | Corpo | Resposta |

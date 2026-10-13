@@ -1,6 +1,10 @@
 import os
+from decimal import Decimal,InvalidOperation
+from typing import Any
 from fastapi import APIRouter,Depends,Request,HTTPException,Query
-from pydantic import BaseModel,ConfigDict
+from fastapi.encoders import jsonable_encoder
+from pydantic import AwareDatetime,BaseModel,ConfigDict
+from starlette.responses import JSONResponse
 from nucleo.autenticacao import contexto_da_chave,painel,exigir_admin
 from nucleo.banco import Repositorio
 from admin.servico import auditar
@@ -169,7 +173,7 @@ async def itens(request:Request,tenant_id:str,unidade:str|None=None,tipo:str|Non
     achados=[dict(r) for r in rows]
     if q.strip(): achados=mod_busca.buscar(achados,q,limite=5000);achados.sort(key=lambda r:r['id'])
     pagina=achados[:limite]
-    return {'itens':[do_painel(r) for r in pagina],
+    return {'itens':await com_agora(request.app.state.db,tenant_id,pagina),
             'proximo_cursor':pagina[-1]['id'] if len(achados)>limite else None}
 
 
@@ -178,29 +182,165 @@ def do_painel(r):
     return {**publico(r),'ativo':r['ativo'],'atualizado_em':r['atualizado_em'],'disponibilidade':disp.publica(disp.ler(r['disponibilidade']))}
 
 
+COLUNAS_DO_PAINEL='id,codigo,unidade,categoria,nome,descricao,preco,alcoolico,delivery,tipo,observacao,ativo,atualizado_em,disponibilidade'
+MAX_NOME=120
+MAX_DESCRICAO=300
+MAX_PRECO=Decimal('99999.99')
+
+
+async def com_agora(db,tenant,rows):
+    """Itens como o painel vê, com a situação AGORA (CAT2): `disponivel_agora`, `indisponivel_motivo` e `data_referencia`.
+    Mesma conferência da Skill (dia, feriado da unidade e horário). Item que não pode ser vendido (inativo, sem preço,
+    só do salão) sai como não disponível, com o motivo que o adicionar_item daria."""
+    from modulos.pedidos import agendamento
+    from modulos.pedidos.servico import vendavel as motivo_de_venda
+    conf=disp.Conferencia(db,tenant,agendamento.agora_utc(),await db.fetchval('SELECT timezone FROM tenants WHERE id=$1',tenant));saida=[]
+    for r in rows:
+        a=await conf.item(r);motivo=motivo_de_venda(r) or a['motivo']
+        saida.append({**do_painel(r),'disponivel_agora':motivo is None,'indisponivel_motivo':motivo,'data_referencia':a['data_referencia']})
+    return saida
+
+
 class ItemDoCatalogo(BaseModel):
-    """Por enquanto só a disponibilidade é editável item a item; o resto do item entra pelo CSV."""
+    """Edição de um item pelo painel (CAT2). Todos os campos são opcionais e independentes: o que não vem fica como está.
+    `atualizado_em` (o valor lido pelo painel) liga a conferência de edição concorrente."""
     model_config=ConfigDict(extra='forbid')
-    disponibilidade:dict|None
+    nome:Any=None
+    descricao:Any=None
+    preco:Any=None
+    ativo:Any=None
+    categoria:Any=None
+    disponibilidade:Any=None
+    atualizado_em:AwareDatetime|None=None
+
+
+def _campo(nome):
+    return HTTPException(400,{'campo':nome})
+
+
+def _preco_do_painel(valor):
+    """Nulo = sem preço. Número maior que zero, com até 2 casas decimais."""
+    if valor is None: return None
+    if isinstance(valor,bool) or not isinstance(valor,(int,float,str)): raise _campo('preco')
+    try: d=Decimal(str(valor).strip().replace(',','.'))
+    except InvalidOperation: raise _campo('preco') from None
+    if not d.is_finite() or d<=0 or d>MAX_PRECO or d!=d.quantize(Decimal('0.01')): raise _campo('preco')
+    return d.quantize(Decimal('0.01'))
+
+
+async def _validar_edicao(conn,tenant,atual,dados):
+    """{coluna: valor novo} só do que veio no corpo. 400 com `detalhes.campo` no primeiro campo que não serve."""
+    enviados=dados.model_fields_set-{'atualizado_em'};novos={}
+    if not enviados: raise _campo('corpo')
+    if 'nome' in enviados:
+        if not isinstance(dados.nome,str) or not dados.nome.strip() or len(dados.nome.strip())>MAX_NOME: raise _campo('nome')
+        novos['nome']=dados.nome.strip()
+    if 'descricao' in enviados:
+        if dados.descricao is not None and (not isinstance(dados.descricao,str) or len(dados.descricao.strip())>MAX_DESCRICAO): raise _campo('descricao')
+        # Só espaços vale como vazio: apaga.
+        novos['descricao']=(dados.descricao or '').strip() or None
+    if 'preco' in enviados: novos['preco']=_preco_do_painel(dados.preco)
+    if 'ativo' in enviados:
+        if not isinstance(dados.ativo,bool): raise _campo('ativo')
+        novos['ativo']=dados.ativo
+    if 'categoria' in enviados:
+        if not isinstance(dados.categoria,str) or not dados.categoria.strip(): raise _campo('categoria')
+        # Só categoria que já existe na mesma unidade (sem acento e sem maiúsculas); grava com a grafia que já existe.
+        existentes={mod_busca.normalizar(r['categoria']):r['categoria'] for r in await conn.fetch(
+            'SELECT DISTINCT categoria FROM catalogo_itens WHERE tenant_id=$1 AND unidade=$2',tenant,atual['unidade'])}
+        achada=existentes.get(mod_busca.normalizar(dados.categoria))
+        if not achada: raise _campo('categoria')
+        novos['categoria']=achada
+    if 'disponibilidade' in enviados:
+        if dados.disponibilidade is not None and not isinstance(dados.disponibilidade,dict): raise _campo('disponibilidade')
+        try: novos['disponibilidade']=disp.validar(dados.disponibilidade)
+        except ValueError: raise _campo('disponibilidade') from None
+    return novos
+
+
+def _para_o_historico(coluna,valor):
+    if coluna=='preco': return float(valor) if valor is not None else None
+    if coluna=='disponibilidade': return disp.ler(valor)
+    return valor
+
+
+@admin.get('/tenants/{tenant_id}/catalogo/itens/{item_id}')
+async def item_do_catalogo(request:Request,tenant_id:str,item_id:int):
+    """Um item, com a situação agora. Qualquer papel lê."""
+    await _empresa(request.app.state.db,tenant_id)
+    row=await request.app.state.db.fetchrow(f'SELECT {COLUNAS_DO_PAINEL} FROM catalogo_itens WHERE tenant_id=$1 AND id=$2',tenant_id,item_id)
+    if row is None: raise HTTPException(404,'NOT_FOUND')
+    return (await com_agora(request.app.state.db,tenant_id,[row]))[0]
 
 
 @admin.patch('/tenants/{tenant_id}/catalogo/itens/{item_id}',dependencies=[Depends(exigir_admin)])
 async def editar_item(request:Request,tenant_id:str,item_id:int,dados:ItemDoCatalogo,actor=Depends(painel)):
-    """Disponibilidade do item por dia da semana, feriado e horário (DISP1). `null` tira a restrição. Só admin ou plataforma."""
+    """Edita nome, descrição, preço, ativo, categoria e disponibilidade (CAT2). Só admin ou plataforma. Unidade e id não mudam.
+    Com `atualizado_em`, item que mudou desde a leitura do painel devolve 409 com o item atual. Carrinhos abertos não são tocados:
+    o fechar_pedido já confere preço e item ativo."""
     import json
     from admin.alteracoes import registrar
-    await _empresa(request.app.state.db,tenant_id)
-    try: nova=disp.validar(dados.disponibilidade)
-    except ValueError: raise HTTPException(400,{'campo':'disponibilidade'}) from None
-    async with request.app.state.db.acquire() as conn,conn.transaction():
-        atual=await conn.fetchrow('SELECT disponibilidade FROM catalogo_itens WHERE tenant_id=$1 AND id=$2 FOR UPDATE',tenant_id,item_id)
+    db=request.app.state.db
+    await _empresa(db,tenant_id)
+    async with db.acquire() as conn,conn.transaction():
+        atual=await conn.fetchrow(f'SELECT {COLUNAS_DO_PAINEL} FROM catalogo_itens WHERE tenant_id=$1 AND id=$2 FOR UPDATE',tenant_id,item_id)
         if atual is None: raise HTTPException(404,'NOT_FOUND')
-        row=await conn.fetchrow('''UPDATE catalogo_itens SET disponibilidade=$3::jsonb,atualizado_em=now() WHERE tenant_id=$1 AND id=$2
-            RETURNING id,codigo,unidade,categoria,nome,descricao,preco,alcoolico,delivery,tipo,observacao,ativo,atualizado_em,disponibilidade''',
-            tenant_id,item_id,json.dumps(nova) if nova else None)
-        if await registrar(conn,tenant_id,actor,'catalogo_item',item_id,'alterado',{'disponibilidade':disp.ler(atual['disponibilidade'])},{'disponibilidade':nova}):
-            await auditar(conn,tenant_id,actor,'catalogo.disponibilidade',str(item_id))
-    return do_painel(row)
+        if dados.atualizado_em is not None and dados.atualizado_em!=atual['atualizado_em']:
+            corpo={'erro':{'codigo':'CONFLICT','mensagem':'O item foi alterado por outra pessoa. Confira os dados atuais e salve de novo.',
+                           'detalhes':{'campo':'atualizado_em','motivo':'item_alterado'}},'item':(await com_agora(conn,tenant_id,[atual]))[0]}
+            return JSONResponse(jsonable_encoder(corpo),status_code=409,headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
+        novos=await _validar_edicao(conn,tenant_id,atual,dados)
+        mudou={c:v for c,v in novos.items() if _para_o_historico(c,v)!=_para_o_historico(c,atual[c])}
+        row=atual
+        if mudou:
+            colunas=list(mudou)
+            valores=[json.dumps(mudou[c]) if c=='disponibilidade' and mudou[c] is not None else mudou[c] for c in colunas]
+            atribuicoes=','.join(f'{c}=${n}'+('::jsonb' if c=='disponibilidade' else '') for n,c in enumerate(colunas,3))
+            row=await conn.fetchrow(f'UPDATE catalogo_itens SET {atribuicoes},atualizado_em=clock_timestamp() WHERE tenant_id=$1 AND id=$2 RETURNING {COLUNAS_DO_PAINEL}',
+                                    tenant_id,item_id,*valores)
+            # Histórico com antes e depois só do que mudou, e quem mudou (X-Actor).
+            await registrar(conn,tenant_id,actor,'catalogo_item',item_id,'alterado',{c:_para_o_historico(c,atual[c]) for c in colunas},
+                            {c:_para_o_historico(c,mudou[c]) for c in colunas})
+            await auditar(conn,tenant_id,actor,'catalogo.item_alterado',str(item_id))
+        return (await com_agora(conn,tenant_id,[row]))[0]
+
+
+@admin.get('/tenants/{tenant_id}/catalogo/categorias')
+async def categorias_da_unidade(request:Request,tenant_id:str,unidade:str=Query(...,max_length=40)):
+    """Categorias de uma unidade na ordem do cardápio importado, com as contagens. Só leitura; qualquer papel."""
+    db=request.app.state.db
+    await _empresa(db,tenant_id)
+    rows=await db.fetch("""SELECT categoria,min(id) AS primeiro,count(*) AS qtd_itens,count(*) FILTER (WHERE ativo) AS itens_ativos,
+        count(*) FILTER (WHERE ativo AND preco IS NOT NULL AND delivery<>'nao' AND tipo IN ('item','adicional')) AS itens_no_cardapio
+        FROM catalogo_itens WHERE tenant_id=$1 AND unidade=$2 GROUP BY 1 ORDER BY 2""",tenant_id,unidade)
+    if not rows and not await db.fetchval('SELECT EXISTS(SELECT 1 FROM tenant_unidades WHERE tenant_id=$1 AND codigo=$2)',tenant_id,unidade):
+        raise HTTPException(404,'NOT_FOUND')
+    return {'unidade':unidade,'categorias':[{'categoria':r['categoria'],'ordem':n,'qtd_itens':r['qtd_itens'],'itens_ativos':r['itens_ativos'],
+                                             'itens_no_cardapio':r['itens_no_cardapio']} for n,r in enumerate(rows,1)]}
+
+
+class PreviaDeDisponibilidade(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    unidade:str
+    disponibilidade:Any=None
+
+
+@admin.post('/tenants/{tenant_id}/catalogo/disponibilidade/previa')
+async def previa_da_disponibilidade(request:Request,tenant_id:str,dados:PreviaDeDisponibilidade):
+    """Como uma regra de disponibilidade ficaria, sem gravar: o resumo em palavras e se valeria agora naquela unidade
+    (com o calendário e os feriados dela). Qualquer papel pode usar."""
+    from modulos.pedidos import agendamento
+    db=request.app.state.db
+    await _empresa(db,tenant_id)
+    if dados.disponibilidade is not None and not isinstance(dados.disponibilidade,dict): raise _campo('disponibilidade')
+    try: regra=disp.validar(dados.disponibilidade)
+    except ValueError: raise _campo('disponibilidade') from None
+    if not await db.fetchval("""SELECT EXISTS(SELECT 1 FROM tenant_unidades WHERE tenant_id=$1 AND codigo=$2)
+            OR EXISTS(SELECT 1 FROM catalogo_itens WHERE tenant_id=$1 AND unidade=$2)""",tenant_id,dados.unidade): raise HTTPException(404,'NOT_FOUND')
+    conf=disp.Conferencia(db,tenant_id,agendamento.agora_utc(),await db.fetchval('SELECT timezone FROM tenants WHERE id=$1',tenant_id))
+    a=await conf.item({'unidade':dados.unidade,'disponibilidade':regra})
+    return {'unidade':dados.unidade,'disponibilidade':disp.publica(regra),'resumo':disp.resumo(regra),
+            'disponivel_agora':a['disponivel'],'indisponivel_motivo':a['motivo'],'data_referencia':a['data_referencia']}
 
 
 @admin.get('/tenants/{tenant_id}/catalogo/resumo')
