@@ -153,11 +153,13 @@ def test_busca_com_categorias_e_registro_de_todas_as_chamadas():
                 await conn.execute("""INSERT INTO catalogo_itens(tenant_id,codigo,unidade,categoria,nome,preco,tipo,delivery)
                     VALUES ('bykoji',$1,'patio_guedala',$2,$3,$4,'item','sim')""",f'TMK-{n:02d}','Temakis — cone' if n<9 else 'Temakis — hand roll',f'Temaki {n:02d}',20+n)
             # Sem os parâmetros novos, a busca de sempre.
-            r=(await busca(q='edamame',unidade='patio_guedala')).json();assert list(r)==['itens'] and r['itens'][0]['nome']=='Edamame' and r['itens'][0]['categoria']=='Entradas quentes'
-            # Categorias da unidade: só o que pode ser pedido (com preço, ativo, não exclusivo do salão), em ordem alfabética.
+            r=(await busca(q='edamame',unidade='patio_guedala')).json();assert set(r)=={'itens','data_referencia'} and r['itens'][0]['nome']=='Edamame' and r['itens'][0]['categoria']=='Entradas quentes'
+            # Categorias da unidade: só o que pode ser pedido (com preço, ativo, não exclusivo do salão).
             r=(await busca(categorias='true',unidade='patio_guedala')).json()
-            assert r=={'unidade':'patio_guedala','total_itens':16,'categorias':[{'categoria':'Carpaccios','qtd_itens':1},{'categoria':'Cervejas','qtd_itens':1},
-                {'categoria':'Entradas quentes','qtd_itens':1},{'categoria':'Pratos quentes','qtd_itens':1},{'categoria':'Temakis — cone','qtd_itens':9},{'categoria':'Temakis — hand roll','qtd_itens':3}]}
+            # Ordem do cardápio importado (DISP1): a categoria fica na posição do seu primeiro item.
+            assert (r['unidade'],r['total_itens'],r['total_categorias'],r['pagina'],r['tem_mais'],r['tem_cardapio'])==('patio_guedala',16,6,None,False,True)
+            assert r['categorias']==[{'categoria':'Entradas quentes','qtd_itens':1},{'categoria':'Pratos quentes','qtd_itens':1},{'categoria':'Cervejas','qtd_itens':1},
+                {'categoria':'Carpaccios','qtd_itens':1},{'categoria':'Temakis — cone','qtd_itens':9},{'categoria':'Temakis — hand roll','qtd_itens':3}]
             assert (await busca(categorias='true',unidade='morumbi')).json()['categorias']==[{'categoria':'Sashimi','qtd_itens':1}]
             # Itens de uma categoria: sem acento e sem maiúsculas, 10 por página, sempre com preço.
             r=(await busca(categoria='ENTRADAS QUENTES',unidade='patio_guedala')).json()

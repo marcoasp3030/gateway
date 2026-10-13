@@ -963,6 +963,7 @@ return 1
             await self.db.execute('DELETE FROM webhook_raw WHERE tenant_id=$1 AND recebido_em < now()-make_interval(days=>$2)',row['id'],row['retencao_dias'])
             await self.db.execute('DELETE FROM skill_chamadas WHERE tenant_id=$1 AND criado_em < now()-make_interval(days=>$2)',row['id'],row['retencao_dias'])
             await self.db.execute('DELETE FROM skill_registro WHERE tenant_id=$1 AND criado_em < now()-make_interval(days=>$2)',row['id'],row['retencao_dias'])
+            await self.db.execute("DELETE FROM catalogo_vistos WHERE tenant_id=$1 AND visto_em < now()-interval '2 days'",row['id'])
 
     async def agendador(self):
         if self.fila_duravel: return

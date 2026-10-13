@@ -180,14 +180,23 @@ async def situacao_da_unidade(db,tenant,unidade,fuso_empresa,agora=None):
 PARA_O_AGENTE=('codigo','endereco','telefone','formas_pagamento','taxa_entrega','pedido_minimo','area_entrega','aceita_retirada','regras')
 
 
+async def itens_no_cardapio(db,tenant):
+    """{código da unidade: quantos itens podem ser pedidos} — ativo, com preço e que não seja só do salão (a conta do modo `categorias` da busca)."""
+    rows=await db.fetch("""SELECT unidade,count(*) n FROM catalogo_itens WHERE tenant_id=$1 AND ativo AND preco IS NOT NULL AND delivery<>'nao'
+        AND tipo IN ('item','adicional') GROUP BY 1""",tenant)
+    return {r['unidade']:r['n'] for r in rows}
+
+
 async def pacote(db,tenant,fuso,agora=None):
     rows=await db.fetch('SELECT * FROM tenant_unidades WHERE tenant_id=$1 AND ativo ORDER BY id',tenant)
-    saida=[]
+    saida=[];cardapio=await itens_no_cardapio(db,tenant)
     for r in rows:
         horarios=json.loads(r['horarios']) if isinstance(r['horarios'],str) else r['horarios']
         dados={k:(float(r[k]) if k in ('taxa_entrega','pedido_minimo') and r[k] is not None else r[k]) for k in PARA_O_AGENTE}
         s=await situacao_da_unidade(db,tenant,r,fuso,agora)
         saida.append({'id':r['id'],'nome':r['nome'],'aberta_agora':s['aberta_agora'],'proxima_abertura':s['proxima_abertura'],
                       'motivo_fechada':s['motivo'],'fecha_as':s['fecha_as'],'pausada_ate':s['pausada_ate'],'pausa_motivo':r['pausa_motivo'] if s['motivo']=='pausa' else None,
-                      **dados,'horarios':horarios})
+                      **dados,'horarios':horarios,
+                      # DISP1: false = nenhum item desta unidade pode ser pedido; o agente não oferece cardápio dela.
+                      'tem_cardapio':cardapio.get(r['codigo'],0)>0,'itens_no_cardapio':cardapio.get(r['codigo'],0)})
     return saida

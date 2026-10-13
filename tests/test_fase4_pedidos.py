@@ -36,7 +36,14 @@ async def montar(conn,client,app):
     k=segredo(await client.post('/admin/v1/tenants/bykoji/api-keys',json={'nome':'skills','escopos':['ferramentas:catalogo','ferramentas:pedidos']}))
     outra=segredo(await client.post('/admin/v1/tenants/bykoji/api-keys',json={'nome':'so-catalogo','escopos':['ferramentas:catalogo']}))
     ids={r['codigo']:r['id'] for r in await conn.fetch("SELECT codigo,id FROM catalogo_itens WHERE tenant_id='bykoji'")}
-    async def api(metodo,caminho,chave=k,**kw):
+    async def visto(caminho):
+        # DISP1: adicionar_item só aceita item que apareceu numa busca da conversa. Aqui os testes marcam o catálogo
+        # como buscado; a proteção em si é testada em tests/test_disp1.py.
+        import re
+        m=re.fullmatch(r'/carrinho/([^/]+)/itens',caminho)
+        if m: await conn.execute("INSERT INTO catalogo_vistos(tenant_id,conversation_id,item_id) SELECT 'bykoji',$1,id FROM catalogo_itens WHERE tenant_id='bykoji' ON CONFLICT DO NOTHING",m.group(1))
+    async def api(metodo,caminho,chave=k,buscado=True,**kw):
+        if metodo=='POST' and buscado: await visto(caminho)
         return await client.request(metodo,'/api/v1'+caminho,headers={'X-API-Key':chave,'Authorization':''},**kw)
     return conversa,ids,api,outra
 

@@ -45,9 +45,12 @@ async def info_unidades(request:Request,conversation_id:str,unidade:str|None=Que
     db=request.app.state.db;repo=Repositorio(db);t=ctx['tenant_id']
     conv=await repo.obter(t,'conversas',conversation_id)
     if not conv or (ctx['agente_id'] and conv['agente_id']!=ctx['agente_id']): raise HTTPException(404,'NOT_FOUND')
+    request.state.skill_ref={'unidade':unidade}
     if unidade is None: rows=await db.fetch('SELECT * FROM tenant_unidades WHERE tenant_id=$1 ORDER BY ativo DESC,nome,id',t)
     else:
         rows=await db.fetch('SELECT * FROM tenant_unidades WHERE tenant_id=$1 AND codigo=$2',t,unidade)
         if not rows: raise HTTPException(404,'NOT_FOUND')
     fuso=await db.fetchval('SELECT timezone FROM tenants WHERE id=$1',t)
-    return {'unidades':[await unidade_para_o_agente(db,t,r,fuso) for r in rows]}
+    # DISP1: unidade sem nenhum item que possa ser pedido não tem cardápio para oferecer.
+    cardapio=await H.itens_no_cardapio(db,t)
+    return {'unidades':[{**await unidade_para_o_agente(db,t,r,fuso),'tem_cardapio':cardapio.get(r['codigo'],0)>0,'itens_no_cardapio':cardapio.get(r['codigo'],0)} for r in rows]}

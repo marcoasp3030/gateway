@@ -75,6 +75,8 @@ class RegistroDeSkills:
         dados=_json(corpo) if corpo else None;dados=dados if isinstance(dados,dict) else {}
         conversa=(scope.get('path_params') or {}).get('conversation_id') or consulta.get('conversation_id') or dados.get('conversation_id')
         campos=sorted({str(k)[:40] for k in list(consulta)+list(dados) if k!='conversation_id'})[:30]
-        await scope['app'].state.db.execute('''INSERT INTO skill_registro(tenant_id,conversation_id,skill,metodo,campos,status,motivo,duracao_ms)
-            VALUES ($1,$2,$3,$4,$5::text[],$6,$7,$8)''',tenant,str(conversa)[:300] if isinstance(conversa,str) and conversa else None,
-            skill,scope['method'],campos,status,motivo,duracao_ms)
+        # Valores que não são dado de cliente, numa lista fechada por Skill (quem monta é a rota, em request.state.skill_ref).
+        ref=scope['state'].get('skill_ref');ref={k:v for k,v in ref.items() if v is not None} if isinstance(ref,dict) else None
+        await scope['app'].state.db.execute('''INSERT INTO skill_registro(tenant_id,conversation_id,skill,metodo,campos,status,motivo,duracao_ms,ref)
+            VALUES ($1,$2,$3,$4,$5::text[],$6,$7,$8,$9::jsonb)''',tenant,str(conversa)[:300] if isinstance(conversa,str) and conversa else None,
+            skill,scope['method'],campos,status,motivo,duracao_ms,json.dumps(ref,ensure_ascii=False,default=str) if ref else None)

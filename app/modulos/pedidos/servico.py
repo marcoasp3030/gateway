@@ -28,6 +28,8 @@ RECUSAS={
  'preco_alterado':('itens','O preço de um item mudou. Confira o carrinho atualizado com o cliente antes de fechar.'),
  'pedido_inexistente':('numero','Pedido não encontrado nesta conversa.'),
  'pedido_nao_cancelavel':('numero','Este pedido já foi decidido pela unidade e não pode ser cancelado por aqui. Transfira para a equipe.'),
+ 'item_nao_buscado':('item_id','Este item_id não veio de uma busca desta conversa. Chame buscar_catalogo e use o item_id devolvido.'),
+ 'item_indisponivel':('item_id','Este item não é servido no dia e horário do pedido. Diga ao cliente quando ele é servido (veja resumo) e ofereça outra opção ou outro horário.'),
  'horario_passado':('horario','O horário marcado já passou. Pergunte ao cliente outro horário e chame definir_entrega de novo.'),
  'horario_fora_funcionamento':('horario','A unidade não funciona nesse dia e horário. Ofereça um horário dentro do funcionamento (veja proxima_abertura).'),
  'horario_invalido':('horario','Não deu para entender o horário. Envie agendado_para (AAAA-MM-DDTHH:MM) ou um texto com a hora ("hoje às 19h", "19:30", "o quanto antes").'),
@@ -64,7 +66,7 @@ async def aberto(conn,tenant,conversa,criar=False):
 
 async def linhas(conn,tenant,carrinho_id):
     return await conn.fetch('''SELECT l.id,l.item_id,l.quantidade,l.preco_unitario,l.observacao,
-        i.codigo,i.nome,i.categoria,i.unidade,i.alcoolico,i.ativo,i.preco AS preco_atual,i.delivery,i.tipo
+        i.codigo,i.nome,i.categoria,i.unidade,i.alcoolico,i.ativo,i.preco AS preco_atual,i.delivery,i.tipo,i.disponibilidade
         FROM carrinho_itens l JOIN catalogo_itens i ON i.tenant_id=l.tenant_id AND i.id=l.item_id
         WHERE l.tenant_id=$1 AND l.carrinho_id=$2 ORDER BY l.id''',tenant,carrinho_id)
 
@@ -81,11 +83,14 @@ async def retrato(conn,tenant,conversa):
         return {'conversation_id':conversa,'unidade':None,'modalidade':None,'endereco':None,'horario':None,
                 'agendado_para':None,'horario_vencido':False,'observacao':None,
                 'maioridade_confirmada':False,'itens':[],'numero_itens':0,'subtotal':None,'taxa_entrega':None,'total':None,
-                'pedido_minimo':None,'tem_alcoolico':False,'faltando':['itens','modalidade'],'pode_fechar':False,'atualizado_em':None}
+                'pedido_minimo':None,'tem_alcoolico':False,'itens_indisponiveis':[],'faltando':['itens','modalidade'],'pode_fechar':False,'atualizado_em':None}
     ls=await linhas(conn,tenant,c['id'])
+    fora=await indisponiveis(conn,tenant,conversa,ls);fora_por_linha={f['id']:f for f in fora}
     itens=[{'id':l['id'],'item_id':l['item_id'],'codigo':l['codigo'],'nome':l['nome'],'categoria':l['categoria'],
             'quantidade':l['quantidade'],'preco_unitario':dinheiro(l['preco_unitario']),
-            'subtotal':dinheiro(l['preco_unitario']*l['quantidade']),'observacao':l['observacao'],'alcoolico':l['alcoolico']} for l in ls]
+            'subtotal':dinheiro(l['preco_unitario']*l['quantidade']),'observacao':l['observacao'],'alcoolico':l['alcoolico'],
+            # DISP1: o item é servido no dia e horário do pedido (agendado; sem agendamento, agora)?
+            'disponivel':l['id'] not in fora_por_linha} for l in ls]
     subtotal=sum((l['preco_unitario']*l['quantidade'] for l in ls),Decimal('0')) if ls else None
     u=await unidade_da_empresa(conn,tenant,c['unidade'])
     # Taxa só entra quando é entrega e a unidade tem taxa cadastrada; senão fica nula (a unidade confirma no retorno).
@@ -99,15 +104,41 @@ async def retrato(conn,tenant,conversa):
     # PED2: horário marcado que já passou não fecha pedido; o agente pergunta outro.
     fuso=await fuso_da_unidade(conn,tenant,u);quando=agendamento.do_carrinho(c,fuso);passou=agendamento.vencido(quando)
     if passou: faltando.append('horario')
+    if fora: faltando.append('item_indisponivel')
     return {'conversation_id':conversa,'unidade':c['unidade'],'modalidade':c['modalidade'],'endereco':c['endereco'],'horario':c['horario'],
             'agendado_para':agendamento.iso(quando,fuso),'horario_vencido':passou,
             'observacao':c['observacao'],'maioridade_confirmada':c['maioridade_confirmada'],'itens':itens,
             'numero_itens':sum(l['quantidade'] for l in ls),'subtotal':dinheiro(subtotal),'taxa_entrega':dinheiro(taxa),
             'total':dinheiro(subtotal+(taxa or 0)) if subtotal is not None else None,
             'pedido_minimo':dinheiro(u['pedido_minimo']) if u else None,'tem_alcoolico':tem_alcool,
+            # Itens que não são servidos no dia e horário do pedido, com o motivo e quando são servidos (vazia = nenhum).
+            'itens_indisponiveis':fora,
             'faltando':faltando,'pode_fechar':not faltando,
             # Última alteração do carrinho (item ou entrega): diz se ele é desta conversa ou antigo.
             'atualizado_em':c['atualizado_em'].isoformat(timespec='seconds')}
+
+
+async def indisponiveis(conn,tenant,conversa,ls):
+    """Linhas do carrinho cujo item não é servido no dia e horário do pedido (DISP1). Lista vazia = todos servem."""
+    if not any(l['disponibilidade'] for l in ls): return []
+    from modulos.catalogo import disponibilidade as disp
+    conf=await disp.da_conversa(conn,tenant,conversa);fora=[]
+    for l in ls:
+        if not l['disponibilidade']: continue
+        a=await conf.item(l)
+        if not a['disponivel']:
+            fora.append({'id':l['id'],'item_id':l['item_id'],'nome':l['nome'],'motivo':a['motivo'],'feriado':a['feriado'],
+                         'resumo':a['disponibilidade']['resumo'],'data_referencia':a['data_referencia']})
+    return fora
+
+
+# adicionar_item só aceita item que apareceu numa busca desta conversa há pouco (constante em modulos/catalogo/rotas.py).
+async def foi_buscado(conn,tenant,conversa,item_id,carrinho):
+    from modulos.catalogo.rotas import ITEM_BUSCADO_MIN
+    if await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM catalogo_vistos WHERE tenant_id=$1 AND conversation_id=$2 AND item_id=$3
+            AND visto_em>now()-make_interval(mins=>$4))''',tenant,conversa,item_id,ITEM_BUSCADO_MIN): return True
+    # Somar mais um do que já está no carrinho aberto não exige buscar de novo.
+    return bool(carrinho) and await conn.fetchval('SELECT EXISTS(SELECT 1 FROM carrinho_itens WHERE tenant_id=$1 AND carrinho_id=$2 AND item_id=$3)',tenant,carrinho['id'],item_id)
 
 
 def vendavel(item):
@@ -174,11 +205,25 @@ async def acoes_recentes(db,tenant,conversa,minutos):
 async def adicionar(conn,tenant,conversa,item_id,quantidade,observacao):
     await travar(conn,tenant,conversa)
     item=await conn.fetchrow('SELECT * FROM catalogo_itens WHERE tenant_id=$1 AND id=$2',tenant,item_id)
+    # Ordem das conferências (DISP1): existe → foi buscado nesta conversa → é da unidade do carrinho → pode ser vendido → é servido no dia do pedido.
+    if item is None: raise Recusa('item_inexistente',404)
+    c=await aberto(conn,tenant,conversa)
+    # A recusa não diz nada sobre o item enviado: ele não foi buscado e pode ser de outra unidade.
+    if not await foi_buscado(conn,tenant,conversa,item_id,c):
+        from modulos.catalogo.rotas import ITEM_BUSCADO_MIN
+        raise Recusa('item_nao_buscado',detalhes={'janela_min':ITEM_BUSCADO_MIN})
+    # Regra 2: carrinho de uma unidade só. O primeiro item define a unidade. Vem antes do preço: item de outra unidade
+    # sem preço é "unidade diferente", não "sem preço".
+    if c and c['unidade'] and c['unidade']!=item['unidade']:
+        raise Recusa('unidade_diferente',detalhes={'unidade_do_carrinho':c['unidade'],'unidade_do_item':item['unidade']})
     motivo=vendavel(item)
-    if motivo: raise Recusa(motivo,404 if motivo=='item_inexistente' else 422)
-    c=await aberto(conn,tenant,conversa,criar=True)
-    # Regra 2: carrinho de uma unidade só. O primeiro item define a unidade.
-    if c['unidade'] and c['unidade']!=item['unidade']: raise Recusa('unidade_diferente')
+    if motivo: raise Recusa(motivo)
+    from modulos.catalogo import disponibilidade as disp
+    a=await (await disp.da_conversa(conn,tenant,conversa)).item(item)
+    if not a['disponivel']:
+        raise Recusa('item_indisponivel',detalhes={'motivo_indisponivel':a['motivo'],'feriado':a['feriado'],'resumo':a['disponibilidade']['resumo'],
+                                                    'disponibilidade':a['disponibilidade'],'data_referencia':a['data_referencia']})
+    c=c or await aberto(conn,tenant,conversa,criar=True)
     if not c['unidade']: await conn.execute('UPDATE carrinhos SET unidade=$3 WHERE tenant_id=$1 AND id=$2',tenant,c['id'],item['unidade'])
     obs=(observacao or '').strip() or None
     igual=await conn.fetchrow('''SELECT id,quantidade FROM carrinho_itens WHERE tenant_id=$1 AND carrinho_id=$2 AND item_id=$3
@@ -244,7 +289,8 @@ async def entrega(conn,tenant,conversa,dados):
     c=await aberto(conn,tenant,conversa,criar=True)
     if 'unidade' in dados and dados['unidade'] and dados['unidade']!=c['unidade']:
         if not await unidade_da_empresa(conn,tenant,dados['unidade']): raise Recusa('unidade_inexistente',404)
-        if await conn.fetchval('SELECT EXISTS(SELECT 1 FROM carrinho_itens WHERE tenant_id=$1 AND carrinho_id=$2)',tenant,c['id']): raise Recusa('unidade_diferente')
+        if await conn.fetchval('SELECT EXISTS(SELECT 1 FROM carrinho_itens WHERE tenant_id=$1 AND carrinho_id=$2)',tenant,c['id']):
+            raise Recusa('unidade_diferente',detalhes={'unidade_do_carrinho':c['unidade'],'unidade_do_item':dados['unidade']})
         await conn.execute('UPDATE carrinhos SET unidade=$3 WHERE tenant_id=$1 AND id=$2',tenant,c['id'],dados['unidade'])
     if dados.get('modalidade')=='retirada':
         u=await unidade_da_empresa(conn,tenant,dados.get('unidade') or c['unidade'])
@@ -450,6 +496,9 @@ async def fechar(conn,tenant,conversa):
     subtotal=sum((l['preco_unitario']*l['quantidade'] for l in ls),Decimal('0'))
     if u and u['pedido_minimo'] is not None and subtotal<u['pedido_minimo']: raise Recusa('abaixo_do_minimo')
     agendado=await conferir_horario(conn,tenant,c,u)
+    # DISP1: confere de novo se cada item é servido no dia e horário do pedido.
+    fora=await indisponiveis(conn,tenant,conversa,ls)
+    if fora: raise Recusa('item_indisponivel',detalhes={'itens':fora,'resumo':fora[0]['resumo'],'motivo_indisponivel':fora[0]['motivo'],'data_referencia':fora[0]['data_referencia']})
     taxa=u['taxa_entrega'] if u and c['modalidade']=='delivery' else None
     itens=[{'item_id':l['item_id'],'codigo':l['codigo'],'nome':l['nome'],'categoria':l['categoria'],'quantidade':l['quantidade'],
             'preco_unitario':dinheiro(l['preco_unitario']),'subtotal':dinheiro(l['preco_unitario']*l['quantidade']),

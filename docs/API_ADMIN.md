@@ -227,6 +227,8 @@ Estado persistente por agente: três falhas consecutivas em cinco minutos abrem 
 
 **Calendário no pacote (CAL1, `docs/ESPEC_CAL1.md`):** a unidade ganhou `cidade` (texto, até 80) e `uf` (duas letras maiúsculas, ex.: `SP`), aceitos na criação e na alteração e devolvidos nas leituras; nulos = a unidade só recebe feriados nacionais no calendário do agente. As exceções por data já cadastradas passam a aparecer para o agente em `calendario.dias[].observacao`.
 
+**Disponibilidade do item (DISP1, `docs/ESPEC_DISP1.md` seção 8.5):** `PATCH /tenants/{t}/catalogo/itens/{item_id}` com `{"disponibilidade": {"dias_semana": ["seg",…], "exceto_feriado": true, "horario": [["11:30","15:00"]]} | null}` — só `X-Role: admin` ou `plataforma`; devolve o item com `disponibilidade.resumo`. `GET …/catalogo/itens` devolve `disponibilidade`. O CSV aceita as colunas opcionais `dias_semana`, `exceto_feriado` e `horario` no fim. `GET …/skills/registro` devolve `ref` (item, unidade, nome do item, quantidade, página — nunca texto do cliente).
+
 **Gestão G1 — horários da unidade** (`docs/ESPEC_GESTAO.md`). Todas sob `/admin/v1/tenants/{t}/unidades`, rede interna, chave do painel e `X-Actor`.
 
 | Rota | Corpo | Resposta |

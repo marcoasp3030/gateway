@@ -101,7 +101,9 @@ A cada turno o gateway envia, sem o agente pedir:
 | `sem_preco` | 422 | Não promete preço. Transfere: `acao = transferir_humano`, `motivo = pedido_para_confirmar` |
 | `item_inativo`, `sem_delivery` | 422 | Avisa que o item não está disponível e oferece alternativa |
 | `item_inexistente` | 404 | Busca de novo no catálogo |
-| `unidade_diferente` | 422 | Explica que um pedido é de uma unidade só; pergunta se quer trocar de unidade (esvaziar) ou manter |
+| `unidade_diferente` | 422 | Explica que um pedido é de uma unidade só; pergunta se quer trocar de unidade (esvaziar) ou manter. `detalhes` traz `unidade_do_carrinho` e `unidade_do_item`. Vem antes do preço: item de outra unidade nunca volta `sem_preco` |
+| `item_nao_buscado` | 422 | O `item_id` não veio de `buscar_catalogo` nesta conversa nos últimos 30 minutos: **busca de novo** e usa o id devolvido. Não transfere |
+| `item_indisponivel` | 422 | O item não é servido no dia e horário do pedido (`detalhes.motivo_indisponivel`, `feriado`, `resumo`). Em `adicionar_item` e em `fechar_pedido` (aqui com `detalhes.itens`). Diz quando é servido e oferece outro item ou outro horário |
 | `unidade_inexistente` | 404 | Usa um dos códigos de `unidades` |
 | `carrinho_cheio` | 422 | Avisa o limite de 50 linhas |
 | `linha_inexistente` | 404 | Usa os `id` das linhas do carrinho devolvido |
@@ -135,7 +137,7 @@ Outros erros: 401 (chave ausente ou inválida), 403 (chave sem o escopo), 404 (c
 | `unidade` | recomendado | Código da unidade (`morumbi`, `einstein`, `vila_nova_conceicao`, `patio_guedala`). Sem ele, busca em todas |
 | `categorias` | não | `true` → em vez de itens, devolve as categorias da unidade com a quantidade de itens (PED2) |
 | `categoria` | não | Nome da categoria → só os itens dela que podem ser pedidos, 10 por página, sempre com preço. Sem acento e sem maiúsculas; "temaki" acha "Temakis — cone" (PED2) |
-| `pagina` | não | Página dos itens da categoria (padrão 1) |
+| `pagina` | não | Página dos itens da categoria (padrão 1, 10 por página). Com `categorias=true`: página das categorias, 9 por página; sem `pagina`, vêm todas (DISP1) |
 
 Com `categorias` ou `categoria`, a `unidade` é necessária; sem ela vale a do carrinho aberto e, sem carrinho, a chamada volta 400 com `detalhes.campo = "unidade"`.
 
@@ -148,6 +150,8 @@ Com `categorias` ou `categoria`, a `unidade` é necessária; sem ela vale a do c
  "itens": [{"item_id": 812, "codigo": "GUE-0412", "unidade": "patio_guedala", "categoria": "Baterá", "nome": "Baterá Shake", "descricao": null,
             "preco": 58.0, "alcoolico": false, "delivery": "a_confirmar", "tipo": "item", "observacao": null}]}
 ```
+
+**Disponibilidade (DISP1).** Todo item traz `disponivel` (bool), `indisponivel_motivo` (`dia_da_semana`, `feriado`, `horario` ou nulo) e `disponibilidade` (nulo, ou `{"dias_semana", "exceto_feriado", "horario", "resumo"}`); a resposta traz `data_referencia`, o dia e a hora do pedido usados na conferência (o horário agendado do carrinho; sem ele, agora). Item com `disponivel: false` não entra no carrinho: diga ao cliente quando ele é servido (`disponibilidade.resumo`) e ofereça outro. As categorias vêm na ordem do cardápio, com `total_categorias`, `pagina`, `por_pagina`, `tem_mais` e `tem_cardapio`. Só vale usar em `adicionar_item` um `item_id` devolvido por esta busca nesta conversa nos últimos 30 minutos. Contrato completo: `docs/ESPEC_DISP1.md`, seção 8.
 
 Categoria que não existe: `itens` vazio e `sugestoes` com as parecidas. Para "o cardápio completo", chame com `categorias=true` e ofereça as categorias; não liste itens de cabeça.
 

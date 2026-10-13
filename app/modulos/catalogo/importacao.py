@@ -5,6 +5,8 @@ import csv,io,re
 from decimal import Decimal,InvalidOperation
 
 COLUNAS=['codigo','unidade','categoria','nome','descricao','preco','tipo','alcoolico','delivery','ativo','observacao']
+# DISP1: colunas opcionais, no fim. Arquivo sem elas continua valendo e não mexe na disponibilidade já cadastrada.
+COLUNAS_DISPONIBILIDADE=['dias_semana','exceto_feriado','horario']
 TIPOS=('item','adicional','opcao_executivo','regra')
 DELIVERY=('sim','nao','a_confirmar')
 MAX_BYTES=2*1024*1024
@@ -34,8 +36,36 @@ def _sim_nao(valor,campo):
     return v=='sim'
 
 
+def _disponibilidade(dias,feriado,horario):
+    """Colunas do CSV → disponibilidade. dias: "seg-sex" ou "seg,ter,qua"; feriado: sim/nao; horario: "11:30-15:00;19:00-23:00".
+    Tudo vazio = sem restrição."""
+    from .disponibilidade import DIAS,validar
+    valor={}
+    if dias.strip():
+        escolhidos=[]
+        for trecho in re.split(r'[,; ]+',dias.strip().lower()):
+            if not trecho: continue
+            if '-' in trecho:
+                a,_,b=trecho.partition('-')
+                if a not in DIAS or b not in DIAS or DIAS.index(a)>DIAS.index(b): raise ValueError('dias_semana inválido (ex.: seg-sex ou seg,qua,sex)')
+                escolhidos+=DIAS[DIAS.index(a):DIAS.index(b)+1]
+            elif trecho in DIAS: escolhidos.append(trecho)
+            else: raise ValueError('dias_semana inválido (ex.: seg-sex ou seg,qua,sex)')
+        valor['dias_semana']=escolhidos
+    if feriado.strip(): valor['exceto_feriado']=_sim_nao(feriado,'exceto_feriado')
+    if horario.strip():
+        faixas=[]
+        for trecho in re.split(r'[;,]+',horario.strip()):
+            m=re.fullmatch(r'\s*(\d{1,2}):(\d{2})\s*[-–]\s*(\d{1,2}):(\d{2})\s*',trecho)
+            if not m: raise ValueError('horario inválido (ex.: 11:30-15:00)')
+            faixas.append([f'{int(m.group(1)):02d}:{m.group(2)}',f'{int(m.group(3)):02d}:{m.group(4)}'])
+        valor['horario']=faixas
+    return validar(valor) if valor else None
+
+
 def ler(conteudo):
-    """bytes ou texto do CSV → (itens válidos, erros por linha). Levanta ArquivoInvalido se o arquivo não serve."""
+    """bytes ou texto do CSV → (itens válidos, erros por linha). Levanta ArquivoInvalido se o arquivo não serve.
+    Com as colunas de disponibilidade, cada item traz a chave 'disponibilidade'; sem elas, não traz."""
     if isinstance(conteudo,bytes):
         if len(conteudo)>MAX_BYTES: raise ArquivoInvalido('arquivo maior que 2 MB')
         try: conteudo=conteudo.decode('utf-8-sig')
@@ -44,7 +74,10 @@ def ler(conteudo):
     leitor=csv.reader(io.StringIO(conteudo,newline=''))
     try: cabecalho=[c.strip().lower() for c in next(leitor)]
     except StopIteration: raise ArquivoInvalido('arquivo vazio') from None
-    if cabecalho!=COLUNAS: raise ArquivoInvalido('cabeçalho esperado: '+','.join(COLUNAS))
+    com_disponibilidade=cabecalho==COLUNAS+COLUNAS_DISPONIBILIDADE
+    if cabecalho!=COLUNAS and not com_disponibilidade:
+        raise ArquivoInvalido('cabeçalho esperado: '+','.join(COLUNAS)+' (opcionais no fim: '+','.join(COLUNAS_DISPONIBILIDADE)+')')
+    colunas=COLUNAS+COLUNAS_DISPONIBILIDADE if com_disponibilidade else COLUNAS
     itens=[];erros=[];vistos={}
     for campos in leitor:
         n=leitor.line_num
@@ -52,8 +85,8 @@ def ler(conteudo):
         if len(itens)+len(erros)>=MAX_LINHAS: raise ArquivoInvalido(f'mais de {MAX_LINHAS} linhas')
         codigo=campos[0].strip() if campos else ''
         try:
-            if len(campos)!=len(COLUNAS): raise ValueError(f'{len(campos)} colunas; esperado {len(COLUNAS)}')
-            l={k:v.strip() for k,v in zip(COLUNAS,campos)}
+            if len(campos)!=len(colunas): raise ValueError(f'{len(campos)} colunas; esperado {len(colunas)}')
+            l={k:v.strip() for k,v in zip(colunas,campos)}
             if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,39}',l['codigo']): raise ValueError('codigo inválido')
             if l['codigo'] in vistos: raise ValueError(f'codigo repetido (linha {vistos[l["codigo"]]})')
             if not re.fullmatch(r'[a-z0-9][a-z0-9_]{0,39}',l['unidade']): raise ValueError('unidade inválida')
@@ -65,6 +98,7 @@ def ler(conteudo):
                   'descricao':l['descricao'] or None,'preco':_preco(l['preco']),'tipo':l['tipo'],
                   'alcoolico':_sim_nao(l['alcoolico'],'alcoolico'),'delivery':l['delivery'],
                   'ativo':_sim_nao(l['ativo'],'ativo'),'observacao':l['observacao'] or None}
+            if com_disponibilidade: item['disponibilidade']=_disponibilidade(l['dias_semana'],l['exceto_feriado'],l['horario'])
             vistos[l['codigo']]=n;itens.append(item)
         except ValueError as erro:
             if len(erros)<MAX_ERROS: erros.append({'linha':n,'codigo':codigo[:40] or None,'erro':str(erro)})
@@ -89,7 +123,13 @@ async def importar(conn,tenant,conteudo,simulacao=True):
     itens,erros=ler(conteudo)
     atuais={r['codigo']:r for r in await conn.fetch('SELECT * FROM catalogo_itens WHERE tenant_id=$1 AND codigo IS NOT NULL',tenant)}
     novos=[i for i in itens if i['codigo'] not in atuais]
-    mudados=[i for i in itens if i['codigo'] in atuais and any(atuais[i['codigo']][c]!=i[c] for c in COMPARADOS)]
+    from .disponibilidade import ler as ler_disponibilidade
+    import json
+    def mudou(i):
+        atual=atuais[i['codigo']]
+        # A disponibilidade só é comparada (e gravada) quando o arquivo traz as colunas dela.
+        return any(atual[c]!=i[c] for c in COMPARADOS) or ('disponibilidade' in i and ler_disponibilidade(atual['disponibilidade'])!=i['disponibilidade'])
+    mudados=[i for i in itens if i['codigo'] in atuais and mudou(i)]
     no_arquivo={i['codigo'] for i in itens}
     sumidos=[c for c,r in atuais.items() if c not in no_arquivo and r['ativo']]
     relatorio={'simulacao':simulacao,'aplicado':False,'linhas':len(itens)+len(erros),'validas':len(itens),
@@ -102,6 +142,10 @@ async def importar(conn,tenant,conteudo,simulacao=True):
     for i in mudados:
         await conn.execute('''UPDATE catalogo_itens SET unidade=$3,categoria=$4,nome=$5,descricao=$6,preco=$7,tipo=$8,alcoolico=$9,
             delivery=$10,ativo=$11,observacao=$12,atualizado_em=now() WHERE tenant_id=$1 AND codigo=$2''',tenant,*(i[c] for c in ['codigo']+list(COMPARADOS)))
+    for i in itens:
+        if 'disponibilidade' in i:
+            await conn.execute('UPDATE catalogo_itens SET disponibilidade=$3::jsonb WHERE tenant_id=$1 AND codigo=$2 AND disponibilidade IS DISTINCT FROM $3::jsonb',
+                               tenant,i['codigo'],json.dumps(i['disponibilidade']) if i['disponibilidade'] else None)
     if sumidos:
         await conn.execute('UPDATE catalogo_itens SET ativo=false,atualizado_em=now() WHERE tenant_id=$1 AND codigo=ANY($2::text[])',tenant,sumidos)
     relatorio['aplicado']=True

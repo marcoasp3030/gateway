@@ -60,7 +60,15 @@ async def montar(conn,client,app,monkeypatch,whatsapp=UNIDADE):
     k=(await client.post('/admin/v1/tenants/bykoji/api-keys',json={'nome':'skills','escopos':['ferramentas:catalogo','ferramentas:pedidos']})).json()
     chave=next(v for a,v in k.items() if isinstance(v,str) and a in ('chave','api_key','valor','segredo','key'))
     ids={r['codigo']:r['id'] for r in await conn.fetch("SELECT codigo,id FROM catalogo_itens WHERE tenant_id='bykoji'")}
-    async def api(metodo,caminho,**kw): return await client.request(metodo,'/api/v1'+caminho,headers={'X-API-Key':chave,'Authorization':''},**kw)
+    async def visto(caminho):
+        # DISP1: adicionar_item só aceita item que apareceu numa busca da conversa. Aqui os testes marcam o catálogo
+        # como buscado; a proteção em si é testada em tests/test_disp1.py.
+        import re
+        m=re.fullmatch(r'/carrinho/([^/]+)/itens',caminho)
+        if m: await conn.execute("INSERT INTO catalogo_vistos(tenant_id,conversation_id,item_id) SELECT 'bykoji',$1,id FROM catalogo_itens WHERE tenant_id='bykoji' ON CONFLICT DO NOTHING",m.group(1))
+    async def api(metodo,caminho,**kw):
+        if metodo=='POST': await visto(caminho)
+        return await client.request(metodo,'/api/v1'+caminho,headers={'X-API-Key':chave,'Authorization':''},**kw)
     async def pedido(telefone=CLIENTE):
         conv=(await webhook(telefone,'oi'))['conversation_id']
         await api('POST',f'/carrinho/{conv}/itens',json={'item_id':ids['GUE-0001'],'quantidade':2})

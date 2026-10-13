@@ -8,7 +8,7 @@ from test_pipeline_multi import RedisFila,ativo
 
 pytestmark=pytest.mark.skipif(not DSN,reason='Postgres de teste obrigatório')
 SEMANA={d:[['00:00','23:59']] for d in ('seg','ter','qua','qui','sex','sab','dom')}
-CAMPOS={'codigo','nome','ativa','endereco','telefone','situacao','agenda','aceita_retirada','delivery','taxa_entrega','pedido_minimo','formas_pagamento','area_entrega','regras',
+CAMPOS={'tem_cardapio','itens_no_cardapio','codigo','nome','ativa','endereco','telefone','situacao','agenda','aceita_retirada','delivery','taxa_entrega','pedido_minimo','formas_pagamento','area_entrega','regras',
         'entrega','retirada','pagamentos'}
 
 

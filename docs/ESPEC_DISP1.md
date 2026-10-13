@@ -1,6 +1,6 @@
 # DISP1 — Disponibilidade de item por dia e feriado · paginação de categorias
 
-**Situação:** especificação para aprovação, com os acréscimos pedidos em 13/10 (seção 6). **Nada implementado.**
+**Situação:** aprovado em 13/10/2026 (decisões nas seções 6.7 e 7) e implementado (seção 8, que é o contrato final). Onde as seções 2 a 6 divergem, **valem as seções 7 e 8**.
 **Data:** 12/10/2026. Produção: `gateway:7784585`, schema 39.
 
 ## 1. O que o teste mostrou e o que existe hoje
@@ -204,4 +204,86 @@ Avaliado: vale a pena e é barato (uma consulta agrupada por unidade).
 
 O relatório da implantação deve trazer o contrato para o prompt: motivos novos de `adicionar_item` e `buscar_catalogo` (`item_nao_buscado`, `item_indisponivel_hoje`, `unidade_diferente` com as duas unidades), o formato de `disponibilidade` na busca e onde aparecem `tem_cardapio` e `itens_no_cardapio`.
 
-**Itens 1 a 9 (seção 5): ainda sem decisão.** Nada é implementado antes delas.
+
+---
+
+## 7. Decisões do Marco para os itens 1 a 9 (13/10/2026)
+
+1. **Faixa de horário no item:** entra agora.
+2. **Item indisponível na busca:** devolvido marcado, com o motivo e o resumo em palavras, no fim da lista. Nomes neutros: `disponivel` (e não `disponivel_hoje`); em `adicionar_item` e `fechar_pedido`, motivo `item_indisponivel`, com o mesmo resumo.
+3. **Dia da conferência:** o `agendado_para` do carrinho; sem agendamento, agora. `fechar_pedido` confere de novo. `definir_entrega` avisa no retorno quais itens do carrinho ficaram indisponíveis com o novo horário.
+4. **Itens existentes:** todos sem restrição, menos os 4 almoços executivos, preenchidos na implantação (Einstein, Pátio Guedala e Vila Nova Conceição seg–sex; Morumbi ter–sex; todos exceto feriados). **A faixa de horário veio em branco na mensagem ("[HH:MM–HH:MM]") e não foi preenchida**: os 4 itens entraram só com dias e feriado, até o Marco informar a faixa de cada unidade.
+5. **Quem edita:** só admin e plataforma, pela rota PATCH nova e pelas 3 colunas opcionais do CSV.
+6. **Categorias por página:** 9.
+7. **Sem `pagina`:** devolve todas, como hoje, com `total_categorias` e `tem_mais`.
+8. **Ordem das categorias:** a do cardápio importado.
+9. **Um bloco só** (migração 040, uma implantação, um relatório com o contrato para o prompt).
+
+## 8. Contrato final (o que está implementado)
+
+### 8.1 `buscar_catalogo`
+
+Todo item devolvido ganha três campos, **sempre presentes**:
+
+| Campo | Valor |
+|---|---|
+| `disponivel` | `true` / `false` — o item é servido no dia e horário do pedido? Item sem restrição: sempre `true` |
+| `indisponivel_motivo` | `null`, `"dia_da_semana"`, `"feriado"` ou `"horario"` |
+| `disponibilidade` | `null` (sem restrição) ou `{"dias_semana": [...], "exceto_feriado": bool, "horario": [["HH:MM","HH:MM"]], "resumo": "segunda a sexta, 11h30–15h, exceto feriados"}` |
+
+- A resposta de busca com itens ganha `data_referencia` (ISO, fuso da unidade): o dia e a hora usados na conferência — o `agendado_para` do carrinho aberto; sem agendamento (ou com ele vencido), agora.
+- Os indisponíveis vão para o fim da lista; no modo `categoria`, isso acontece antes de paginar.
+- Feriado = o do `calendario` para a unidade do item (nacional; estadual e municipal pela cidade/UF da unidade; "feriado da empresa"). Ponto facultativo não conta.
+- Todo item devolvido fica marcado como "buscado" nesta conversa por 30 minutos (seção 8.2).
+
+**Categorias** (`categorias=true`):
+
+```json
+{"unidade": "patio_guedala", "total_itens": 193, "tem_cardapio": true, "total_categorias": 18,
+ "pagina": 1, "por_pagina": 9, "tem_mais": true,
+ "categorias": [{"categoria": "Almoço executivo", "qtd_itens": 1}, {"categoria": "Entradas quentes", "qtd_itens": 10}]}
+```
+
+- Com `pagina=N`: até 9 por página; `tem_mais` diz se há outra. Página além do fim: lista vazia, `tem_mais: false`.
+- Sem `pagina`: todas, com `pagina: null`, `por_pagina: null`, `tem_mais: false`.
+- Ordem: a do cardápio importado (posição do primeiro item de cada categoria).
+
+### 8.2 `adicionar_item` — ordem das conferências e motivos
+
+A primeira que falhar responde. Todas 422, salvo a primeira; nenhuma altera o carrinho.
+
+| # | Motivo | HTTP | `detalhes` a mais | O que o agente faz |
+|---|---|---|---|---|
+| 1 | `item_inexistente` | 404 | — | Busca de novo |
+| 2 | **`item_nao_buscado`** | 422 | `janela_min` (30) | O id não veio de uma busca desta conversa nos últimos 30 min (nem está no carrinho aberto). **Chama `buscar_catalogo` e usa o `item_id` devolvido.** Não transfere. A resposta não diz nada sobre o item enviado |
+| 3 | **`unidade_diferente`** | 422 | `unidade_do_carrinho`, `unidade_do_item` | O carrinho é de outra unidade. Busca o item na unidade do carrinho, ou pergunta se o cliente quer trocar de unidade |
+| 4 | `item_inativo`, `sem_preco`, `sem_delivery` | 422 | — | Como antes |
+| 5 | **`item_indisponivel`** | 422 | `motivo_indisponivel` (`dia_da_semana`/`feriado`/`horario`), `feriado` (nome ou nulo), `resumo`, `disponibilidade`, `data_referencia` | Diz ao cliente quando o item é servido (`resumo`) e oferece outro item ou outro horário |
+| 6 | `carrinho_cheio` | 422 | — | Como antes |
+
+A janela de 30 minutos é a constante `ITEM_BUSCADO_MIN` (variável de ambiente do gateway; padrão 30). Sempre ligada, sem chave por agente.
+
+### 8.3 Carrinho, `definir_entrega` e `fechar_pedido`
+
+- **Carrinho** (respostas das Skills e `contexto_modulos.pedidos.carrinho`): cada item ganha `disponivel` (bool); o carrinho ganha `itens_indisponiveis` (sempre presente, lista): `[{"id": <linha>, "item_id", "nome", "motivo", "feriado", "resumo", "data_referencia"}]`. Havendo algum: `pode_fechar: false` e `faltando` ganha `"item_indisponivel"`.
+- **`definir_entrega`**: o sucesso traz `itens_indisponiveis` também na **raiz** da resposta (a mesma lista do carrinho): os itens que não são servidos no horário recém-definido. O horário é aceito; cabe ao agente avisar o cliente e oferecer tirar o item ou mudar o horário. `unidade_diferente` (trocar a unidade com itens no carrinho) passa a trazer `unidade_do_carrinho` e `unidade_do_item`.
+- **`fechar_pedido`**: confere de novo. Recusa 422 `item_indisponivel`, com `detalhes.itens` (a lista acima), `resumo`, `motivo_indisponivel` e `data_referencia` (os três do primeiro item). Nenhum pedido é criado.
+- `alterar_item` e `remover_item` não conferem disponibilidade.
+
+### 8.4 `tem_cardapio` e `itens_no_cardapio`
+
+- Em cada unidade de **`unidades`** (raiz do pacote) e de **`info_unidades`** (`unidades[]`): `tem_cardapio` (bool) e `itens_no_cardapio` (inteiro).
+- Na resposta de `buscar_catalogo` com `categorias=true`: `tem_cardapio`.
+- Conta item ativo, com preço e que não seja exclusivo do salão.
+
+### 8.5 Contrato admin
+
+- `PATCH /admin/v1/tenants/{id}/catalogo/itens/{item_id}` — corpo `{"disponibilidade": {...} | null}`; cabeçalho `X-Role: admin` ou `plataforma` (senão 403). 400 com `campo: disponibilidade` se o formato não serve; 404 se o item não é da empresa. Devolve o item. Audita (`catalogo.disponibilidade`) e entra no histórico (`gestao_alteracoes`, entidade `catalogo_item`).
+- `GET /admin/v1/tenants/{id}/catalogo/itens` devolve `disponibilidade` (com `resumo`) em cada item.
+- CSV: colunas opcionais no fim `dias_semana` (`seg-sex` ou `seg,qua,sex`), `exceto_feriado` (`sim`/`nao`), `horario` (`11:30-15:00`, vários com `;`). Sem as colunas, a disponibilidade cadastrada não é tocada; com elas, célula vazia tira a restrição.
+- `GET /admin/v1/tenants/{id}/skills/registro` devolve `ref` em cada linha (seção 6.1, com `item_nome` em `adicionar_item`, `alterar_item` e `remover_item`).
+
+### 8.6 Banco e testes
+
+- Migração 040: `catalogo_itens.disponibilidade`, tabela `catalogo_vistos`, `skill_registro.ref`, e os 4 almoços executivos do By Koji (dias e feriado).
+- `tests/test_disp1.py` (5 testes). Os auxiliares dos testes antigos marcam o catálogo como buscado antes de adicionar item.

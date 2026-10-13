@@ -262,7 +262,7 @@ def test_info_unidades_entrega_retirada_pagamentos_e_pacote_sem_mudanca():
             from nucleo.horarios import pacote
             p=[x for x in await pacote(conn,'alpha','America/Sao_Paulo') if x['codigo']=='centro'][0]
             assert set(p)=={'id','nome','aberta_agora','proxima_abertura','motivo_fechada','fecha_as','pausada_ate','pausa_motivo','codigo','endereco','telefone',
-                            'formas_pagamento','taxa_entrega','pedido_minimo','area_entrega','aceita_retirada','regras','horarios'}
+                            'formas_pagamento','taxa_entrega','pedido_minimo','area_entrega','aceita_retirada','regras','horarios','tem_cardapio','itens_no_cardapio'}
             assert u3
     banco(cenario)
 

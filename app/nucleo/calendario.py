@@ -151,3 +151,17 @@ async def do_pacote(db,tenant,fuso,agora=None):
     except Exception as erro:
         log.warning('Calendário montado só com as datas (%s)',type(erro).__name__)
         return simples(hoje,fuso)
+
+
+async def feriado_da_unidade(db,tenant,unidade,dia):
+    """Nome do feriado que vale para uma unidade numa data, ou None (DISP1): nacional, estadual e municipal pela
+    cidade/UF da unidade, e o "feriado da empresa" (todas as unidades fechadas pelo mesmo motivo).
+    `unidade`: linha de tenant_unidades (None = item sem unidade cadastrada: só nacionais). Ponto facultativo não conta."""
+    nome,_,_=_feriado(dia,[dict(unidade)] if unidade else [])
+    if nome: return nome
+    unidades=await db.fetch('SELECT id,nome,cidade,uf FROM tenant_unidades WHERE tenant_id=$1 AND ativo ORDER BY nome,id',tenant)
+    excecoes=await db.fetch("""SELECT e.unidade_id,e.data,e.fechado,e.faixas,e.motivo FROM unidade_excecoes e
+        JOIN tenant_unidades u ON u.tenant_id=e.tenant_id AND u.id=e.unidade_id AND u.ativo WHERE e.tenant_id=$1 AND e.data=$2""",tenant,dia)
+    if not excecoes: return None
+    d=montar(dia,'UTC',unidades,excecoes)['dias'][0]
+    return d['feriado'] if d['tipo_feriado']=='empresa' else None

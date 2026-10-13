@@ -72,6 +72,17 @@ def recusa(r,carrinho=None):
     return JSONResponse(corpo,status_code=r.status,headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
 
 
+async def ref_do_item(request,tenant,item_id=None,linha_id=None,quantidade=None):
+    """Valores da chamada para o registro das Skills (DISP1): item, unidade e nome do catálogo — nada do cliente."""
+    db=request.app.state.db
+    if linha_id is not None:
+        r=await db.fetchrow('SELECT i.id,i.unidade,i.nome FROM carrinho_itens l JOIN catalogo_itens i ON i.tenant_id=l.tenant_id AND i.id=l.item_id WHERE l.tenant_id=$1 AND l.id=$2',tenant,linha_id)
+    else: r=await db.fetchrow('SELECT id,unidade,nome FROM catalogo_itens WHERE tenant_id=$1 AND id=$2',tenant,item_id)
+    request.state.skill_ref={**({'linha_id':linha_id} if linha_id is not None else {}),'item_id':r['id'] if r else item_id,
+                             'item_unidade':r['unidade'] if r else None,'item_nome':r['nome'] if r else None,'quantidade':quantidade}
+    return r['nome'] if r else None
+
+
 async def escrever(request,tenant,conversa,operacao,skill=None,dados=None):
     """Roda a operação numa transação e devolve o carrinho completo atualizado (ou a recusa com ele).
     Com `skill`, deixa o registro curto da chamada (para o turno refeito saber o que já foi feito)."""
@@ -95,22 +106,25 @@ async def ver(request:Request,conversation_id:str,ctx=Depends(chave)):
 @router.post('/api/v1/carrinho/{conversation_id}/itens')
 async def adicionar(request:Request,conversation_id:str,dados:NovoItem,ctx=Depends(chave)):
     t=await conversa_da_chave(request,ctx,conversation_id)
+    nome=await ref_do_item(request,t,item_id=dados.item_id,quantidade=dados.quantidade)
     return await escrever(request,t,conversation_id,lambda c: servico.adicionar(c,t,conversation_id,dados.item_id,dados.quantidade,dados.observacao),
-        'adicionar_item',{'item':await servico.nome_do_item(request.app.state.db,t,item_id=dados.item_id),'quantidade':dados.quantidade})
+        'adicionar_item',{'item':nome,'quantidade':dados.quantidade,'item_id':dados.item_id})
 
 
 @router.patch('/api/v1/carrinho/{conversation_id}/itens/{linha_id}')
 async def alterar(request:Request,conversation_id:str,linha_id:int,dados:MudarItem,ctx=Depends(chave)):
     t=await conversa_da_chave(request,ctx,conversation_id)
+    nome=await ref_do_item(request,t,linha_id=linha_id,quantidade=dados.quantidade)
     return await escrever(request,t,conversation_id,lambda c: servico.alterar(c,t,conversation_id,linha_id,dados.quantidade,dados.observacao,'observacao' in dados.model_fields_set),
-        'alterar_item',{'item':await servico.nome_do_item(request.app.state.db,t,linha_id=linha_id),'quantidade':dados.quantidade})
+        'alterar_item',{'item':nome,'quantidade':dados.quantidade,'item_id':request.state.skill_ref['item_id']})
 
 
 @router.delete('/api/v1/carrinho/{conversation_id}/itens/{linha_id}')
 async def remover(request:Request,conversation_id:str,linha_id:int,ctx=Depends(chave)):
     t=await conversa_da_chave(request,ctx,conversation_id)
+    nome=await ref_do_item(request,t,linha_id=linha_id)
     return await escrever(request,t,conversation_id,lambda c: servico.remover(c,t,conversation_id,linha_id),
-        'remover_item',{'item':await servico.nome_do_item(request.app.state.db,t,linha_id=linha_id)})
+        'remover_item',{'item':nome,'item_id':request.state.skill_ref['item_id']})
 
 
 @router.delete('/api/v1/carrinho/{conversation_id}')
@@ -124,8 +138,12 @@ async def entrega(request:Request,conversation_id:str,dados:Entrega,ctx=Depends(
     t=await conversa_da_chave(request,ctx,conversation_id)
     enviados=dados.model_dump(include=dados.model_fields_set)
     # Só os nomes dos campos informados: endereço e observação não ficam no registro.
-    return await escrever(request,t,conversation_id,lambda c: servico.entrega(c,t,conversation_id,enviados),
+    request.state.skill_ref={k:enviados.get(k) for k in ('unidade','modalidade','agendado_para') if k in enviados}
+    r=await escrever(request,t,conversation_id,lambda c: servico.entrega(c,t,conversation_id,enviados),
         'definir_entrega',{'detalhe':', '.join(sorted(enviados))})
+    # DISP1: com o horário novo, algum item do carrinho deixou de ser servido? O agente avisa o cliente na hora, não só no fechamento.
+    if isinstance(r,dict): r['itens_indisponiveis']=r['carrinho']['itens_indisponiveis']
+    return r
 
 
 def resumo_evento(p):
@@ -156,6 +174,7 @@ async def fechar(request:Request,dados:Fechar,ctx=Depends(chave)):
             await servico.registrar_skill(conn,t,conversa,'fechar_pedido',{},'preco_alterado')
             return recusa(servico.Recusa('preco_alterado',409),await servico.retrato(conn,t,conversa))
         await servico.registrar_skill(conn,t,conversa,'fechar_pedido',{'detalhe':'pedido '+str(p['numero'])},'ok')
+        request.state.skill_ref={'numero':p['numero']}
         # `numero` também na raiz (PED2): é o que o agente diz ao cliente; não depende de ler dentro de `pedido`.
         return {'ok':True,'numero':p['numero'],'pedido':servico.retrato_pedido(p),'carrinho':await servico.retrato(conn,t,conversa)}
 
@@ -170,6 +189,7 @@ async def ultimos_pedidos(request:Request,conversation_id:str,ctx=Depends(chave)
 @router.get('/api/v1/pedidos/{numero}')
 async def status(request:Request,numero:str,conversation_id:str,ctx=Depends(chave)):
     t=await conversa_da_chave(request,ctx,conversation_id)
+    request.state.skill_ref={'numero':str(numero)[:12]}
     try: p=await servico.da_conversa(request.app.state.db,t,conversation_id,numero)
     except servico.Recusa as r: return recusa(r)
     return {'ok':True,'pedido':await servico.para_o_agente(request.app.state.db,t,p)}
@@ -178,6 +198,7 @@ async def status(request:Request,numero:str,conversation_id:str,ctx=Depends(chav
 @router.post('/api/v1/pedidos/{numero}/cancelar')
 async def cancelar(request:Request,numero:str,dados:Cancelar,ctx=Depends(chave)):
     t=await conversa_da_chave(request,ctx,dados.conversation_id)
+    request.state.skill_ref={'numero':str(numero)[:12]}
     async with request.app.state.db.acquire() as conn:
         try:
             async with conn.transaction():
@@ -441,10 +462,12 @@ async def registro_de_skills(request:Request,tenant_id:str,conversation_id:str|N
     """Todas as chamadas de Skill da empresa (PED2), da mais recente para a mais antiga: nomes dos campos recebidos, status, motivo e tempo."""
     if not await Repositorio(request.app.state.db).tenant(tenant_id): raise HTTPException(404,'NOT_FOUND')
     if not 1<=limite<=200 or cursor<0: raise HTTPException(400,'VALIDATION_ERROR')
-    rows=await request.app.state.db.fetch("""SELECT id,conversation_id,skill,metodo,campos,status,motivo,duracao_ms,criado_em FROM skill_registro
+    rows=await request.app.state.db.fetch("""SELECT id,conversation_id,skill,metodo,campos,ref,status,motivo,duracao_ms,criado_em FROM skill_registro
         WHERE tenant_id=$1 AND ($2::text IS NULL OR conversation_id=$2) AND ($3::text IS NULL OR skill=$3) AND ($4=0 OR id<$4)
         ORDER BY id DESC LIMIT $5""",tenant_id,conversation_id,skill,cursor,limite+1)
-    return {'itens':[dict(r) for r in rows[:limite]],'proximo_cursor':rows[limite-1]['id'] if len(rows)>limite else None}
+    import json
+    return {'itens':[{**dict(r),'ref':json.loads(r['ref']) if isinstance(r['ref'],str) else r['ref']} for r in rows[:limite]],
+            'proximo_cursor':rows[limite-1]['id'] if len(rows)>limite else None}
 
 
 @admin.get('/tenants/{tenant_id}/avisos')
