@@ -89,8 +89,8 @@ async def busca(request:Request,conversation_id:str,q:str=Query('',max_length=20
     conv=await repo.obter(t,'conversas',conversation_id)
     if not conv or (ctx['agente_id'] and conv['agente_id']!=ctx['agente_id']): raise HTTPException(404,'NOT_FOUND')
     cfg=await request.app.state.configuracoes.efetiva(t,conv['agente_id'])
-    modelo=await repo.modelo(t,cfg['modelo_id'],cfg['modelo_versao'])
-    if 'catalogo' not in modelo['modulos']: raise HTTPException(404,'NOT_FOUND')
+    # Módulo que vale para o agente da conversa: permitido no modelo, ligado na empresa e no agente (MULTI1-a).
+    if 'catalogo' not in cfg['modulos']: raise HTTPException(404,'NOT_FOUND')
     por_categoria=categorias or bool((categoria or '').strip())
     if por_categoria and not unidade:
         # Sem unidade na chamada, vale a do carrinho aberto da conversa; sem carrinho, o agente precisa dizer qual.

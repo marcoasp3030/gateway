@@ -69,6 +69,8 @@ class Comportamento(Estrito):
 
 class Agente(Comportamento):
     nome: str | None = Field(None,min_length=1,max_length=200)
+    # MULTI1-a: módulos ligados no agente (dentro dos permitidos pelo modelo); nulo = os ligados por padrão no modelo.
+    modulos_ligados: list[str] | None = None
     modelo_id: str | None = None
     modelo_versao: int | None = Field(None,gt=0)
     status: Literal['rascunho','ativo','pausado'] | None = None

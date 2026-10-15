@@ -111,6 +111,22 @@ async def _escopo(request,tenant,agente,conn=None):
     return repo,empresa,config,linha
 
 
+async def listas_do_escopo(request,tenant,agente):
+    """MULTI1-a: (motivos de transferência aceitos [{"id","rotulo"}], comportamentos de módulo que o escopo não tem).
+    Agente: os dele. Empresa: a soma dos agentes dela."""
+    from modulos import COMPORTAMENTOS_DE_MODULO
+    cfgs=request.app.state.configuracoes
+    if agente is not None:
+        cfg=await cfgs.efetiva(tenant,agente);motivos,modulos=cfg['motivos_transferencia_permitidos'],cfg['modulos']
+    else: motivos,modulos=await cfgs.da_empresa_listas(tenant)
+    return motivos,{c for c,m in COMPORTAMENTOS_DE_MODULO.items() if m not in modulos}
+
+
+def fora_do_escopo(comportamentos,ocultos):
+    """Erros para configuração de um módulo que o escopo não tem."""
+    return [{'campo':'comportamentos.'+c,'motivo':'modulo_desligado'} for c in comportamentos if c in ocultos]
+
+
 async def numeros_da_instancia(db,tenant):
     return {r['numero_instancia'] for r in await db.fetch('SELECT numero_instancia FROM tenant_canais WHERE tenant_id=$1 AND numero_instancia IS NOT NULL',tenant)}
 
@@ -160,7 +176,9 @@ async def _efetivo(request,repo,tenant,agente,definicao=None):
             e=await cfgs.efetiva(tenant,agente);cfg,origem,perfil,origem_perfil,versao=e,e['origem_config'],e['perfil_atendimento'],e['origem_perfil'],e['perfil_versao']
     finally:
         if definicao is not None: repo.obter=original
-    comportamentos={c:cfg.get(c) for c in list(COMPORTAMENTOS)+list(A.SO_PLATAFORMA)}
+    from modulos import COMPORTAMENTOS_DE_MODULO
+    # Configuração de módulo que o escopo não tem não aparece (MULTI1-a): a efetiva já não a traz.
+    comportamentos={c:cfg.get(c) for c in list(COMPORTAMENTOS)+list(A.SO_PLATAFORMA) if c not in COMPORTAMENTOS_DE_MODULO or c in cfg}
     return {'perfil':perfil,'comportamentos':comportamentos,
             'origem':{'perfil':origem_perfil,'comportamentos':{c:A.ORIGENS[origem.get(c,'plataforma')] for c in comportamentos}}},versao
 
@@ -181,7 +199,7 @@ async def _visao(request,tenant,agente,avisos=None):
     saida={'escopo':'agente' if agente is not None else 'empresa','segmento':(linha or {}).get('modelo_id') if agente is not None else empresa.get('segmento'),
            'versao_publicada':versao,'publicado_em':ultima['publicado_em'] if ultima else None,'publicado_por':ultima['publicado_por'] if ultima else None,
            'perfil_versao':texto,'publicado':definicao,'rascunho':None,'efetivo':efetivo,
-           'esquema':A.esquema(PADROES,quem),'pode_editar':quem in ('admin','plataforma')}
+           'esquema':A.esquema(PADROES,quem,*await listas_do_escopo(request,tenant,agente)),'pode_editar':quem in ('admin','plataforma')}
     # Pendências que o painel deve mostrar (não impedem nada): o telefone de alerta em vigor é o da própria instância → o alerta não é enviado.
     saida['pendencias']=[{'campo':'comportamentos.transbordo_alerta','motivo':'numero_da_instancia'}] if efetivo['comportamentos'].get('transbordo_alerta') in await numeros_da_instancia(db,tenant) else []
     # O padrão de nome_empresa é o nome cadastrado desta empresa.
@@ -218,8 +236,9 @@ async def ler(request:Request,tenant_id:str,agente_id:str|None=None):
 @nas_duas('put','/rascunho',dependencies=[Depends(exigir_admin)])
 async def salvar_rascunho(request:Request,tenant_id:str,dados:Rascunho,agente_id:str|None=None,actor=Depends(painel)):
     """Salva só os campos enviados (nulo = voltar ao padrão de cima). Nada muda em produção."""
-    perfil,erros=A.validar_perfil(dados.perfil or {})
-    comportamentos,erros_c=validar_comportamentos(dados.comportamentos or {})
+    motivos,ocultos=await listas_do_escopo(request,tenant_id,agente_id)
+    perfil,erros=A.validar_perfil(dados.perfil or {},[m['id'] for m in motivos])
+    comportamentos,erros_c=validar_comportamentos(dados.comportamentos or {});erros_c+=fora_do_escopo(comportamentos,ocultos)
     # T1: o número da própria instância não serve de telefone de alerta (o bot avisaria a si mesmo).
     if comportamentos.get('transbordo_alerta') and comportamentos['transbordo_alerta'] in await numeros_da_instancia(request.app.state.db,tenant_id):
         erros_c.append({'campo':'comportamentos.transbordo_alerta','motivo':'numero_da_instancia'})
@@ -271,7 +290,8 @@ async def publicar(request:Request,tenant_id:str,dados:Publicar,agente_id:str|No
             return erro(409,'CONFLICT','Outra versão foi publicada depois deste rascunho.',{'motivo':'versao_desatualizada','versao_publicada':atual})
         antes=definicao_do_escopo(alvo);nova=aplicar(antes,r['conteudo'])
         # Revalida tudo: as regras podem ter mudado desde que o rascunho foi salvo.
-        _,e1=A.validar_perfil(nova['perfil']);_,e2=validar_comportamentos(nova['comportamentos'])
+        motivos,ocultos=await listas_do_escopo(request,tenant_id,agente_id)
+        _,e1=A.validar_perfil(nova['perfil'],[m['id'] for m in motivos]);_,e2=validar_comportamentos(nova['comportamentos']);e2+=fora_do_escopo(nova['comportamentos'],ocultos)
         if e1+e2: return erro(400,'VALIDATION_ERROR','Há campos inválidos.',{'campos':e1+e2})
         bloqueios,duvidas=analisar_textos(nova)
         # A confirmação vale para o que está mudando agora; trecho já confirmado numa versão anterior não volta a pedir.
@@ -325,7 +345,9 @@ async def restaurar(request:Request,tenant_id:str,versao:int,dados:Restaurar|Non
         antes=definicao_do_escopo(alvo);nova={'perfil':conteudo.get('perfil') or {},'comportamentos':conteudo.get('comportamentos') or {}}
         if not diferencas(antes,nova): return erro(409,'CONFLICT','Esta versão já é a que está em vigor.',{'motivo':'sem_alteracoes','versao_publicada':alvo.get('perfil_versao') or 0})
         # Versão antiga é revalidada pelas regras de hoje; texto que hoje seria bloqueado não volta.
-        _,e1=A.validar_perfil(nova['perfil']);_,e2=validar_comportamentos(nova['comportamentos']);bloqueios,_=analisar_textos(nova)
+        motivos,ocultos=await listas_do_escopo(request,tenant_id,agente_id)
+        _,e1=A.validar_perfil(nova['perfil'],[m['id'] for m in motivos]);_,e2=validar_comportamentos(nova['comportamentos']);e2+=fora_do_escopo(nova['comportamentos'],ocultos)
+        bloqueios,_=analisar_textos(nova)
         if e1+e2 or bloqueios: return erro(400,'VALIDATION_ERROR','Esta versão não passa nas regras atuais.',{'campos':e1+e2,'bloqueios':bloqueios})
         nota=((dados.nota if dados else None) or '').strip() or f'Restaurada da versão {versao}'
         await _gravar(request,conn,repo,tenant_id,agente_id,empresa,antes,nova,'restauracao',actor,nota,versao)
@@ -354,6 +376,8 @@ async def segmentos(request:Request):
 def _segmento(m):
     perfil,_=A.resolver_perfil(('segmento',m.get('perfil_padrao')))
     return {'id':m['id'],'nome':m['nome'],'versao':m['versao'],'modulos':m['modulos'],'perfil_padrao':A.bloco_do_pacote(perfil),
+            'segmento':m.get('segmento'),'ativo':m.get('ativo',True),'skyone_ref':m.get('skyone_ref'),
+            'modulos_permitidos':m.get('modulos_permitidos'),'modulos_padrao':m.get('modulos_padrao'),
             'comportamento_padrao':{**{c:PADROES.get(c) for c in COMPORTAMENTOS},**{c:v for c,v in (m['comportamento_padrao'] or {}).items() if c in COMPORTAMENTOS}}}
 
 

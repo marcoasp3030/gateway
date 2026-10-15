@@ -3,7 +3,7 @@ import json
 from urllib.parse import urlsplit,parse_qs
 import pytest
 from test_migrations import banco,migrar,DSN
-from test_admin import preparar,criar
+from test_admin import preparar,criar,modelo_de_teste
 
 pytestmark=pytest.mark.skipif(not DSN,reason='Postgres de teste obrigatório')
 
@@ -45,7 +45,7 @@ def test_INV08_INV17_pipeline_dois_tenants_tres_agentes_e_debounce():
         async with client:
             a,ca=await criar(client)
             b,cb=await criar(client,'bravo')
-            a2=(await client.post('/admin/v1/tenants/alpha/agentes',json={'nome':'A2','modelo_id':'assistente_generico'})).json()['id']
+            a2=(await client.post('/admin/v1/tenants/alpha/agentes',json={'nome':'A2','modelo_id':await modelo_de_teste(client)})).json()['id']
             ca2=(await client.post('/admin/v1/tenants/alpha/canais',json={'nome':'C2','tipo':'api','agente_id':a2})).json()['id']
             for tenant,ag,can in [('alpha',a,ca),('alpha',a2,ca2),('bravo',b,cb)]:
                 await ativo(client,tenant,ag,can,debounce_s=2,max_wait_s=8)

@@ -137,6 +137,7 @@ Campos garantidos em toda chamada (teste de contrato: `tests/test_fase2_contrato
 | `cliente` | `{"nome", "nome_origem", "unidade_preferida", "resumo_anterior"}` (valores podem ser nulos). `nome` segue a prioridade **cadastro (painel) > informado (`nome_cliente` do agente) > perfil (WhatsApp)** e **nunca é o telefone**; `nome_origem` diz de onde veio (`cadastro`, `informado`, `perfil` ou nulo). Com `nome_origem` nulo ou `perfil`, o agente pode perguntar o nome; com `cadastro` ou `informado`, não precisa. |
 | `unidades` | Unidades da empresa com situação de funcionamento (lista vazia se não houver). |
 | `contexto_modulos` | Um bloco por módulo habilitado no agente (objeto vazio se não houver). |
+| `agente` | MULTI1-a, sempre presente. `{"modelo": {"id", "versao", "nome"}, "segmento", "modulos": [...], "motivos_transferencia": [{"id", "rotulo"}], "tipos_solicitacao": [{"id", "rotulo"}]}` — o que este agente é e as listas que valem para ele (motivo fora da lista vira `fora_do_escopo`; tipo fora da lista vira `outro`). As instruções de cada módulo ficam no prompt do agente do Skyone de cada segmento. Formato em `docs/ESPEC_MULTI1.md`, seção 10.8. |
 
 A credencial vai no cabeçalho `Authorization` (SEG13), nunca no corpo.
 

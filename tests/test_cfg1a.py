@@ -83,7 +83,8 @@ def test_rascunho_publicacao_versoes_restauracao_previa_e_papeis():
             # Estado inicial: nada publicado, tudo no padrão; o pacote já teria o perfil padrão.
             g=(await client.get(E)).json()
             assert (g['escopo'],g['versao_publicada'],g['perfil_versao'],g['rascunho'],g['publicado'])==('empresa',0,'e0',None,{'perfil':{},'comportamentos':{}})
-            PADRAO_ALPHA=A.bloco_do_pacote(A.resolver_perfil(nome_da_empresa=(await conn.fetchval("SELECT nome FROM tenants WHERE id='alpha'")))[0])
+            # O modelo de teste não tem módulos nem motivos próprios: só os motivos do núcleo (MULTI1-a).
+            PADRAO_ALPHA=A.bloco_do_pacote(A.resolver_perfil(nome_da_empresa=(await conn.fetchval("SELECT nome FROM tenants WHERE id='alpha'")),motivos=['pediu_humano','reclamacao'])[0])
             assert g['efetivo']['perfil']==PADRAO_ALPHA and PADRAO_ALPHA['nome_empresa'] and g['efetivo']['origem']['perfil']['nome_empresa']=='cadastro' and g['esquema']['perfil']['nome_empresa']['padrao']==PADRAO_ALPHA['nome_empresa']
             assert {o for c,o in g['efetivo']['origem']['perfil'].items() if c!='nome_empresa'}=={'plataforma'} and g['personalizado']=={'perfil':[],'comportamentos':[]}
             assert g['pode_editar'] is False and (await client.get(E,headers={'X-Role':'admin'})).json()['pode_editar'] is True
@@ -184,8 +185,10 @@ def test_rascunho_publicacao_versoes_restauracao_previa_e_papeis():
             assert (await client.post(E+'/publicar',json={'baseado_em':8},headers=ADMIN)).status_code==400 and (await cfg())['max_wait_s']==12 and (await client.get(E)).json()['versao_publicada']==8
             await client.delete(E+'/rascunho',headers=ADMIN)
             # Rotas antigas num campo versionado geram versão automática; em campo de operação, não.
-            assert (await client.put('/admin/v1/tenants/alpha/config',json={'carrinho_expira_h':8})).status_code==200
-            v=(await client.get(E+'/versoes')).json()['itens'][0];assert (v['versao'],v['origem'],v['campos_alterados'],v['publicado_por'])==(9,'alteracao_direta',['comportamentos.carrinho_expira_h'],'teste')
+            # Configuração de pedido numa empresa sem o módulo em uso é recusada (MULTI1-a).
+            r=await client.put('/admin/v1/tenants/alpha/config',json={'carrinho_expira_h':8});assert r.status_code==400 and r.json()['erro']['detalhes']=={'campo':'carrinho_expira_h','motivo':'modulo_desligado'},r.text
+            assert (await client.put('/admin/v1/tenants/alpha/config',json={'debounce_incompleta_s':9})).status_code==200
+            v=(await client.get(E+'/versoes')).json()['itens'][0];assert (v['versao'],v['origem'],v['campos_alterados'],v['publicado_por'])==(9,'alteracao_direta',['comportamentos.debounce_incompleta_s'],'teste')
             assert (await client.put('/admin/v1/tenants/alpha/config',json={'max_concorrencia':7})).status_code==200 and (await client.get(E)).json()['versao_publicada']==9
             assert (await client.patch(f'/admin/v1/tenants/alpha/agentes/{a}',json={'refazer_turno':'on'})).status_code==200 and (await client.get(AG)).json()['versao_publicada']==2
             assert (await client.patch(f'/admin/v1/tenants/alpha/agentes/{a}',json={'nome':'Outro nome'})).status_code==200 and (await client.get(AG)).json()['versao_publicada']==2
@@ -218,10 +221,10 @@ def test_segmento_empresa_herda_e_migracao_sem_mudar_a_configuracao_efetiva():
             efetiva=lambda: app.state.configuracoes.efetiva('bykoji','bykoji_atendimento')
             antes=await efetiva();assert antes['modelo_id']=='atendente_delivery'
             assert (await client.patch('/admin/v1/tenants/bykoji',json={'segmento':'delivery_restaurante'})).status_code==200
-            assert (await client.patch(A1,json={'modelo_id':'delivery_restaurante','modelo_versao':1})).status_code==200
+            assert (await client.patch(A1,json={'modelo_id':'delivery_restaurante','modelo_versao':1},headers={'X-Role':'plataforma'})).status_code==200
             depois=await efetiva();assert depois['modelo_id']=='delivery_restaurante'
             novos={'fora_do_horario'}   # campo que ainda não é executado; o segmento novo já traz o padrão de delivery
-            diferentes={k for k in antes if k not in ('modelo_id','origem_config','origem_perfil') and antes[k]!=depois[k]}
+            diferentes={k for k in antes if k not in ('modelo_id','modelo_nome','origem_config','origem_perfil') and antes[k]!=depois[k]}
             assert diferentes==novos,diferentes
             assert {k for k in antes['origem_config'] if antes['origem_config'][k]!=depois['origem_config'][k]}==novos
             assert depois['perfil_atendimento']==antes['perfil_atendimento'] and depois['perfil_versao']==antes['perfil_versao']=='e0.a1'   # trocar de segmento não cria versão

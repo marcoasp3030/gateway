@@ -5,11 +5,12 @@ def test_INV08_SEG06_modulo_desabilitado_e_catalogo_isolado():
   await migrar.aplicar(c);app,h=preparar(c)
   async with h:
    a,ca=await criar(h);b,cb=await criar(h,'bravo')
+   h.headers['X-Role']='plataforma'  # chaves de módulo da empresa e troca de modelo: só a plataforma (MULTI1-a)
    assert (await h.get('/admin/v1/modulos')).status_code==200
    for t in ('alpha','bravo'):
     for m in ('catalogo','pedidos'):
      assert (await h.put(f'/admin/v1/tenants/{t}/modulos/{m}',json={'ativo':True})).status_code==200
-   assert (await h.patch(f'/admin/v1/tenants/alpha/agentes/{a}',json={'modelo_id':'atendente_delivery'})).status_code==200
+   assert (await h.patch(f'/admin/v1/tenants/alpha/agentes/{a}',json={'modelo_id':'delivery_restaurante'})).status_code==200
    conv=f'alpha:{ca}:cliente'
    await c.execute('INSERT INTO conversas(conversation_id,canal,tenant_id,agente_id,canal_id) VALUES ($1,$2,$3,$4,$5)',conv,'api','alpha',a,ca)
    for t in ('alpha','bravo'):
@@ -30,6 +31,7 @@ def test_INV08_modelos_versionados_globais_privados_e_auditoria():
   await migrar.aplicar(c);app,h=preparar(c)
   async with h:
    a,ca=await criar(h);await criar(h,'bravo')
+   h.headers['X-Role']='plataforma'  # criar e alterar modelo: só a plataforma (MULTI1-a)
    for mid,t in [('global_model',None),('privado','alpha')]:
     r=await h.post('/admin/v1/modelos-agente',json={'id':mid,'nome':'M','tenant_id':t,'comportamento_padrao':{'history_turns':2}})
     assert r.status_code==201,r.text

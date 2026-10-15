@@ -1268,3 +1268,12 @@ PY
 ## Auditoria multiagente — 2026-10-15
 
 - `docs/AUDITORIA_MULTIAGENTE.md`: o quanto o gateway está pronto para outros tipos de agente e outras empresas (passos de criação, módulos, canais, isolamento, módulo financeiro, painel). **Só leitura; nada alterado.**
+
+## MULTI1-a — empresa da sessão, modelos de agente como cadastro e módulos declarativos — 2026-10-15
+
+- Decisões do Marco (1–10) registradas em `docs/ESPEC_MULTI1.md`, seção 9; contrato para o [PAINEL] na seção 10. AVS1 já estava implantado (13/10) quando o MULTI1 foi aprovado.
+- `X-Tenant-Scope` na API admin (`app/nucleo/escopo_empresa.py`): outra empresa → 404, visões/escritas globais → 403, plataforma vê tudo; sem o cabeçalho, log + alerta `painel_sem_escopo` até `ESCOPO_EMPRESA_OBRIGATORIO=on`.
+- Migração 043: modelo de agente com `segmento`, `modulos_permitidos`, `modulos_padrao`, `motivos_transferencia`, `tipos_solicitacao`, `skyone_ref`, `ativo`; `agentes.modulos_ligados`; `delivery_restaurante` v4 ("Delivery", v1–v3 com os mesmos campos novos), `atendimento_geral` v1; `assistente_generico` e `atendente_delivery` inativos (quem usa continua).
+- Módulo efetivo = modelo E empresa E agente; empresa sem registro = ligado; chave da empresa e criar/alterar modelo só plataforma. Motivos e tipos em três camadas com rótulo; `converte_em_solicitacao` no motivo. Comportamentos de módulo escondidos e recusados (`modulo_desligado`) sem o módulo.
+- Bloco `agente` no pacote do Skyone (sem instruções de módulo). Webhook da instância uazapi cadastrado pelo gateway (criar canal, trocar credenciais, rotacionar segredo; `POST …/canais/{id}/webhook` para refazer).
+- Testes: `tests/test_multi1a.py` (7); testes antigos passaram a usar o modelo `generico_teste` (o `assistente_generico` ficou inativo) e `X-Role: plataforma` onde trocam modelo ou chave de módulo.

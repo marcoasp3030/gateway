@@ -25,7 +25,9 @@ def test_null_em_campo_obrigatorio_vira_400_com_campo_sem_tocar_o_banco(monkeypa
             a,can=await criar(c)
             antes=(await c.get(f'/admin/v1/tenants/alpha/agentes/{a}')).json()
             for campo in OBRIGATORIOS_AGENTE:
-                r=await c.patch(f'/admin/v1/tenants/alpha/agentes/{a}',json={campo:None})
+                # Trocar o modelo do agente é só da plataforma (MULTI1-a).
+                papel={'X-Role':'plataforma'} if campo.startswith('modelo_') else {}
+                r=await c.patch(f'/admin/v1/tenants/alpha/agentes/{a}',json={campo:None},headers=papel)
                 assert erro(r)==(400,'VALIDATION_ERROR',campo),(campo,r.text)
             # Junto com outros campos válidos, nada é gravado.
             r=await c.patch(f'/admin/v1/tenants/alpha/agentes/{a}',json={'fallback':'novo','timeout_s':None})

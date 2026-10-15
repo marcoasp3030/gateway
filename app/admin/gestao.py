@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import Field, field_validator
 from .modelos import Estrito
 from .servico import auditar
-from nucleo.autenticacao import painel
+from nucleo.autenticacao import painel, exigir_admin
 from nucleo.banco import Repositorio
 from nucleo.configuracao import Configuracoes
 from nucleo.contatos import exibicao, canal_info
@@ -106,7 +106,21 @@ async def rotacionar(request: Request, tenant: str, canal: str, actor=Depends(pa
                                   tenant, canal, state.cofre.cifrar(tenant, segredo))
         if not row: raise HTTPException(404, 'NOT_FOUND')
         await auditar(conn, tenant, actor, 'canal.segredo_rotacionado', canal)
-    return {'id': canal, 'webhook_url': state.infra.public_url.rstrip('/')+'/webhooks/'+row['tipo']+'/'+quote(canal, safe='')+'?s='+segredo}
+    resposta={'id': canal, 'webhook_url': state.infra.public_url.rstrip('/')+'/webhooks/'+row['tipo']+'/'+quote(canal, safe='')+'?s='+segredo}
+    # MULTI1-a: o endereço novo vai para a instância na hora (antes era manual).
+    if row['tipo']=='uazapi' and state.infra.registrar_webhook_uazapi:
+        from canais.webhook_instancia import registrar
+        resposta['webhook_uazapi']=await registrar(state,tenant,canal,actor,segredo)
+    return resposta
+
+
+@router.post('/tenants/{tenant}/canais/{canal}/webhook', dependencies=[Depends(exigir_admin)])
+async def refazer_webhook(request: Request, tenant: str, canal: str, actor=Depends(painel)):
+    """Cadastra de novo, na instância uazapi, o endereço que recebe as mensagens (com o segredo atual). O endereço não volta na resposta."""
+    from canais.webhook_instancia import registrar
+    resultado=await registrar(request.app.state,tenant,canal,actor)
+    if resultado is None: raise HTTPException(404,'NOT_FOUND')
+    return {'id': canal, 'webhook_uazapi': resultado}
 
 
 @router.get('/tenants/{tenant}/conversas')

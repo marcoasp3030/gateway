@@ -71,6 +71,12 @@ def papel(request: Request):
     return valor if valor in PAPEIS else 'membro'
 
 
+def exigir_plataforma(request: Request):
+    """Só a equipe da plataforma (ex.: cadastro de modelos de agente e chave de módulo da empresa)."""
+    if papel(request)!='plataforma':
+        raise HTTPException(403,'FORBIDDEN')
+
+
 def exigir_admin(request: Request):
     if papel(request) not in ('plataforma','admin'):
         raise HTTPException(403,'FORBIDDEN')

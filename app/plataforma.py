@@ -38,6 +38,8 @@ class Infra:
     skyone_rpm: int = 240
     fila_duravel: bool = False
     concorrencia_por_worker: int = 20
+    # MULTI1-a: cadastrar sozinho o webhook na instância uazapi ao criar o canal, trocar credenciais e rotacionar o segredo.
+    registrar_webhook_uazapi: bool = False
 
     def validar(self):
         segredos={'PANEL_SERVICE_KEY':self.panel_key,'API_KEY_PEPPER':self.pepper}
@@ -55,7 +57,8 @@ class Infra:
             os.getenv('REDIS_URL',''),os.getenv('GATEWAY_PUBLIC_URL','https://painel.luxbrain.com.br/gateway'),
             skyone_rpm=int(os.getenv('SKYONE_REQUESTS_PER_MINUTE','240')),
             fila_duravel=ligada_no_ambiente(),
-            concorrencia_por_worker=int(os.getenv('CONCORRENCIA_POR_WORKER','20')))
+            concorrencia_por_worker=int(os.getenv('CONCORRENCIA_POR_WORKER','20')),
+            registrar_webhook_uazapi=os.getenv('REGISTRAR_WEBHOOK_UAZAPI','on').strip().lower() in ('on','1','sim','true'))
 
 
 def criar_app(infra,db=None,redis=None):
@@ -116,6 +119,19 @@ def criar_app(infra,db=None,redis=None):
         if seguranca.rota_interna(request.url.path) and not seguranca.chamada_interna(
                 request.client.host if request.client else None,request.headers):
             return resposta_erro(404)
+        # MULTI1-a: empresa da sessão do painel (X-Tenant-Scope).
+        if request.url.path.startswith('/admin/v1/'):
+            from nucleo import escopo_empresa
+            from nucleo.autenticacao import papel as papel_do_pedido
+            quem=papel_do_pedido(request);veredito=escopo_empresa.conferir(request,quem)
+            if veredito=='sem_escopo':
+                if escopo_empresa.registrar_sem_escopo(request,quem):
+                    try:
+                        from nucleo.alertas import Alertas
+                        await Alertas(app.state.redis,app.state.http,app.state.db,app.state.pipeline.prefixo).disparar('painel_sem_escopo','aviso',
+                            'painel sem a empresa da sessão',f'Chamada de papel "{quem}" sem X-Tenant-Scope: {request.method} {escopo_empresa.rota_sem_ids(request.url.path)}')
+                    except Exception: pass
+            elif veredito is not None: return resposta_erro(veredito[0])
         grupo=request.url.path.split('/',2)[1]
         if grupo in ('api','webhooks'):
             try:
@@ -133,7 +149,7 @@ def criar_app(infra,db=None,redis=None):
         codigo='CREDENTIAL_REJECTED' if exc.status_code==502 and exc.detail=='credencial do Skyone recusada' else None
         campo=exc.detail.get('campo') if isinstance(exc.detail,dict) else None
         if isinstance(exc.detail,str): campo=CAMPOS_LEGADOS.get(exc.detail,campo)
-        return resposta_erro(exc.status_code,codigo,campo,exc.headers)
+        return resposta_erro(exc.status_code,codigo,campo,exc.headers,exc.detail.get('motivo') if isinstance(exc.detail,dict) else None)
     @app.exception_handler(RequestValidationError)
     async def validacao(request,exc): return resposta_erro(400,campo=campo_validacao(exc.errors()))
     @app.exception_handler(ValueError)

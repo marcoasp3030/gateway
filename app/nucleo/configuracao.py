@@ -81,11 +81,20 @@ class Configuracoes:
             'timeout_s','instrucoes_agente','modo_resposta')})
         # Não cachear credenciais nem ciphertexts.
         cfg['origem_config'] = origem
+        # MULTI1-a: módulos que valem para o agente (modelo E empresa E agente), segmento e listas efetivas de motivos e tipos.
+        from modulos import modulos_efetivos,motivos_efetivos,tipos_efetivos,chaves_da_empresa,COMPORTAMENTOS_DE_MODULO
+        cfg['modulos'] = modulos_efetivos(modelo,agente.get('modulos_ligados'),await chaves_da_empresa(self.repo.db,tenant_id))
+        cfg['segmento'] = modelo.get('segmento'); cfg['modelo_nome'] = modelo.get('nome')
+        cfg['motivos_transferencia_permitidos'] = motivos_efetivos(modelo,cfg['modulos'])
+        cfg['tipos_solicitacao_permitidos'] = tipos_efetivos(modelo,cfg['modulos'])
+        # Configuração de um módulo que o agente não tem não aparece nem vale.
+        for campo,modulo in COMPORTAMENTOS_DE_MODULO.items():
+            if modulo not in cfg['modulos']: cfg.pop(campo,None); origem.pop(campo,None)
         # Perfil de atendimento (CFG1-a): mesma herança, sempre a versão publicada de cada escopo.
         from nucleo.atendimento import resolver_perfil,bloco_do_pacote,versao_texto
         empresa = await self.repo.tenant(tenant_id) or {}
         perfil,origem_perfil = resolver_perfil(('segmento',modelo.get('perfil_padrao')),('empresa',tenant.get('perfil')),('agente',agente.get('perfil')),
-                                               nome_da_empresa=empresa.get('nome'))
+                                               nome_da_empresa=empresa.get('nome'),motivos=[m['id'] for m in cfg['motivos_transferencia_permitidos']])
         cfg['perfil_atendimento'] = bloco_do_pacote(perfil); cfg['origem_perfil'] = origem_perfil
         cfg['perfil_versao'] = versao_texto(tenant.get('perfil_versao'),agente.get('perfil_versao'))
         if geracao == self._geracao:
@@ -105,5 +114,21 @@ class Configuracoes:
             for campo in COMPORTAMENTO:
                 if dados.get(campo) is not None:
                     cfg[campo] = copy.deepcopy(dados[campo]); origem[campo] = nome
-        perfil,origem_perfil = resolver_perfil(('segmento',(modelo or {}).get('perfil_padrao')),('empresa',tenant.get('perfil')),nome_da_empresa=empresa.get('nome'))
+        # MULTI1-a: na empresa valem os motivos de todos os agentes dela, e a configuração dos módulos que algum deles usa.
+        motivos,modulos = await self.da_empresa_listas(tenant_id)
+        from modulos import COMPORTAMENTOS_DE_MODULO
+        for campo,modulo in COMPORTAMENTOS_DE_MODULO.items():
+            if modulo not in modulos: cfg.pop(campo,None); origem.pop(campo,None)
+        perfil,origem_perfil = resolver_perfil(('segmento',(modelo or {}).get('perfil_padrao')),('empresa',tenant.get('perfil')),nome_da_empresa=empresa.get('nome'),
+                                               motivos=[m['id'] for m in motivos])
         return cfg,origem,bloco_do_pacote(perfil),origem_perfil,versao_texto(tenant.get('perfil_versao'))
+
+    async def da_empresa_listas(self, tenant_id):
+        """(motivos de transferência, módulos em uso) somando os agentes da empresa. Sem agente, os do núcleo e nenhum módulo."""
+        from modulos import modulos_efetivos,motivos_efetivos,chaves_da_empresa,MOTIVOS_NUCLEO,_em_ordem,ORDEM_MOTIVOS,REGISTRO
+        chaves = await chaves_da_empresa(self.repo.db,tenant_id);motivos = list(MOTIVOS_NUCLEO);modulos = set()
+        for a in await self.repo.db.fetch("SELECT modelo_id,modelo_versao,modulos_ligados FROM agentes WHERE tenant_id=$1",tenant_id):
+            modelo = await self.repo.modelo(tenant_id,a['modelo_id'],a['modelo_versao'])
+            if not modelo: continue
+            mods = modulos_efetivos(modelo,a['modulos_ligados'],chaves);modulos.update(mods);motivos += motivos_efetivos(modelo,mods)
+        return _em_ordem(motivos,ORDEM_MOTIVOS),[m for m in REGISTRO if m in modulos]

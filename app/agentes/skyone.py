@@ -162,6 +162,11 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
                      'content':h['conteudo'],'enviada_em':iso(h['enviada_em'])}
                     for h in historico],
         'tenant_id':tenant_id,'agente_id':cfg['id'],'modelo_id':cfg['modelo_id'],
+        # MULTI1-a: modelo, segmento e módulos do agente, com as listas efetivas, para o Normalizar montar as instruções certas.
+        'agente':{'modelo':{'id':cfg['modelo_id'],'versao':cfg['modelo_versao'],'nome':cfg.get('modelo_nome')},'segmento':cfg.get('segmento'),
+                  'modulos':list(cfg.get('modulos') or []),
+                  'motivos_transferencia':[{'id':m['id'],'rotulo':m['rotulo']} for m in cfg.get('motivos_transferencia_permitidos') or []],
+                  'tipos_solicitacao':[{'id':t['id'],'rotulo':t['rotulo']} for t in cfg.get('tipos_solicitacao_permitidos') or []]},
         'canal':{'id':conv.get('canal_id'),'tipo':(canal or {}).get('tipo') or conv.get('canal'),'publico':(canal or {}).get('publico')},
         'modo_resposta':cfg['modo_resposta'],'tarefa':'responder',
         'agora':iso(agora),

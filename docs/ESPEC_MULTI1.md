@@ -170,7 +170,7 @@ Sem mudança desde a revisão 1:
 - Cabeçalho `X-Tenant-Scope: <empresa da sessão>`, enviado pelo servidor do painel.
 - Para `admin` e `membro`: rota de outra empresa responde 404; `GET /tenants` devolve só a própria; escritas globais respondem 403 (criar empresa e criar ou alterar modelo de agente) e as visões de toda a plataforma (`/fila`, `/auditoria/plataforma`) também.
 - `plataforma` vê tudo.
-- Falta decidir o que acontece quando o cabeçalho não vem (decisão 1).
+- Sem o cabeçalho (decisão 1, opção A): durante a transição a chamada segue como antes e fica registrada em log (`gateway.escopo`, no máximo uma linha por minuto por papel e rota) e em alerta `painel_sem_escopo`; com `ESCOPO_EMPRESA_OBRIGATORIO=on` (ligar quando o [PAINEL] publicar), responde 403.
 
 ---
 
@@ -196,7 +196,7 @@ Primeiro o MULTI1-a, porque entrega o que um segundo agente precisa (cadastro, p
 
 ---
 
-## 9. Decisões
+## 9. Decisões (aprovadas pelo Marco em 15/10/2026, com os detalhes da seção 10)
 
 | # | Decisão | Proposta |
 |---|---|---|
@@ -210,3 +210,85 @@ Primeiro o MULTI1-a, porque entrega o que um segundo agente precisa (cadastro, p
 | 8 | Referência do Skyone | `skyone_ref`, texto livre só informativo (o gateway continua usando o fluxo cadastrado no agente) |
 | 9 | Criar e alterar modelo | Só plataforma (hoje qualquer papel) |
 | 10 | Ordem | MULTI1-a primeiro; MULTI1-b (núcleo sem delivery) logo depois, sem mudança visível |
+
+Detalhes das decisões de 15/10: a chave da empresa só a plataforma altera, padrão ligado quando o modelo permite (2); o v3 do By Koji só recebe os campos novos (3); modelos antigos inativos para criação e para troca de modelo, quem já usa continua (4); **sem texto de instruções de módulo no pacote** — as instruções de cada módulo ficam no prompt do agente do Skyone de cada segmento (7). No MULTI1-b: retrato do pacote e das respostas das Skills do By Koji em cenários fixos antes de mexer, teste "idêntico campo a campo" depois, e teste próprio da anonimização (10).
+
+---
+
+## 10. MULTI1-a implementado — contrato para o [PAINEL]
+
+Migração 043 (aditiva). By Koji sem mudança: mesma configuração efetiva, mesmas 9 opções de motivo e 6 tipos, e o pacote só ganhou o bloco `agente`.
+
+### 10.1 Empresa da sessão
+
+- Toda chamada à `/admin/v1` de usuário que não é `plataforma` leva `X-Tenant-Scope: <empresa da sessão>` (junto com `X-Role`).
+- Outra empresa no caminho (`/tenants/{t}/…`) ou em `?tenant=` → **404** `NOT_FOUND`, sem executar a rota. `POST /tenants`, `GET /fila`, `GET /auditoria/plataforma`, `POST`/`PATCH /modelos-agente` → **403** `FORBIDDEN`. `GET /tenants` devolve só a empresa da sessão.
+- `plataforma` vê e altera tudo, com ou sem o cabeçalho.
+- Sem o cabeçalho: hoje segue, com log e alerta `painel_sem_escopo`. Quando o painel publicar, o gateway liga `ESCOPO_EMPRESA_OBRIGATORIO=on` e a falta do cabeçalho passa a dar 403.
+
+### 10.2 Modelos de agente (tela da plataforma)
+
+`GET /modelos-agente?segmento=&ativo=&tenant=` e `GET /modelos-agente/{id}?versao=&tenant=` — cada versão:
+
+```json
+{"id":"delivery_restaurante","versao":4,"nome":"Delivery","tipo":"atendimento","tenant_id":null,
+ "segmento":"delivery","ativo":true,"skyone_ref":"…",
+ "modulos_permitidos":["catalogo","pedidos"],"modulos_padrao":["catalogo","pedidos"],"modulos":["catalogo","pedidos"],
+ "motivos_transferencia":[{"id":"pagamento","rotulo":"Pagamento"},{"id":"evento_ou_encomenda","rotulo":"Evento ou encomenda","converte_em_solicitacao":true}],
+ "tipos_solicitacao":[{"id":"evento","rotulo":"Evento"}],
+ "comportamento_padrao":{},"perfil_padrao":{},"desfechos":[],"followups_padrao":[],"skyone_fluxo_modelo":null,"criado_em":"…"}
+```
+
+- `POST /modelos-agente` (cria a versão 1) e `PATCH /modelos-agente/{id}` (cria a próxima versão; agentes ficam na versão em que estão): **só `X-Role: plataforma`**.
+- Validação: `id` `^[a-z0-9_]{3,80}$`; `segmento` `^[a-z0-9_]{2,40}$` (texto livre, sem lista); itens das listas com `id` `^[a-z0-9_]{2,40}$` e `rotulo` 2–60, até 30, sem id repetido (`{"campo":"motivos_transferencia","motivo":"repetido"}`); `modulos_permitidos` só módulos do registro (`catalogo`, `pedidos`); `modulos_padrao` ⊆ permitidos (`motivo: fora_dos_permitidos`). `modulos` é o nome antigo de `modulos_permitidos` (aceito e devolvido igual).
+- `skyone_ref`: texto só informativo (o gateway usa o fluxo cadastrado no agente).
+- `ativo: false` = some da criação: agente novo ou troca de modelo para ele → 400 `{"campo":"modelo_id","motivo":"modelo_inativo"}`; quem já usa continua.
+- Em produção: `delivery_restaurante` v4 (nome "Delivery", segmento `delivery`) e v1–v3 com os mesmos campos novos; `atendimento_geral` v1 (segmento `geral`, sem módulos); `assistente_generico` e `atendente_delivery` inativos.
+
+### 10.3 Agentes
+
+- Criar agente: `modelo_id` obrigatório; sem `modelo_versao` nasce na versão mais recente.
+- `PATCH` de `modelo_id`/`modelo_versao`: só plataforma (403 para os demais).
+- `modulos_ligados`: lista ou `null` (= padrão do modelo). Só `admin`/`plataforma`; fora dos permitidos → 400 `{"campo":"modulos_ligados","motivo":"fora_do_modelo"}`.
+- `GET …/agentes` e `GET …/agentes/{id}` trazem `modulos` (os efetivos).
+- Novo `GET /tenants/{t}/agentes/{id}/modulos`:
+
+```json
+{"agente_id":"…","modelo":{"id":"delivery_restaurante","versao":4,"nome":"Delivery"},"segmento":"delivery",
+ "modulos":["catalogo","pedidos"],"permitidos":["catalogo","pedidos"],"ligados_no_agente":null,
+ "padrao_do_modelo":["catalogo","pedidos"],"da_empresa":{"catalogo":true,"pedidos":true}}
+```
+
+Efetivo = permitido no modelo **e** ligado na empresa **e** ligado no agente.
+
+### 10.4 Módulos da empresa (menu)
+
+- `GET /tenants/{t}/modulos` → `{"itens":[…registros…],"em_uso":["catalogo","pedidos"],"telas":["cardapio","pedidos","avisos_de_pedido"]}`. `em_uso` = módulos efetivos de algum agente não pausado; `telas` = telas que esses módulos trazem. Mostrar Cardápio só com `cardapio`; Pedidos e Avisos de pedido só com `pedidos`. Sem registro em `itens` = ligado.
+- `PUT /tenants/{t}/modulos/{modulo}` `{"ativo":bool}`: **só plataforma**.
+
+### 10.5 Configuração de pedido escondida
+
+Comportamentos de um módulo (`carrinho_expira_h`, `acoes_recentes_min`, de `pedidos`) só aparecem onde o módulo está em uso: somem de `configuracao_efetiva`, do `esquema` e do `efetivo` das rotas `/atendimento` (agente: módulos dele; empresa: de algum agente dela). Gravar um deles sem o módulo → 400 `{"campo":"carrinho_expira_h","motivo":"modulo_desligado"}` (`PATCH` do agente, `PUT /config`) ou erro `comportamentos.carrinho_expira_h` / `modulo_desligado` no rascunho e no publicar. Os campos de entrega e pagamento da unidade o painel mostra só com `pedidos` em `em_uso`.
+
+### 10.6 Motivos e tipos
+
+- Opções do escopo = núcleo (`pediu_humano`, `reclamacao`; tipo `outro`) + módulos efetivos (`pedidos`: `pedido_para_confirmar`) + modelo. O `esquema.perfil.motivos_transferencia` traz `opcoes`, `rotulos` e o `padrao` já filtrados; motivo de fora é recusado.
+- Atendimento geral: `pediu_humano, reclamacao, pagamento, fora_do_escopo, assunto_proibido`; tipos `orcamento, parceria, outro`.
+- Motivo recebido do agente fora da lista vira `fora_do_escopo`; tipo fora da lista vira `outro`. Motivos com `converte_em_solicitacao` viram aviso à equipe sem pausar o bot.
+
+### 10.7 Webhook da instância uazapi
+
+- Criar canal uazapi com `credenciais`, trocar `credenciais` (PATCH) e rotacionar o segredo: o gateway cadastra o endereço na instância (`POST /webhook`, eventos `messages` e `connection`, sem grupos). Resposta ganha `"webhook_uazapi":{"registrado":true}` ou `{"registrado":false,"motivo":"sem_credenciais"|"provedor_recusou"|"provedor_inacessivel"|"endereco_publico_ausente"}`. Falha não desfaz o canal.
+- Refazer à mão: `POST /tenants/{t}/canais/{id}/webhook` (admin/plataforma) → `{"id","webhook_uazapi":{…}}`; usa o segredo guardado e não devolve o endereço.
+- Auditoria: `canal.webhook_registrado` / `canal.webhook_falhou`. Chave geral `REGISTRAR_WEBHOOK_UAZAPI` (padrão ligada).
+
+### 10.8 Pacote do Skyone
+
+Bloco novo na raiz, sempre presente:
+
+```json
+"agente":{"modelo":{"id":"delivery_restaurante","versao":3,"nome":"Delivery"},"segmento":"delivery","modulos":["catalogo","pedidos"],
+          "motivos_transferencia":[{"id":"pediu_humano","rotulo":"Cliente pediu atendente"},…],
+          "tipos_solicitacao":[{"id":"evento","rotulo":"Evento"},…]}
+```
+

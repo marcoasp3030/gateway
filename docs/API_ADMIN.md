@@ -437,6 +437,22 @@ docker compose run --rm --no-deps -T -v /home/twadmin/gateway:/workspace:ro gate
   --tenant bykoji --agente bykoji_atendimento --clientes 4
 ```
 
+## 15.1 Empresa da sessão, modelos de agente e módulos (MULTI1-a) ✅
+
+Contrato completo em `docs/ESPEC_MULTI1.md`, seção 10. Resumo:
+
+| Métodos | Rota | Quem |
+|---|---|---|
+| (todas) | `/admin/v1/…` com `X-Tenant-Scope: <empresa>` | não-plataforma: outra empresa → 404; visões e escritas globais → 403 |
+| GET | `/modelos-agente?segmento=&ativo=&tenant=`, `/modelos-agente/{id}` | todos |
+| POST, PATCH | `/modelos-agente`, `/modelos-agente/{id}` | só plataforma |
+| GET | `/tenants/{tenant}/agentes/{id}/modulos` | todos |
+| GET | `/tenants/{tenant}/modulos` (+ `em_uso`, `telas`) | todos |
+| PUT | `/tenants/{tenant}/modulos/{modulo}` | só plataforma |
+| PATCH | `/tenants/{tenant}/agentes/{id}` com `modelo_id`/`modelo_versao` | só plataforma |
+| PATCH | `/tenants/{tenant}/agentes/{id}` com `modulos_ligados` | admin, plataforma |
+| POST | `/tenants/{tenant}/canais/{id}/webhook` | admin, plataforma |
+
 ## 16. Planejado para o painel ⏳
 
 Não implementar telas dependentes destas rotas como se já estivessem disponíveis.

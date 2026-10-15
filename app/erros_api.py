@@ -14,7 +14,7 @@ MENSAGENS={
  'UNAVAILABLE':'Serviço temporariamente indisponível.'}
 
 
-def resposta(status,codigo=None,campo=None,headers=None):
+def resposta(status,codigo=None,campo=None,headers=None,motivo=None):
     codigo=codigo or {400:'VALIDATION_ERROR',401:'UNAUTHORIZED',403:'FORBIDDEN',404:'NOT_FOUND',
       405:'NOT_IMPLEMENTED',409:'CONFLICT',413:'VALIDATION_ERROR',422:'VALIDATION_ERROR',
       429:'RATE_LIMITED',501:'NOT_IMPLEMENTED',502:'UPSTREAM_ERROR'}.get(status,'UNAVAILABLE')
@@ -22,6 +22,7 @@ def resposta(status,codigo=None,campo=None,headers=None):
     if status==429: headers={'Retry-After':'1',**(headers or {})}
     detalhes=({'campo':campo or 'corpo'} if codigo=='VALIDATION_ERROR'
               else {'campo':campo} if codigo=='CONFLICT' and campo else {})
+    if motivo and codigo=='VALIDATION_ERROR': detalhes['motivo']=str(motivo)[:60]
     mensagem='O corpo da requisição excede o tamanho permitido.' if status==413 else MENSAGENS[codigo]
     return JSONResponse({'erro':{'codigo':codigo,'mensagem':mensagem,'detalhes':detalhes}},status_code=status,
                         headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',**(headers or {})})

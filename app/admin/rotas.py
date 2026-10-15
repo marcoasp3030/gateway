@@ -16,7 +16,11 @@ def pagina(itens,limite):
 async def tenants(request:Request,limite:int=50,cursor:str|None=None):
     if not 1<=limite<=100: raise HTTPException(400,'Limite inválido')
     # Catálogo global restrito à chave de serviço do painel.
-    rows=await request.app.state.db.fetch('SELECT * FROM tenants WHERE ($1::text IS NULL OR id>$1) ORDER BY id LIMIT $2',cursor,limite+1)
+    # MULTI1-a: quem não é plataforma e manda a empresa da sessão vê só a própria.
+    from nucleo.autenticacao import papel
+    from nucleo.escopo_empresa import do_pedido
+    so=do_pedido(request) if papel(request)!='plataforma' else None
+    rows=await request.app.state.db.fetch('SELECT * FROM tenants WHERE ($1::text IS NULL OR id>$1) AND ($3::text IS NULL OR id=$3) ORDER BY id LIMIT $2',cursor,limite+1,so)
     return pagina([dict(r) for r in rows],limite)
 
 
@@ -68,6 +72,8 @@ async def listar(request:Request,tenant_id:str,entidade:str,limite:int=50,cursor
             FROM agentes a LEFT JOIN agente_circuitos c ON c.tenant_id=a.tenant_id AND c.agente_id=a.id
             WHERE a.tenant_id=$1 AND ($2::text IS NULL OR a.id>$2) ORDER BY a.id LIMIT $3""",tenant_id,cursor,limite+1)
         rows=[{**registro(r),'canais':json.loads(r['canais']) if isinstance(r['canais'],str) else r['canais']} for r in rows]
+        # MULTI1-a: módulos que cada agente usa de fato (para o painel).
+        for r in rows: r['modulos']=(await request.app.state.configuracoes.efetiva(tenant_id,r['id']))['modulos']
     else:
         rows=await Repositorio(request.app.state.db).listar(tenant_id,ENTIDADES[entidade][0],limite+1,cursor)
     return pagina(limpar(rows),limite)
@@ -76,7 +82,14 @@ async def listar(request:Request,tenant_id:str,entidade:str,limite:int=50,cursor
 @router.post('/tenants/{tenant_id}/{entidade}',status_code=201)
 async def criar(request:Request,tenant_id:str,entidade:str,dados:dict,actor=Depends(painel)):
     if entidade not in ENTIDADES: raise HTTPException(404,'NOT_FOUND')
-    return await request.app.state.admin.salvar(tenant_id,entidade,dados,actor)
+    result=await request.app.state.admin.salvar(tenant_id,entidade,dados,actor)
+    # MULTI1-a: canal uazapi criado com credenciais → o gateway cadastra o webhook na instância.
+    if entidade=='canais' and result.get('tipo')=='uazapi' and isinstance(dados,dict) and dados.get('credenciais') and request.app.state.infra.registrar_webhook_uazapi:
+        from canais.webhook_instancia import registrar
+        from urllib.parse import parse_qs,urlsplit
+        segredo=parse_qs(urlsplit(result['webhook_url']).query).get('s',[None])[0] if result.get('webhook_url') else None
+        result['webhook_uazapi']=await registrar(request.app.state,tenant_id,result['id'],actor,segredo)
+    return result
 
 
 @router.get('/tenants/{tenant_id}/{entidade}/{identidade}')
@@ -85,14 +98,26 @@ async def obter(request:Request,tenant_id:str,entidade:str,identidade:str):
     row=await Repositorio(request.app.state.db).obter(tenant_id,ENTIDADES[entidade][0],identidade)
     if not row: raise HTTPException(404,'NOT_FOUND')
     result=limpar(row)
-    if entidade=='agentes': result['configuracao_efetiva']=await request.app.state.configuracoes.efetiva(tenant_id,identidade)
+    if entidade=='agentes':
+        result['configuracao_efetiva']=await request.app.state.configuracoes.efetiva(tenant_id,identidade)
+        result['modulos']=result['configuracao_efetiva']['modulos']
     return result
 
 
 @router.patch('/tenants/{tenant_id}/{entidade}/{identidade}')
 async def alterar(request:Request,tenant_id:str,entidade:str,identidade:str,dados:dict,actor=Depends(painel)):
     if entidade not in ENTIDADES: raise HTTPException(404,'NOT_FOUND')
-    return await request.app.state.admin.salvar(tenant_id,entidade,dados,actor,identidade)
+    if entidade=='agentes' and isinstance(dados,dict):
+        from nucleo.autenticacao import papel
+        # MULTI1-a: trocar o modelo do agente é da plataforma; ligar e desligar módulos no agente, de admin ou plataforma.
+        if any(k in dados for k in ('modelo_id','modelo_versao')) and papel(request)!='plataforma': raise HTTPException(403,'FORBIDDEN')
+        if 'modulos_ligados' in dados and papel(request) not in ('admin','plataforma'): raise HTTPException(403,'FORBIDDEN')
+    result=await request.app.state.admin.salvar(tenant_id,entidade,dados,actor,identidade)
+    # MULTI1-a: credenciais novas num canal uazapi → cadastra de novo o webhook (pode ser outra instância).
+    if entidade=='canais' and result.get('tipo')=='uazapi' and isinstance(dados,dict) and dados.get('credenciais') and request.app.state.infra.registrar_webhook_uazapi:
+        from canais.webhook_instancia import registrar
+        result['webhook_uazapi']=await registrar(request.app.state,tenant_id,identidade,actor)
+    return result
 
 
 @router.delete('/tenants/{tenant_id}/api-keys/{identidade}')

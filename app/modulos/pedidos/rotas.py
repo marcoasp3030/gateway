@@ -59,8 +59,8 @@ async def conversa_da_chave(request,ctx,conversa):
     conv=await repo.obter(t,'conversas',conversa)
     if not conv or (ctx['agente_id'] and conv['agente_id']!=ctx['agente_id']): raise HTTPException(404,'NOT_FOUND')
     cfg=await request.app.state.configuracoes.efetiva(t,conv['agente_id'])
-    modelo=await repo.modelo(t,cfg['modelo_id'],cfg['modelo_versao'])
-    if 'pedidos' not in modelo['modulos']: raise HTTPException(404,'NOT_FOUND')
+    # Módulo que vale para o agente da conversa: permitido no modelo, ligado na empresa e no agente (MULTI1-a).
+    if 'pedidos' not in cfg['modulos']: raise HTTPException(404,'NOT_FOUND')
     return t
 
 

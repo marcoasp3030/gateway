@@ -20,8 +20,10 @@ def test_validacao_da_solicitacao_e_catalogo():
     v=S.validar
     assert v({'tipo':' Evento ','data':'  25 de   dezembro ','pessoas':50,'local':'Salão do prédio','observacao':'Só queria saber.','telefone':'5511999990000','cpf':'x'})=={
         'tipo':'evento','data':'25 de dezembro','pessoas':50,'local':'Salão do prédio','observacao':'Só queria saber.'}
-    # Campo inválido é ignorado, sem erro; tipo desconhecido vira "outro"; número em texto é aceito; limites de tamanho cortam.
-    assert v({'tipo':'churrasco','data':5,'pessoas':'cinquenta','local':['x'],'observacao':None})=={'tipo':'outro'}
+    # Campo inválido é ignorado, sem erro; tipo fora do formato vira "outro" (o tipo fora da lista do agente vira "outro" no registro,
+    # MULTI1-a); número em texto é aceito; limites de tamanho cortam.
+    assert v({'tipo':'churrasco','data':5,'pessoas':'cinquenta','local':['x'],'observacao':None})=={'tipo':'churrasco'}
+    assert v({'tipo':'Churrasco de 50 pessoas!'})=={'tipo':'outro'}
     assert v({'pessoas':'50'})=={'tipo':'outro','pessoas':50} and v({'pessoas':0})=={'tipo':'outro'} and v({'pessoas':100001})=={'tipo':'outro'} and v({'pessoas':True})=={'tipo':'outro'}
     assert len(v({'data':'x'*200})['data'])==80 and len(v({'local':'x'*500})['local'])==160 and len(v({'observacao':'x'*900})['observacao'])==500
     assert v({'observacao':'linha 1\nlinha 2\x00'})['observacao']=='linha 1 linha 2' and v({})=={'tipo':'outro'}

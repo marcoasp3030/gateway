@@ -116,9 +116,10 @@ def _texto(valor,regra):
     return valor,None
 
 
-def validar_perfil(dados):
+def validar_perfil(dados,motivos=None):
     """Valida o perfil que um escopo define. Devolve (limpo, erros): chaves com None = herda.
-    erros: [{"campo","motivo"}] com todos os problemas de uma vez."""
+    erros: [{"campo","motivo"}] com todos os problemas de uma vez.
+    `motivos`: ids de motivo de transferência aceitos neste escopo (MULTI1-a); None = a lista de sempre."""
     limpo={};erros=[]
     if not isinstance(dados,dict): return {},[{'campo':'perfil','motivo':'tipo'}]
     for campo,valor in dados.items():
@@ -138,8 +139,9 @@ def validar_perfil(dados):
             if not erro and campo in ('mensagem_boas_vindas','mensagem_despedida') and re.search(r'(https?://|www\.|\S+@\S+\.\S+|\d[\d ()\-]{7,}\d)',valor): erro='contato_ou_link'
             if not erro and regra.get('opcional') and valor=='': valor=None
         elif regra['tipo']=='lista_escolhas':
-            if not isinstance(valor,list) or any(v not in regra['opcoes'] for v in valor) or len(set(valor))!=len(valor): erro='opcao'
-            else: valor=[m for m in regra['opcoes'] if m in valor or m in regra.get('fixos',())]
+            opcoes=list(motivos) if campo=='motivos_transferencia' and motivos is not None else regra['opcoes']
+            if not isinstance(valor,list) or any(v not in opcoes for v in valor) or len(set(valor))!=len(valor): erro='opcao'
+            else: valor=[m for m in opcoes if m in valor or m in regra.get('fixos',())]
         elif regra['tipo']=='lista_assuntos':
             if not isinstance(valor,list): erro='tipo'
             elif len(valor)>regra['max_itens']: erro='quantidade'
@@ -167,7 +169,7 @@ def analisar_perfil(perfil):
     return bloqueios,avisos
 
 
-def resolver_perfil(*camadas,nome_da_empresa=None):
+def resolver_perfil(*camadas,nome_da_empresa=None,motivos=None):
     """Herança campo a campo. camadas: [(origem, {campo: valor})] da mais geral para a mais específica.
     Devolve (perfil completo, origem de cada campo). Lista do nível mais específico substitui a de cima.
     nome_da_empresa: nome cadastrado da empresa, que vale como nome_empresa enquanto ninguém definir outro."""
@@ -177,7 +179,10 @@ def resolver_perfil(*camadas,nome_da_empresa=None):
         for campo in PERFIL:
             if isinstance(dados,dict) and dados.get(campo) is not None:
                 perfil[campo]=dados[campo];origem[campo]=nome
-    perfil['motivos_transferencia']=[m for m in MOTIVOS_TRANSFERENCIA if m in perfil['motivos_transferencia'] or m in MOTIVOS_FIXOS]
+    # MULTI1-a: só os motivos que valem neste escopo (núcleo + modelo + módulos), na ordem deles. Sem a lista, a de sempre.
+    validos=list(motivos) if motivos is not None else list(MOTIVOS_TRANSFERENCIA)
+    if origem['motivos_transferencia']=='plataforma': perfil['motivos_transferencia']=list(validos)
+    perfil['motivos_transferencia']=[m for m in validos if m in perfil['motivos_transferencia'] or m in MOTIVOS_FIXOS]
     return perfil,origem
 
 
@@ -191,10 +196,12 @@ def versao_texto(empresa,agente=0):
     return f'e{int(empresa or 0)}'+(f'.a{int(agente)}' if agente else '')
 
 
-def esquema(padroes,papel):
-    """Descrição dos campos para o painel desenhar a tela sem repetir regras."""
+def esquema(padroes,papel,motivos=None,ocultos=()):
+    """Descrição dos campos para o painel desenhar a tela sem repetir regras.
+    MULTI1-a: `motivos` = motivos de transferência do escopo ([{"id","rotulo"}]); `ocultos` = comportamentos de módulo que o escopo não tem."""
     comportamentos={}
     for campo,(grupo,tipo,minimo,maximo,opcoes,disponivel) in COMPORTAMENTOS.items():
+        if campo in ocultos: continue
         item={'grupo':grupo,'tipo':tipo,'padrao':padroes.get(campo),'editavel':papel in ('admin','plataforma'),'disponivel':disponivel}
         if minimo is not None: item['min']=minimo
         if maximo is not None: item['max']=maximo
@@ -203,4 +210,9 @@ def esquema(padroes,papel):
         comportamentos[campo]=item
     for campo in SO_PLATAFORMA:
         comportamentos[campo]={'grupo':'operacao','tipo':'so_plataforma','padrao':padroes.get(campo),'editavel':False,'disponivel':True}
-    return {'perfil':{k:{**{a:b for a,b in v.items()},'editavel':papel in ('admin','plataforma')} for k,v in PERFIL.items()},'comportamentos':comportamentos}
+    perfil={k:{**{a:b for a,b in v.items()},'editavel':papel in ('admin','plataforma')} for k,v in PERFIL.items()}
+    if motivos is not None:
+        ids=[m['id'] for m in motivos]
+        perfil['motivos_transferencia']={**perfil['motivos_transferencia'],'opcoes':ids,'padrao':ids,'rotulos':{m['id']:m['rotulo'] for m in motivos},
+                                         'fixos':[f for f in perfil['motivos_transferencia']['fixos'] if f in ids]}
+    return {'perfil':perfil,'comportamentos':comportamentos}

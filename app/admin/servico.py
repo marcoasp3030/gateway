@@ -141,6 +141,13 @@ class Administracao:
 
     async def salvar_config(self,tenant_id,dados,actor):
         dados = validar(Comportamento,dados)
+        # MULTI1-a: configuração de módulo só para empresa em que algum agente usa o módulo.
+        from modulos import COMPORTAMENTOS_DE_MODULO
+        fora = [c for c in dados if c in COMPORTAMENTOS_DE_MODULO and dados[c] is not None]
+        if fora:
+            _,em_uso = await self.configuracoes.da_empresa_listas(tenant_id)
+            fora = [c for c in fora if COMPORTAMENTOS_DE_MODULO[c] not in em_uso]
+            if fora: raise HTTPException(400,{'campo':fora[0],'motivo':'modulo_desligado'})
         async with self.db.acquire() as conn, conn.transaction():
             repo = Repositorio(conn)
             tenant = await repo.tenant(tenant_id)
@@ -170,11 +177,23 @@ class Administracao:
             if novo and not dados.get('nome'): raise HTTPException(400,'Nome obrigatório')
             if entidade=='agentes':
                 if novo and not dados.get('modelo_id'): raise HTTPException(400,'Modelo obrigatório')
+                if novo and not dados.get('modelo_versao'):
+                    # MULTI1-a: agente novo sem versão nasce na versão mais recente do modelo (antes: versão 1).
+                    recente = await repo.segmento(tenant_id,dados['modelo_id'])
+                    if recente: dados['modelo_versao'] = recente['versao']
                 combinado = {**(anterior or {}),**dados}
                 modelo_reg = await repo.modelo(tenant_id,combinado['modelo_id'],combinado.get('modelo_versao',1))
                 if not modelo_reg: raise HTTPException(404,'NOT_FOUND')
-                habilitados = await conn.fetch('SELECT modulo FROM modulos_tenant WHERE tenant_id=$1 AND ativo',tenant_id)
-                if not set(modelo_reg['modulos']) <= {r['modulo'] for r in habilitados}: raise HTTPException(400,'Módulos não habilitados')
+                # Modelo inativo não serve para agente novo nem para quem troca de modelo; quem já usa continua.
+                if modelo_reg.get('ativo') is False and (novo or combinado['modelo_id']!=anterior.get('modelo_id')): raise HTTPException(400,{'campo':'modelo_id','motivo':'modelo_inativo'})
+                from modulos import modulos_efetivos,chaves_da_empresa,COMPORTAMENTOS_DE_MODULO,REGISTRO
+                permitidos = modelo_reg.get('modulos_permitidos') if modelo_reg.get('modulos_permitidos') is not None else modelo_reg.get('modulos') or []
+                ligados = combinado.get('modulos_ligados')
+                if ligados is not None and (any(m not in REGISTRO or m not in permitidos for m in ligados) or len(set(ligados))!=len(ligados)):
+                    raise HTTPException(400,{'campo':'modulos_ligados','motivo':'fora_do_modelo'})
+                efetivos = modulos_efetivos(modelo_reg,ligados,await chaves_da_empresa(conn,tenant_id))
+                fora = [c for c in dados if c in COMPORTAMENTOS_DE_MODULO and dados[c] is not None and COMPORTAMENTOS_DE_MODULO[c] not in efetivos]
+                if fora: raise HTTPException(400,{'campo':fora[0],'motivo':'modulo_desligado'})
                 for campo in ('skyone_auth','skyone_auth_usuario'):
                     if campo in dados:
                         valor = dados.pop(campo)

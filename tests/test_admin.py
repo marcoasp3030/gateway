@@ -28,10 +28,21 @@ def preparar(conn):
     return app,client
 
 
+MODELO_DE_TESTE='generico_teste'
+
+
+async def modelo_de_teste(client):
+    """Modelo genérico para os testes (o assistente_generico ficou inativo para criação no MULTI1-a). Mesma configuração dele."""
+    r=await client.post('/admin/v1/modelos-agente',headers={'X-Role':'plataforma'},json={'id':MODELO_DE_TESTE,'nome':'Genérico de teste','tipo':'interno',
+        'segmento':'geral','modulos_permitidos':[],'comportamento_padrao':{'send_mode':'dry','agente_mode':'mock','modo_piloto':True}})
+    assert r.status_code in (201,409),r.text
+    return MODELO_DE_TESTE
+
+
 async def criar(client,tenant='alpha'):
     r=await client.post('/admin/v1/tenants',json={'id':tenant,'nome':tenant})
     assert r.status_code==201,r.text
-    r=await client.post(f'/admin/v1/tenants/{tenant}/agentes',json={'nome':'A','modelo_id':'assistente_generico'})
+    r=await client.post(f'/admin/v1/tenants/{tenant}/agentes',json={'nome':'A','modelo_id':await modelo_de_teste(client)})
     assert r.status_code==201,r.text
     agente=r.json()['id']
     r=await client.post(f'/admin/v1/tenants/{tenant}/canais',json={'nome':'C','tipo':'api','agente_id':agente,'credenciais':{'token':'segredo-fixture'}})
@@ -116,7 +127,7 @@ def test_SEG11_chaves_escopo_validade_ip_revogacao_e_agente():
             assert (await client.get(url,headers=h)).status_code==401
             assert (await client.patch(kurl,json={'expira_em':None})).status_code==200
             # Outro agente do mesmo tenant também é restrito.
-            novo=(await client.post('/admin/v1/tenants/alpha/agentes',json={'nome':'X','modelo_id':'assistente_generico'})).json()['id']
+            novo=(await client.post('/admin/v1/tenants/alpha/agentes',json={'nome':'X','modelo_id':await modelo_de_teste(client)})).json()['id']
             assert (await client.patch(kurl,json={'agente_id':novo})).status_code==200
             assert (await client.get(url,headers=h)).status_code==404
             assert (await client.patch(f'/admin/v1/tenants/bravo/api-keys/{key["id"]}',json={'nome':'errado'})).status_code==404

@@ -30,7 +30,8 @@ def validar(valor):
     Devolve {"tipo": ..., "data"?, "pessoas"?, "local"?, "observacao"?} ou None se não veio um objeto."""
     if not isinstance(valor,dict): return None
     tipo=valor.get('tipo');tipo=tipo.strip().lower() if isinstance(tipo,str) else ''
-    limpo={'tipo':tipo if tipo in TIPOS else 'outro'}
+    # MULTI1-a: o tipo é conferido contra a lista do agente no registro; aqui só o formato.
+    limpo={'tipo':tipo if re.fullmatch(r'[a-z0-9_]{2,40}',tipo) else 'outro'}
     for campo,maximo in (('data',MAX_DATA),('local',MAX_LOCAL),('observacao',MAX_OBSERVACAO)):
         texto=_texto(valor.get(campo),maximo)
         if texto: limpo[campo]=texto
@@ -40,10 +41,17 @@ def validar(valor):
     return limpo
 
 
-def motivo_do_catalogo(motivo):
-    """(motivo do catálogo, texto recebido se não era do catálogo)."""
+def que_nao_pausam(cfg):
+    """Motivos de transferência que viram aviso à equipe com venda em andamento: os marcados `converte_em_solicitacao`
+    na lista do agente (MULTI1-a). Sem a lista, os de sempre."""
+    lista=cfg.get('motivos_transferencia_permitidos')
+    return [m['id'] for m in lista if m.get('converte_em_solicitacao')] if lista else list(MOTIVOS_QUE_NAO_PAUSAM)
+
+
+def motivo_do_catalogo(motivo,motivos=None):
+    """(motivo do catálogo, texto recebido se não era do catálogo). `motivos`: ids que valem para o agente (MULTI1-a)."""
     m=(motivo or '').strip().lower()
-    if m in MOTIVOS_TRANSFERENCIA: return m,None
+    if m in (motivos if motivos is not None else MOTIVOS_TRANSFERENCIA): return m,None
     return 'fora_do_escopo',(' '.join((motivo or '').split())[:200] or None)
 
 
@@ -59,7 +67,7 @@ async def converter(db,tenant,conversa,cfg,resultado):
     Altera `resultado` no lugar (acao e acao_original) e devolve True se converteu. Falha aqui nunca derruba o turno."""
     try:
         if (not resultado or resultado.get('acao')!='transferir_humano' or cfg.get('notificar_equipe')!='on'
-                or (resultado.get('motivo') or '').strip().lower() not in MOTIVOS_QUE_NAO_PAUSAM): return False
+                or (resultado.get('motivo') or '').strip().lower() not in que_nao_pausam(cfg)): return False
         if not await venda_em_andamento(db,tenant,conversa): return False
         resultado['acao_original']='transferir_humano';resultado['acao']='notificar_equipe'
         log.info('Transferência convertida em aviso à equipe: acao_original=transferir_humano acao_aplicada=notificar_equipe motivo=%s',resultado.get('motivo'))
@@ -90,8 +98,12 @@ async def registrar(conn,tenant,conversa,cfg,resultado,painel_url=None):
     from admin.servico import auditar
     from nucleo.webhooks import emitir
     from modulos.pedidos import avisos
-    motivo,informado=motivo_do_catalogo(resultado.get('motivo'))
-    sol=resultado.get('solicitacao') if isinstance(resultado.get('solicitacao'),dict) else {'tipo':'catering' if motivo=='catering' else 'outro'}
+    motivos=[m['id'] for m in cfg['motivos_transferencia_permitidos']] if cfg.get('motivos_transferencia_permitidos') else None
+    tipos=[t['id'] for t in cfg['tipos_solicitacao_permitidos']] if cfg.get('tipos_solicitacao_permitidos') else list(TIPOS)
+    motivo,informado=motivo_do_catalogo(resultado.get('motivo'),motivos)
+    sol=dict(resultado['solicitacao']) if isinstance(resultado.get('solicitacao'),dict) else {'tipo':motivo if motivo in tipos else 'outro'}
+    # Tipo que não é deste agente vira "outro" (MULTI1-a).
+    if sol.get('tipo') not in tipos: sol['tipo']='outro'
     dados={c:sol[c] for c in CAMPOS if sol.get(c) is not None}
     origem='convertida' if resultado.get('acao_original') else 'agente'
     await conn.execute('SELECT pg_advisory_xact_lock(hashtextextended($1,0))','solicitacoes:'+tenant)

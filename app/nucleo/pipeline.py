@@ -660,9 +660,8 @@ return 1
             from modulos.pedidos import anuncio
             resultado=json.loads(turno['resposta']) if isinstance(turno['resposta'],str) else (turno['resposta'] or {})
             if not anuncio.sinal(resultado): return None
-            modelo=await self.repo.modelo(tenant,cfg['modelo_id'],cfg['modelo_versao'])
-            if 'pedidos' not in (modelo or {}).get('modulos',()) or not await self.db.fetchval(
-                    "SELECT ativo FROM modulos_tenant WHERE tenant_id=$1 AND modulo='pedidos'",tenant): return None
+            # Só para agente com o módulo de pedidos de fato (modelo, empresa e agente).
+            if 'pedidos' not in (cfg.get('modulos') or ()): return None
             # Turno refeito: vale o fechar_pedido feito desde a primeira tentativa.
             return await anuncio.avaliar(self.db,tenant,conversa,resultado,await self._inicio_da_cadeia(tenant,turno))
         except Exception:
@@ -687,9 +686,7 @@ return 1
         try:
             resultado=json.loads(turno['resposta']) if isinstance(turno['resposta'],str) else (turno['resposta'] or {})
             if resultado.get('acao')!='transferir_humano' or resultado.get('motivo')!='pedido_para_confirmar': return False
-            modelo=await self.repo.modelo(tenant,cfg['modelo_id'],cfg['modelo_versao'])
-            if 'pedidos' not in (modelo or {}).get('modulos',()) or not await self.db.fetchval(
-                    "SELECT ativo FROM modulos_tenant WHERE tenant_id=$1 AND modulo='pedidos'",tenant): return False
+            if 'pedidos' not in (cfg.get('modulos') or ()): return False
             return not await self.db.fetchval('''SELECT EXISTS(SELECT 1 FROM skill_registro WHERE tenant_id=$1 AND conversation_id=$2
                 AND status>=400 AND criado_em>=$3)''',tenant,conversa,await self._inicio_da_cadeia(tenant,turno))
         except Exception:

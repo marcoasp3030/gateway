@@ -4,7 +4,7 @@ from functools import partial
 import httpx,pytest
 from agentes import skyone
 from nucleo.fila import FilaDuravel
-from test_admin import preparar,criar
+from test_admin import preparar,criar,modelo_de_teste
 from test_fila import banco_real,montar,limpar,conversas,esperar_processadas,parar
 from test_migrations import banco,migrar,DSN
 from test_pipeline_multi import ativo
@@ -62,7 +62,7 @@ def test_INV15_limite_por_agente_compartilhado_entre_workers(tmp_path):
         try:
             async with c:
                 a1,can1=await criar(c,'alpha')
-                a2=(await c.post('/admin/v1/tenants/alpha/agentes',json={'nome':'Outro','modelo_id':'assistente_generico'})).json()['id']
+                a2=(await c.post('/admin/v1/tenants/alpha/agentes',json={'nome':'Outro','modelo_id':await modelo_de_teste(c)})).json()['id']
                 can2=(await c.post('/admin/v1/tenants/alpha/canais',json={'nome':'C2','tipo':'api','agente_id':a2})).json()['id']
                 await ativo(c,'alpha',a1,can1,debounce_s=1,max_wait_s=1,max_concorrencia=2,max_lotes_simultaneos=10)
                 await ativo(c,'alpha',a2,can2,debounce_s=1,max_wait_s=1,max_lotes_simultaneos=10)

@@ -305,3 +305,22 @@ async def recentes(client,cofre,tenant_id,canal,desde_ms,pagina=100,max_paginas=
         if len(lote)<pagina or d.get('hasMore') is False: return achadas,True
         offset=d.get('nextOffset') if isinstance(d.get('nextOffset'),int) and d['nextOffset']>offset else offset+len(lote)
     return achadas,False
+
+
+# MULTI1-a: o gateway cadastra na instância o endereço que recebe as mensagens. Mesma configuração conferida na instância do By Koji.
+WEBHOOK_PADRAO={'events':['messages','connection'],'excludeMessages':['isGroupYes'],'enabled':True,'addUrlEvents':False,'addUrlTypesMessages':False}
+
+
+async def registrar_webhook(client,cofre,tenant_id,canal,url):
+    """Grava o webhook da instância (POST /webhook, modo simples: substitui o que houver). Nunca levanta erro.
+    {"registrado": true} ou {"registrado": false, "motivo": "sem_credenciais"|"provedor_recusou"|"provedor_inacessivel"}."""
+    try: _credencial(cofre,tenant_id,canal)
+    except Exception: return {'registrado':False,'motivo':'sem_credenciais'}
+    try:
+        await _chamar(client,cofre,tenant_id,canal,'POST','/webhook',{'url':url,**WEBHOOK_PADRAO},timeout=15)
+        return {'registrado':True}
+    except ValueError as erro:
+        # Recusa do provedor (HTTP fora de 2xx) ou endereço recusado pela proteção de saída.
+        return {'registrado':False,'motivo':'provedor_recusou' if 'recusou' in str(erro) else 'provedor_inacessivel'}
+    except Exception:
+        return {'registrado':False,'motivo':'provedor_inacessivel'}

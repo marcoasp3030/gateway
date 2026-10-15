@@ -2,7 +2,7 @@ import httpx,pytest
 from fastapi import HTTPException
 import redis.exceptions
 from erros_api import MENSAGENS
-from test_admin import preparar,criar,Pool
+from test_admin import preparar,criar,Pool,modelo_de_teste
 from test_pipeline_multi import RedisFila,ativo
 from test_migrations import banco,migrar,DSN
 pytestmark=pytest.mark.skipif(not DSN,reason='Banco de testes obrigatório')
@@ -90,7 +90,7 @@ def test_INV08_lista_agentes_canais_circuito_sem_n_mais_um():
         await migrar.aplicar(conn);app,c=preparar(conn)
         async with c:
             a,can=await criar(c);b,cb=await criar(c,'bravo')
-            a2=(await c.post('/admin/v1/tenants/alpha/agentes',json={'nome':'Sem canal','modelo_id':'assistente_generico'})).json()['id']
+            a2=(await c.post('/admin/v1/tenants/alpha/agentes',json={'nome':'Sem canal','modelo_id':await modelo_de_teste(c)})).json()['id']
             await conn.execute("INSERT INTO agente_circuitos(tenant_id,agente_id,aberto_ate) VALUES ('alpha',$1,now()+interval '1 minute')",a)
             class Contador(Pool):
                 def __init__(self,conn):super().__init__(conn);self.n=0
