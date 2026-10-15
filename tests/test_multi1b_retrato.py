@@ -166,6 +166,9 @@ def test_retrato_do_by_koji_identico(tmp_path,monkeypatch):
                 async def consulta(payload): await skill('GET',f'/pedidos/{numero}',params={'conversation_id':payload['conversation_id']})
                 await passo('consulta_pedido',cli,'e meu pedido?',6,fala('Seu pedido foi confirmado pela unidade.',consulta))
 
+                # 6b. Transferência numa conversa com pedido: o alerta de transbordo traz a linha do pedido.
+                await passo('transferencia_com_pedido',cli,'quero falar com alguém sobre o pedido',7,fala('Vou chamar a equipe.',acao='transferir_humano',motivo='pediu_humano'))
+                await pool.execute('UPDATE conversas SET aguardando_atendente_desde=NULL,aguardando_motivo=NULL,bot_pausado_ate=NULL WHERE tenant_id=$1 AND conversation_id=$2',T,conv)
                 # 7. Transferência pedida pelo cliente (alerta de transbordo para a equipe).
                 await passo('transferencia',cli+'2','quero falar com atendente',1,fala('Claro, vou chamar um atendente.',acao='transferir_humano',motivo='pediu_humano'))
 
@@ -200,6 +203,11 @@ def test_retrato_do_by_koji_identico(tmp_path,monkeypatch):
                 quando[0]=datetime.fromisoformat(DIA+'T23:30:00').replace(tzinfo=SP)
                 async def info(payload): await skill('GET','/unidades',params={'conversation_id':payload['conversation_id']})
                 await passo('fora_do_horario',cli+'8','vocês estão abertos?',1,fala('Estamos fechados agora; abrimos amanhã às 11h.',info))
+                # 15. Modo "só avisar" com tudo fechado: quem tem pedido ativo é atendido pelo agente; quem não tem recebe o aviso do gateway.
+                assert (await c.patch(f'/admin/v1/tenants/{T}/agentes/{A}',json={'fora_do_horario':'so_avisar'})).status_code==200
+                await passo('so_avisar_com_pedido',cli,'e o meu pedido?',8,fala('Seu pedido está confirmado.'))
+                await passo('so_avisar_sem_pedido',cli+'9','oi, estão abertos?',1)
+                assert (await c.patch(f'/admin/v1/tenants/{T}/agentes/{A}',json={'fora_do_horario':'atender'})).status_code==200
                 quando[0]=datetime.fromisoformat(DIA+'T13:00:00').replace(tzinfo=SP)
                 await despachar(p)
 
@@ -210,7 +218,8 @@ def test_retrato_do_by_koji_identico(tmp_path,monkeypatch):
                     'metricas':{k:v for k,v in (await c.get(f'/admin/v1/tenants/{T}/metricas',headers=h)).json().items()},
                     'avisos':[dict(a) for a in await pool.fetch('SELECT tipo,referencia,texto,destino,status,erro FROM avisos_internos WHERE tenant_id=$1 ORDER BY id',T)],
                     'skill_registro':[dict(s) for s in await pool.fetch('SELECT skill,status,motivo,campos FROM skill_registro WHERE tenant_id=$1 ORDER BY id',T)],
-                    'unidade':(await c.get(f'/admin/v1/tenants/{T}/unidades',headers=h)).json()}
+                    'unidade':(await c.get(f'/admin/v1/tenants/{T}/unidades',headers=h)).json(),
+                    'solicitacoes':(await c.get(f'/admin/v1/tenants/{T}/solicitacoes',headers=h)).json()}
 
                 # LGPD: anonimização do cliente que fez o pedido.
                 cid=await pool.fetchval('SELECT contato_id FROM conversas WHERE tenant_id=$1 AND conversation_id=$2',T,conv)

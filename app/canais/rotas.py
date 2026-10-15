@@ -175,16 +175,17 @@ async def metricas(request:Request,tenant_id:str,agente:str|None=None):
     horario={'avisos_enviados':extra['avisos'],'mensagens_sem_resposta':extra['mudas']}
     transbordo={'transferencias':{'dentro_do_horario':extra['dentro'],'fora_do_horario':extra['fora']}}
     solicitacoes={'criadas':sol['criadas'],'atualizadas':int(sol['atualizadas']),'convertidas':sol['convertidas'],'alertas_enviados':alertas}
-    # PED2: turnos em que o agente anunciou pedido fechado sem fechar_pedido de sucesso (refeitos com aviso; segurados = texto do agente não enviado).
-    falsos=await request.app.state.db.fetchrow("""SELECT count(*) FILTER (WHERE anuncio_falso='refeito') AS refeitos,count(*) FILTER (WHERE anuncio_falso='segurado') AS segurados
-        FROM turnos WHERE tenant_id=$1 AND anuncio_falso IS NOT NULL AND ($2::text IS NULL OR agente_id=$2)""",tenant_id,agente)
+    # Métricas dos módulos (pedidos, PED2: anúncios de pedido fechado sem fechar_pedido de sucesso), na raiz como antes.
+    from modulos import ganchos
+    dos_modulos={}
+    for _,f in ganchos('metricas'): dos_modulos.update(await f(request.app.state.db,tenant_id,agente))
     semrec=await request.app.state.db.fetchrow("""SELECT count(*) FILTER (WHERE transferencia_sem_recusa='refeito') AS refeitas,
         count(*) FILTER (WHERE transferencia_sem_recusa='mantida') AS mantidas
         FROM turnos WHERE tenant_id=$1 AND transferencia_sem_recusa IS NOT NULL AND ($2::text IS NULL OR agente_id=$2)""",tenant_id,agente)
     return {**dict(linha),'fila':fila,'botoes':botoes,'picotadas':picotadas,'solicitacoes':solicitacoes,
             'reacoes':reacoes,'fora_do_horario':horario,'transbordo':transbordo,
-            'anuncios_falsos_refeitos':falsos['refeitos'],'anuncios_falsos_segurados':falsos['segurados'],
+            **dos_modulos,
             # AVS1: avisos de espera em texto que saíram (no modo padrão, só "digitando…", fica em zero).
             'avisos_de_espera_enviados':await request.app.state.db.fetchval('SELECT count(*) FROM turnos WHERE tenant_id=$1 AND aviso_demora AND ($2::text IS NULL OR agente_id=$2)',tenant_id,agente),
-            # HOR2: transferências por pedido_para_confirmar sem recusa de Skill (refeitas com aviso; mantidas = o agente repetiu).
+            # HOR2: transferências por motivo que exige recusa de Skill (pedidos: pedido_para_confirmar) sem recusa (refeitas com aviso; mantidas = o agente repetiu).
             'transferencias_sem_recusa_refeitas':semrec['refeitas'],'transferencias_sem_recusa_mantidas':semrec['mantidas']}

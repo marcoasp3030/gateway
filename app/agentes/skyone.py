@@ -32,7 +32,9 @@ ESPERA_NOVA_TENTATIVA_S=2
 # Acima disto o cliente está voltando depois de um tempo: o agente deve retomar, não continuar (INV10).
 RETOMADA_APOS=timedelta(hours=12)
 MAX_BALOES=10
-ACOES=('nenhuma','silencio','transferir_humano','encerrar','pedido_fechado','notificar_equipe')
+# MULTI1-b: as do núcleo e as que os módulos declaram (pedido_fechado, do módulo de pedidos).
+from modulos import declarados as _declarados
+ACOES=('nenhuma','silencio','transferir_humano','encerrar','notificar_equipe')+_declarados('acoes')
 
 
 def ha_quanto_tempo(intervalo):
@@ -124,8 +126,7 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
     canal = await repo.obter(tenant_id,'tenant_canais',conv['canal_id']) if conv.get('canal_id') else None
     if contato: nome_cliente,nome_origem = nome_do_cliente(contato)
     else: nome_cliente,nome_origem = (conv.get('nome'),'perfil') if conv.get('nome') else (None,None)
-    from modulos import contextos
-    from modulos.pedidos.servico import acoes_recentes
+    from modulos import contextos,ganchos
     from nucleo.horarios import pacote as unidades
     contexto = await contextos(repo,tenant_id,conversa_id,cfg)
     if cfg.get('notificar_equipe')=='on':
@@ -134,10 +135,10 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
         contexto['solicitacoes'] = await abertas(repo.db,tenant_id,conversa_id)
     # CFG1-c: situação da empresa e da equipe agora, e o que está ligado neste agente. Sempre presentes.
     from nucleo import expediente
-    # HOR2: a próxima abertura que vai ao agente é a de uma unidade onde dá para pedir (tem_cardapio). Empresa sem nenhum
-    # item para pedir (sem catálogo) continua com a de qualquer unidade.
-    from nucleo.horarios import itens_no_cardapio
-    cardapio = {codigo for codigo,n in (await itens_no_cardapio(repo.db,tenant_id)).items() if n>0}
+    # HOR2: a próxima abertura que vai ao agente é a de uma unidade que atende (no catálogo: tem_cardapio). Sem módulo que diga
+    # quais atendem, ou empresa sem nenhuma, vale a de qualquer unidade.
+    cardapio = set()
+    for _,f in ganchos('unidades_que_atendem',cfg.get('modulos') or ()): cardapio |= await f(repo.db,tenant_id)
     empresa_agora = await expediente.da_empresa(repo.db,tenant_id,tenant['timezone'],agora,cardapio or None)
     abertura = {**empresa_agora,**empresa_agora['do_cardapio']} if cardapio and empresa_agora['fora'] and empresa_agora['do_cardapio'] else \
                ({**empresa_agora,'proxima':None} if cardapio and empresa_agora['fora'] else empresa_agora)
@@ -148,7 +149,7 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
     return {
         # CAL1: hoje + 7 dias com dia da semana, feriado e o que muda nas unidades. O agente não calcula datas.
         'calendario':await calendario.do_pacote(repo.db,tenant_id,tenant['timezone'],agora),
-        'unidades':await unidades(repo.db,tenant_id,tenant['timezone'],agora),
+        'unidades':await unidades(repo.db,tenant_id,tenant['timezone'],agora,cfg.get('modulos') or ()),
         'contexto_modulos':contexto,
         'fora_do_horario':empresa_agora['fora'],'proxima_abertura':expediente.proxima_abertura(abertura),
         'equipe_disponivel':equipe_agora['disponivel'],'retorno_equipe':expediente.retorno_equipe(equipe_agora),
@@ -182,7 +183,7 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
         # fechado sem fechar_pedido de sucesso.
         'aviso_do_gateway':aviso,
         # Sempre presente (UX3.1): chamadas de Skill desta conversa nos últimos minutos, com há quantos segundos foi cada uma.
-        'acoes_recentes':await acoes_recentes(repo.db,tenant_id,conversa_id,cfg.get('acoes_recentes_min')),
+        'acoes_recentes':[a for _,f in ganchos('acoes_recentes',cfg.get('modulos') or ()) for a in await f(repo.db,tenant_id,conversa_id,cfg)],
         # Nome pela prioridade cadastro > informado > perfil (PED1-c); nunca o telefone. nome_origem diz de onde veio.
         'cliente':{'nome':nome_cliente,'nome_origem':nome_origem,'unidade_preferida':conv.get('unidade_preferida'),
                    'resumo_anterior':(contato or {}).get('resumo')},

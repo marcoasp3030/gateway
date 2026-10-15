@@ -64,9 +64,8 @@ ESPACO_ENTRE_AVISOS_MIN=5
 # Refazer o turno (UX2/UX3.1): no máximo dois por turno; o segundo só enquanto o turno original começou há até 30 s.
 MAX_REFAZER=2
 TETO_REFAZER_S=30
-# HOR2: recado ao agente quando ele transfere por "pedido_para_confirmar" sem nenhuma Skill ter recusado nada no turno.
-AVISO_TRANSFERENCIA=('Você pediu transferência por pedido_para_confirmar, mas nenhuma Skill recusou nada neste turno. '
-                     'Chame a Skill necessária (buscar_catalogo, adicionar_item) antes; só transfira se ela recusar, ou explique o motivo real.')
+# Ações do agente com efeito para fora: depois delas o turno não é refeito. Os módulos somam as deles (acoes_com_efeito).
+ACOES_COM_EFEITO=('transferir_humano','encerrar')
 
 
 # Palavras de quem só está encerrando ou agradecendo. Saudações ("oi", "bom dia", "tudo bem") e
@@ -160,7 +159,7 @@ async def marcar_aguardando(conn,tenant,conversa,motivo,detalhe=None,cfg=None,eq
     if novo:
         await auditar(conn,tenant,'sistema','conversa.aguardando_atendente',conversa)
         # Alerta de transbordo (Fase 4): aviso curto ao número da empresa, se houver um cadastrado.
-        from modulos.pedidos.avisos import avisar_transbordo
+        from nucleo.avisos import avisar_transbordo
         await avisar_transbordo(conn,tenant,conversa,motivo,detalhe,PAINEL_URL,cfg,equipe_ausente)
     return bool(novo)
 
@@ -232,15 +231,12 @@ return 1
             return {'ok':True,'ignorado':True}
         if m.get('via_api'): return {'ok':True,'ignorado':True}
         identificador=m['identificador']
-        # WhatsApp de pedidos de uma unidade e número de alerta nunca são clientes (Fase 4): a mensagem
-        # não vira conversa nem turno; se for "OK <numero>" / "NÃO <numero> motivo", decide o pedido.
-        from modulos.pedidos import servico as pedidos_servico
-        unidades=await pedidos_servico.numero_interno(self.db,tenant,identificador)
-        if unidades is not None:
-            if m.get('tipo') not in (None,'texto'): return {'ok':True,'ignorado':True,'interno':True}
-            from modulos.pedidos.rotas import mensagem_de_numero_interno
-            async with self.db.acquire() as conn,conn.transaction():
-                return await mensagem_de_numero_interno(conn,tenant,identificador,unidades,m['texto'],m.get('message_id'))
+        # Número interno da empresa (ex.: WhatsApp de pedidos de uma unidade, no módulo de pedidos) nunca é cliente:
+        # a mensagem não vira conversa nem turno; o módulo decide o que fazer com ela.
+        from modulos import ganchos
+        for _,interno in ganchos('numero_interno'):
+            resposta=await interno(self.db,tenant,identificador,m)
+            if resposta is not None: return resposta
         conversa=f'{tenant}:{canal_id}:{identificador}'
         humano=m.get('humano',False)
         mensagem_id=f'{canal_id}:{m["message_id"]}' if m.get('message_id') else None
@@ -339,7 +335,7 @@ return 1
             await auditar(conn,tenant,'sistema','mensagem.enviada',conversa)
         return True
 
-    async def enviar_transacional(self,tenant,conversa,texto,aviso,marca_meta='aviso_pedido',auditoria='pedido.aviso'):
+    async def enviar_transacional(self,tenant,conversa,texto,aviso,marca_meta,auditoria):
         """Mensagem que o gateway envia por conta própria (aviso de pedido, fora do horário, equipe ausente).
         Aviso de status do pedido ao cliente (PED1): não é resposta do bot, então a pausa por atendente não o segura
         e ele não mexe na pausa. Respeita empresa/agente/canal ativos, o piloto e o envio de teste.
@@ -390,7 +386,7 @@ return 1
                 status='ignorado'
             else:
                 try:
-                    if origem=='cliente': await self._expirar_carrinho(tenant,conversa,cfg)
+                    if origem=='cliente': await self._antes_do_turno(tenant,conversa,cfg)
                     payload=await skyone.pacote(self.repo,tenant,conversa,min(ids),'\n'.join(i['conteudo'] for i in itens),cfg,rid,lote=itens)
                     if origem=='sistema':
                         payload.update(tarefa='notificar',evento=json.loads(itens[0]['evento']) if isinstance(itens[0]['evento'],str) else itens[0]['evento'])
@@ -510,9 +506,12 @@ return 1
             meta=json.loads(ultima['meta']) if isinstance(ultima['meta'],str) else (ultima['meta'] or {})
             pendente=bool(meta.get('botoes')) or str(ultima['conteudo'] or '').rstrip().endswith('?')
             if not pendente:
-                pendente=await self.db.fetchval("""SELECT EXISTS(SELECT 1 FROM carrinhos c JOIN carrinho_itens l ON l.tenant_id=c.tenant_id AND l.carrinho_id=c.id
-                    WHERE c.tenant_id=$1 AND c.conversation_id=$2 AND c.status='aberto')
-                    OR EXISTS(SELECT 1 FROM skill_registro WHERE tenant_id=$1 AND conversation_id=$2 AND criado_em>=$3)""",tenant,conversa,inicio)
+                # Algo em andamento num módulo (ex.: carrinho com itens) ou Skill chamada neste turno.
+                from modulos import ganchos
+                for _,f in ganchos('em_andamento'):
+                    if await f(self.db,tenant,conversa,'aviso_espera'): pendente=True;break
+            if not pendente:
+                pendente=await self.db.fetchval('SELECT EXISTS(SELECT 1 FROM skill_registro WHERE tenant_id=$1 AND conversation_id=$2 AND criado_em>=$3)',tenant,conversa,inicio)
             if not pendente: return None
             anterior=await self.db.fetchrow("""SELECT conteudo,criado_em>now()-make_interval(mins=>$3) AS recente FROM mensagens
                 WHERE tenant_id=$1 AND conversation_id=$2 AND direcao='saida' AND origem='bot' AND parte=0 ORDER BY id DESC LIMIT 1""",tenant,conversa,ESPACO_ENTRE_AVISOS_MIN)
@@ -577,12 +576,14 @@ return 1
                     turno=await self._responder(tenant,conversa,conv,cfg)
                     if turno is None: return 'vazio'
                 # Guardas do turno: uma só vez por turno, a resposta é descartada e o turno refeito com um recado no pacote.
-                # PED2: o agente disse que fechou o pedido sem fechar_pedido de sucesso.
-                # HOR2: o agente transferiu por "pedido_para_confirmar" sem nenhuma Skill ter recusado nada.
-                from modulos.pedidos import anuncio
+                # Guardas da resposta dos módulos (PED2, pedidos: o agente disse que fechou o pedido sem fechar_pedido de sucesso).
+                # HOR2: o agente transferiu por um motivo que exige recusa de Skill sem nenhuma Skill ter recusado nada.
                 recado=coluna=None
-                if await self._anuncio_falso(tenant,conversa,cfg,turno): recado,coluna=anuncio.AVISO_AO_AGENTE,'anuncio_falso'
-                elif await self._transferencia_sem_recusa(tenant,conversa,cfg,turno): recado,coluna=AVISO_TRANSFERENCIA,'transferencia_sem_recusa'
+                guarda=await self._guarda_da_resposta(tenant,conversa,cfg,turno)
+                if guarda: recado,coluna=guarda['recado'],guarda['coluna']
+                else:
+                    recado=await self._transferencia_sem_recusa(tenant,conversa,cfg,turno)
+                    if recado: coluna='transferencia_sem_recusa'
                 if recado:
                     await self.db.execute(f"UPDATE turnos SET {coluna}='refeito' WHERE tenant_id=$1 AND id=$2",tenant,turno['id'])
                     await self._descartar(tenant,conversa,turno)
@@ -590,8 +591,9 @@ return 1
                     if reservada: await vaga.renovar(cfg)
                     turno=await self._responder(tenant,conversa,conv,cfg,recado=recado)
                     if turno is None: return 'vazio'
-            # Repetiu (ou o turno foi retomado depois de uma queda): o anúncio falso não sai; a transferência segue, com alerta.
-            if await self._anuncio_falso(tenant,conversa,cfg,turno): turno=await self._segurar_anuncio(tenant,conversa,cfg,turno)
+            # Repetiu (ou o turno foi retomado depois de uma queda): a resposta barrada não sai; a transferência segue, com alerta.
+            guarda=await self._guarda_da_resposta(tenant,conversa,cfg,turno)
+            if guarda: turno=await self._segurar(tenant,conversa,cfg,turno,guarda)
             elif await self._transferencia_sem_recusa(tenant,conversa,cfg,turno): turno=await self._manter_transferencia(tenant,conversa,cfg,turno)
             await self._concluir(tenant,conversa,cfg,turno,await self._enviar_partes(tenant,conversa,cfg,turno))
             return 'concluido'
@@ -605,16 +607,13 @@ return 1
             if not sem_vaga and await self.db.fetchval("SELECT EXISTS(SELECT 1 FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND processada_em IS NULL AND direcao='entrada' AND origem IN ('cliente','sistema'))",tenant,conversa):
                 await insistir(lambda: self.enfileirar(tenant,conversa,cfg),self.insistir_s)
 
-    async def _expirar_carrinho(self,tenant,conversa,cfg):
-        """Antes de montar o pacote: carrinho parado há mais de carrinho_expira_h é arquivado (UX3).
-        Falha aqui não pode impedir a resposta ao cliente."""
-        try:
-            from modulos.pedidos import servico as pedidos
-            async with self.db.acquire() as conn,conn.transaction():
-                if await pedidos.expirar(conn,tenant,conversa,cfg.get('carrinho_expira_h')):
-                    await auditar(conn,tenant,'sistema','carrinho.expirado',conversa)
-        except Exception:
-            log.warning('Carrinho não conferido para expiração; segue o turno')
+    async def _antes_do_turno(self,tenant,conversa,cfg):
+        """Antes de montar o pacote, o que os módulos do agente fazem (pedidos: carrinho parado há mais de carrinho_expira_h
+        é arquivado, UX3). Falha aqui não pode impedir a resposta ao cliente."""
+        from modulos import ganchos
+        for nome,f in ganchos('antes_do_turno',cfg.get('modulos') or ()):
+            try: await f(self.db,tenant,conversa,cfg)
+            except Exception: log.warning('Preparação do turno do módulo %s falhou; segue o turno',nome)
 
     async def _bot_falou_ha_pouco(self,tenant,conversa,cfg):
         """O bot enviou alguma mensagem nesta conversa dentro da janela do aviso de demora?"""
@@ -632,7 +631,7 @@ return 1
         if not await self.db.fetchval("""SELECT EXISTS(SELECT 1 FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND processada_em IS NULL
                 AND direcao='entrada' AND origem='cliente' AND NOT (id=ANY($3::bigint[])))""",tenant,conversa,turno['mensagem_ids']): return False
         resultado=json.loads(turno['resposta']) if isinstance(turno['resposta'],str) else (turno['resposta'] or {})
-        from modulos.pedidos import servico as pedidos
+        from modulos import declarados
         motivo=None
         if turno['refeito_de'] is not None:
             original=await self.db.fetchrow('SELECT refeito_de,agente_inicio FROM turnos WHERE tenant_id=$1 AND id=$2',tenant,turno['refeito_de'])
@@ -643,30 +642,32 @@ return 1
                     tenant,conversa,turno['agente_inicio']): motivo='skill_chamada'
             elif await self.db.fetchval('SELECT extract(epoch FROM now()-$1::timestamptz)>$2',original['agente_inicio'],float(TETO_REFAZER_S)): motivo='teto_de_espera'
         if motivo: pass
-        elif resultado.get('acao') in ('transferir_humano','encerrar','pedido_fechado'): motivo='acao_com_efeito'
+        elif resultado.get('acao') in ACOES_COM_EFEITO+declarados('acoes_com_efeito'): motivo='acao_com_efeito'
         elif await self.db.fetchval("""SELECT EXISTS(SELECT 1 FROM skill_chamadas WHERE tenant_id=$1 AND conversation_id=$2 AND criado_em>=$3
-                AND resultado='ok' AND skill=ANY($4::text[]))""",tenant,conversa,turno['agente_inicio'],list(pedidos.SKILLS_COM_EFEITO)): motivo='skill_com_efeito'
+                AND resultado='ok' AND skill=ANY($4::text[]))""",tenant,conversa,turno['agente_inicio'],list(declarados('skills_com_efeito'))): motivo='skill_com_efeito'
         if motivo:
             # A resposta segue e a mensagem nova vira o próximo turno.
             await self.db.execute('UPDATE turnos SET refazer_recusado=$3 WHERE tenant_id=$1 AND id=$2',tenant,turno['id'],motivo)
             return False
         return True
 
-    async def _anuncio_falso(self,tenant,conversa,cfg,turno):
-        """A resposta do turno anuncia pedido fechado sem fechar_pedido de sucesso? Devolve por onde veio o anúncio, ou None.
-        Só para agente com o módulo de pedidos. Falha na conferência não segura a resposta."""
-        if turno['origem']!='cliente' or turno['status']!='ok' or turno['anuncio_falso']=='segurado': return None
-        try:
-            from modulos.pedidos import anuncio
-            resultado=json.loads(turno['resposta']) if isinstance(turno['resposta'],str) else (turno['resposta'] or {})
-            if not anuncio.sinal(resultado): return None
-            # Só para agente com o módulo de pedidos de fato (modelo, empresa e agente).
-            if 'pedidos' not in (cfg.get('modulos') or ()): return None
-            # Turno refeito: vale o fechar_pedido feito desde a primeira tentativa.
-            return await anuncio.avaliar(self.db,tenant,conversa,resultado,await self._inicio_da_cadeia(tenant,turno))
-        except Exception:
-            log.warning('Anúncio de pedido não conferido; a resposta segue')
-            return None
+    async def _guarda_da_resposta(self,tenant,conversa,cfg,turno):
+        """A resposta do turno cai numa guarda de algum módulo do agente (pedidos: anuncia pedido fechado sem fechar_pedido de
+        sucesso)? Devolve a guarda, ou None. Falha na conferência não segura a resposta."""
+        if turno['origem']!='cliente' or turno['status']!='ok': return None
+        import importlib
+        from modulos import REGISTRO
+        resultado=json.loads(turno['resposta']) if isinstance(turno['resposta'],str) else (turno['resposta'] or {})
+        for nome in cfg.get('modulos') or ():
+            if not REGISTRO[nome].ganchos: continue
+            for guarda in getattr(importlib.import_module(REGISTRO[nome].ganchos),'GUARDAS_DA_RESPOSTA',()):
+                if turno[guarda['coluna']]=='segurado': continue
+                try:
+                    # Turno refeito: vale o que foi feito desde a primeira tentativa.
+                    if await guarda['avaliar'](self.db,tenant,conversa,resultado,await self._inicio_da_cadeia(tenant,turno)): return guarda
+                except Exception:
+                    log.warning('Guarda da resposta do módulo %s não conferida; a resposta segue',nome)
+        return None
 
     async def _inicio_da_cadeia(self,tenant,turno):
         """Início do primeiro turno quando este é refeito de outro(s): as Skills chamadas desde lá contam para este."""
@@ -679,52 +680,64 @@ return 1
         return desde
 
     async def _transferencia_sem_recusa(self,tenant,conversa,cfg,turno):
-        """O turno transfere por "pedido_para_confirmar" sem que nenhuma Skill tenha recusado nada nele (HOR2)?
-        Esse motivo existe para o item que o gateway recusou (sem preço…); sem recusa, o agente não tentou.
-        Só para agente com o módulo de pedidos. Falha na conferência não segura a resposta."""
-        if turno['origem']!='cliente' or turno['status']!='ok' or turno['transferencia_sem_recusa']=='mantida': return False
+        """O turno transfere por um motivo que um módulo do agente declara "com recusa" (pedidos: pedido_para_confirmar) sem que
+        nenhuma Skill tenha recusado nada nele (HOR2)? Esse motivo existe para o que o gateway recusou (item sem preço…); sem
+        recusa, o agente não tentou. Devolve o recado ao agente, ou None. Falha na conferência não segura a resposta."""
+        if turno['origem']!='cliente' or turno['status']!='ok' or turno['transferencia_sem_recusa']=='mantida': return None
         try:
             resultado=json.loads(turno['resposta']) if isinstance(turno['resposta'],str) else (turno['resposta'] or {})
-            if resultado.get('acao')!='transferir_humano' or resultado.get('motivo')!='pedido_para_confirmar': return False
-            if 'pedidos' not in (cfg.get('modulos') or ()): return False
-            return not await self.db.fetchval('''SELECT EXISTS(SELECT 1 FROM skill_registro WHERE tenant_id=$1 AND conversation_id=$2
-                AND status>=400 AND criado_em>=$3)''',tenant,conversa,await self._inicio_da_cadeia(tenant,turno))
+            if resultado.get('acao')!='transferir_humano': return None
+            recado=self._recados_de_recusa(cfg).get(resultado.get('motivo'))
+            if not recado: return None
+            if await self.db.fetchval('''SELECT EXISTS(SELECT 1 FROM skill_registro WHERE tenant_id=$1 AND conversation_id=$2
+                AND status>=400 AND criado_em>=$3)''',tenant,conversa,await self._inicio_da_cadeia(tenant,turno)): return None
+            return recado
         except Exception:
             log.warning('Transferência não conferida; a resposta segue')
-            return False
+            return None
+
+    def _recados_de_recusa(self,cfg):
+        """{motivo: recado ao agente} dos motivos "com recusa" dos módulos do agente."""
+        import importlib
+        from modulos import REGISTRO
+        saida={}
+        for nome in cfg.get('modulos') or ():
+            m=REGISTRO[nome]
+            recados=getattr(importlib.import_module(m.ganchos),'RECADOS_DE_RECUSA',{}) if m.ganchos else {}
+            saida.update({motivo:recados[motivo] for motivo in m.motivos_com_recusa if motivo in recados})
+        return saida
 
     async def _manter_transferencia(self,tenant,conversa,cfg,turno):
         """O agente repetiu a transferência sem recusa de Skill: ela segue (pode haver razão que o gateway não vê) e a operação é avisada."""
         async with self.db.acquire() as conn,conn.transaction():
             turno=await conn.fetchrow("UPDATE turnos SET transferencia_sem_recusa='mantida' WHERE tenant_id=$1 AND id=$2 RETURNING *",tenant,turno['id'])
             await auditar(conn,tenant,'sistema','transbordo.sem_recusa',conversa)
-        log.warning('Transferência por pedido_para_confirmar sem recusa de Skill, mantida depois de refazer (empresa %s, turno %s)',tenant,turno['id'])
+        motivo=str((json.loads(turno['resposta']) if isinstance(turno['resposta'],str) else (turno['resposta'] or {})).get('motivo') or '')
+        log.warning('Transferência por %s sem recusa de Skill, mantida depois de refazer (empresa %s, turno %s)',motivo,tenant,turno['id'])
         try:
             from nucleo.alertas import Alertas
             await Alertas(self.redis,self.http,self.db,self.prefixo).avisar('aviso','transferência sem tentativa',
                 f'Empresa: {tenant} · agente: {cfg["id"]} · turno {turno["id"]} · conversa de final {conversa[-4:]}\n'
-                'O agente transferiu por "pedido para confirmar" sem nenhuma Skill ter recusado nada, mesmo depois de refazer o turno.')
+                f'O agente transferiu por "{motivo.replace("_"," ")}" sem nenhuma Skill ter recusado nada, mesmo depois de refazer o turno.')
         except Exception: log.warning('Alerta de transferência sem tentativa não enviado')
         return turno
 
-    async def _segurar_anuncio(self,tenant,conversa,cfg,turno):
-        """Troca a resposta do turno pelo texto fixo com o botão "Confirmar pedido" e avisa a operação.
-        O que o agente respondeu fica guardado no turno (campo `segurado`) para auditoria."""
-        from modulos.pedidos import anuncio
+    async def _segurar(self,tenant,conversa,cfg,turno,guarda):
+        """Troca a resposta do turno pela resposta segura da guarda (pedidos: texto fixo com o botão "Confirmar pedido") e avisa
+        a operação. O que o agente respondeu fica guardado no turno (campo `segurado`) para auditoria."""
         original=json.loads(turno['resposta']) if isinstance(turno['resposta'],str) else (turno['resposta'] or {})
-        nova={'resposta':[anuncio.TEXTO_AO_CLIENTE],'acao':'nenhuma','botoes':{'opcoes':[dict(anuncio.BOTAO)]},
-              'segurado':{k:original.get(k) for k in ('resposta','acao','desfecho','motivo')}}
+        nova=guarda['resposta_segura'](original)
         async with self.db.acquire() as conn,conn.transaction():
-            turno=await conn.fetchrow("""UPDATE turnos SET resposta=$3::jsonb,acao='nenhuma',desfecho=NULL,motivo_silencio=NULL,anuncio_falso='segurado'
+            turno=await conn.fetchrow(f"""UPDATE turnos SET resposta=$3::jsonb,acao='nenhuma',desfecho=NULL,motivo_silencio=NULL,{guarda['coluna']}='segurado'
                 WHERE tenant_id=$1 AND id=$2 RETURNING *""",tenant,turno['id'],json.dumps(nova,ensure_ascii=False))
-            await auditar(conn,tenant,'sistema','pedido.anuncio_segurado',conversa)
-        log.warning('Pedido anunciado sem fechar_pedido: resposta do agente segurada (empresa %s, turno %s)',tenant,turno['id'])
+            await auditar(conn,tenant,'sistema',guarda['auditoria'],conversa)
+        log.warning(guarda['log']+' (empresa %s, turno %s)',tenant,turno['id'])
         try:
             from nucleo.alertas import Alertas
-            await Alertas(self.redis,self.http,self.db,self.prefixo).avisar('aviso','pedido anunciado sem fechar',
-                f'Empresa: {tenant} · agente: {cfg["id"]} · turno {turno["id"]} · conversa de final {conversa[-4:]}\n'
-                'O agente disse que fechou o pedido, mas fechar_pedido não teve sucesso. O cliente recebeu o pedido para confirmar de novo.')
-        except Exception: log.warning('Alerta de pedido anunciado sem fechar não enviado')
+            titulo,texto=guarda['alerta']
+            await Alertas(self.redis,self.http,self.db,self.prefixo).avisar('aviso',titulo,
+                f'Empresa: {tenant} · agente: {cfg["id"]} · turno {turno["id"]} · conversa de final {conversa[-4:]}\n'+texto)
+        except Exception: log.warning('Alerta de resposta segurada não enviado')
         return turno
 
     async def _descartar(self,tenant,conversa,turno):
@@ -763,10 +776,12 @@ return 1
             cfg['agente_mode'],origem,ids,descartado['id'] if descartado else None,cfg.get('perfil_versao'))
         resultado=None;erro=None;status='ok';aviso=False;presenca=None
         acoes=None
-        if origem=='cliente': await self._expirar_carrinho(tenant,conversa,cfg)
+        if origem=='cliente': await self._antes_do_turno(tenant,conversa,cfg)
         if descartado:
-            from modulos.pedidos import servico as pedidos
-            acoes=await pedidos.acoes_do_turno(self.db,tenant,conversa,descartado['agente_inicio'],descartado['agente_fim'] or datetime.now(timezone.utc))
+            # O que a tentativa descartada já fez nas Skills dos módulos.
+            from modulos import ganchos
+            fim=descartado['agente_fim'] or datetime.now(timezone.utc);acoes=[]
+            for _,f in ganchos('acoes_do_turno'): acoes+=await f(self.db,tenant,conversa,descartado['agente_inicio'],fim)
         if not await self.permitido(tenant,conversa,cfg['id']):
             status='ignorado'
         else:
@@ -929,15 +944,16 @@ return 1
         None = segue o caminho normal (modo "atender", empresa aberta, ou conversa com pedido ativo)."""
         if cfg.get('fora_do_horario')!='so_avisar': return None
         from nucleo import expediente
-        from nucleo.solicitacoes import PEDIDO_ATIVO
+        from modulos import ganchos
         empresa=await self.repo.tenant(tenant)
         s=await expediente.da_empresa(self.db,tenant,empresa['timezone'])
         if not s['fora']:
             # Reabriu: o período fechado acabou; se fechar de novo, o cliente é avisado de novo.
             await self.db.execute('UPDATE conversas SET fora_do_horario_avisado_ate=NULL WHERE tenant_id=$1 AND conversation_id=$2 AND fora_do_horario_avisado_ate IS NOT NULL',tenant,conversa)
             return None
-        # Quem tem pedido em andamento precisa conseguir perguntar por ele: o agente atende.
-        if await self.db.fetchval('SELECT EXISTS(SELECT 1 FROM pedidos WHERE tenant_id=$1 AND conversation_id=$2 AND status=ANY($3::text[]))',tenant,conversa,list(PEDIDO_ATIVO)): return None
+        # Quem tem algo em andamento (pedidos: pedido ativo) precisa conseguir perguntar por ele: o agente atende.
+        for _,f in ganchos('em_andamento'):
+            if await f(self.db,tenant,conversa,'fora_do_horario'): return None
         silencio={'resposta':[],'acao':'silencio','motivo':'fora_do_horario'}
         if await self.db.fetchval('SELECT fora_do_horario_avisado_ate>now() FROM conversas WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa):
             return {**silencio,'fora_do_horario':'sem_resposta'}

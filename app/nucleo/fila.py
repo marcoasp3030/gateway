@@ -234,9 +234,9 @@ class FilaDuravel:
                         # Em tarefa própria: chamada lenta ao provedor não atrasa o agendamento.
                         self.varredura_task = asyncio.create_task(self.varrer()); proxima_varredura = agora + self.varredura_s
                     if agora >= proximos_avisos:
-                        # Avisos internos (pedido para a unidade, transbordo, aviso de pedido ao cliente).
+                        # Avisos internos (transbordo, solicitações e os dos módulos: pedido para a unidade, aviso de pedido ao cliente).
                         proximos_avisos = agora + 2
-                        from modulos.pedidos.avisos import despachar as despachar_avisos
+                        from nucleo.avisos import despachar as despachar_avisos
                         await despachar_avisos(self.p)
                     if self.ligada:
                         await self.mover_vencidos()

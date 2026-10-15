@@ -153,8 +153,7 @@ async def conversas(request: Request, tenant: str, agente: str | None = None, ca
         m.conteudo AS ultima_mensagem,m.enviada_em AS ultima_em,m.direcao AS ultima_direcao,m.origem AS ultima_origem,m.tipo AS ultima_tipo,
         ct.nome AS contato_nome,ct.nome_cadastro,ct.nome_informado,ct.nome_perfil,ct.anonimizado_em,
         k.tipo AS canal_tipo,k.nome AS canal_nome,t.tenant_teste,
-        coalesce(c.unidade_preferida,ca.unidade) AS unidade_preferida,u.nome AS unidade_preferida_nome,
-        p.numero AS pedido_numero,p.status AS pedido_status
+        c.unidade_preferida,u.nome AS unidade_preferida_nome
         FROM conversas c
         JOIN tenants t ON t.id=c.tenant_id
         LEFT JOIN tenant_canais k ON k.tenant_id=c.tenant_id AND k.id=c.canal_id
@@ -162,13 +161,7 @@ async def conversas(request: Request, tenant: str, agente: str | None = None, ca
         LEFT JOIN LATERAL (
             SELECT conteudo,enviada_em,direcao,origem,tipo FROM mensagens WHERE tenant_id=c.tenant_id
             AND conversation_id=c.conversation_id ORDER BY id DESC LIMIT 1) m ON true
-        LEFT JOIN LATERAL (
-            SELECT unidade FROM carrinhos WHERE tenant_id=c.tenant_id AND conversation_id=c.conversation_id
-            AND unidade IS NOT NULL ORDER BY id DESC LIMIT 1) ca ON c.unidade_preferida IS NULL
-        LEFT JOIN tenant_unidades u ON u.tenant_id=c.tenant_id AND u.codigo=coalesce(c.unidade_preferida,ca.unidade)
-        LEFT JOIN LATERAL (
-            SELECT numero,status FROM pedidos WHERE tenant_id=c.tenant_id AND conversation_id=c.conversation_id
-            AND status NOT IN ('concluido','recusado','cancelado') ORDER BY id DESC LIMIT 1) p ON true
+        LEFT JOIN tenant_unidades u ON u.tenant_id=c.tenant_id AND u.codigo=c.unidade_preferida
         WHERE c.tenant_id=$1 AND ($2::text IS NULL OR c.agente_id=$2)
         AND ($3::text IS NULL OR c.canal_id=$3)
         AND ($4::text IS NULL OR (CASE WHEN c.bot_pausado_ate>now() THEN 'pausada' ELSE 'ativa' END)=$4)
@@ -184,7 +177,18 @@ async def conversas(request: Request, tenant: str, agente: str | None = None, ca
     if len(rows) > limite:
         r = rows[limite-1]
         proximo = f"{r['atualizado_em'].isoformat()}|{r['conversation_id']}" if ordem == 'recentes' else r['conversation_id']
-    itens = [conversa_do_painel(r) for r in rows[:limite]]
+    # Resumo dos módulos para a página (pedidos: pedido aberto e unidade do último carrinho), numa consulta por módulo.
+    from modulos import ganchos
+    resumos = {}
+    for _, f in ganchos('resumo_das_conversas'):
+        for conv, dados in (await f(request.app.state.db, tenant, [r['conversation_id'] for r in rows[:limite]])).items():
+            resumos.setdefault(conv, {}).update({k: v for k, v in dados.items() if v is not None})
+    nomes_das_unidades = {}
+    sem_unidade = {d['unidade'] for c, d in resumos.items() if d.get('unidade')}
+    if sem_unidade:
+        nomes_das_unidades = {u['codigo']: u['nome'] for u in await request.app.state.db.fetch(
+            'SELECT codigo,nome FROM tenant_unidades WHERE tenant_id=$1 AND codigo=ANY($2::text[])', tenant, list(sem_unidade))}
+    itens = [conversa_do_painel(r, resumos.get(r['conversation_id'], {}), nomes_das_unidades) for r in rows[:limite]]
     # SOL1: solicitação aberta para a equipe em cada conversa da página (uma consulta só).
     abertas = {}
     for s in await request.app.state.db.fetch("""SELECT conversation_id,id,numero,tipo,status FROM solicitacoes WHERE tenant_id=$1
@@ -204,9 +208,12 @@ CAMPOS_ANTIGOS = ('conversation_id','agente_id','canal_id','canal','nome','telef
                   'ultima_mensagem','ultima_em')
 
 
-def conversa_do_painel(r):
-    """Campos de sempre (nada quebra) + os do PED1-c. Contato anonimizado: nomes e telefones nulos."""
-    linha = dict(r)
+def conversa_do_painel(r, resumo=None, nomes_das_unidades=None):
+    """Campos de sempre (nada quebra) + os do PED1-c. Contato anonimizado: nomes e telefones nulos.
+    `resumo`: o que os módulos dizem da conversa (pedido aberto; unidade do último carrinho, quando a conversa não tem preferida)."""
+    linha = dict(r);resumo = resumo or {}
+    if linha['unidade_preferida'] is None and resumo.get('unidade'):
+        linha['unidade_preferida'] = resumo['unidade'];linha['unidade_preferida_nome'] = (nomes_das_unidades or {}).get(resumo['unidade'])
     anon = bool(linha['anonimizado_em'])
     base = {k: linha[k] for k in CAMPOS_ANTIGOS}
     if anon: base.update(nome=None, telefone=None)
@@ -222,7 +229,7 @@ def conversa_do_painel(r):
             'unidade_preferida': linha['unidade_preferida'],
             'unidade_preferida_nome': linha['unidade_preferida_nome'] or linha['unidade_preferida'],
             'estado': linha['estado'], 'ultima': ultima,
-            'pedido_aberto': {'numero': linha['pedido_numero'], 'status': linha['pedido_status']} if linha['pedido_numero'] else None}
+            'pedido_aberto': resumo.get('pedido_aberto')}
 
 
 async def pausar(request, tenant, conv, minutos, actor, acao):

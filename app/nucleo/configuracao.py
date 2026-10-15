@@ -10,7 +10,7 @@ COMPORTAMENTO = {
     'aviso_demora','fallback','alerta_telefone','send_mode','agente_mode','modo_piloto',
     'contatos_permitidos','encerrar_vazia_min','max_lotes_simultaneos','max_concorrencia',
     'skyone_dominios_permitidos','debounce_curto_s','debounce_palavras','max_msgs_por_minuto_contato',
-    'botoes_interativos','debounce_incompleta_s','refazer_turno','aviso_demora_janela_s','carrinho_expira_h','acoes_recentes_min',
+    'botoes_interativos','debounce_incompleta_s','refazer_turno','aviso_demora_janela_s',
     # CFG1-a: já no contrato; a execução vem nos blocos R1 (reações) e G3 (fora do horário e transbordo).
     'aviso_espera_modo','aviso_espera_textos','reacoes','reacoes_emojis','reacoes_max_dia','fora_do_horario','fora_do_horario_mensagem','fora_do_horario_aceita_agendado',
     'transbordo_alerta','transbordo_horario_equipe','transbordo_fora_do_horario',
@@ -29,13 +29,10 @@ PADROES = dict(debounce_s=4,debounce_curto_s=1.5,debounce_palavras=6,max_wait_s=
     # refazer_turno: chegou mensagem antes de a resposta sair → descarta a resposta e refaz com o lote completo.
     debounce_incompleta_s=None,refazer_turno='off',
     # UX3. Aviso de demora não sai se o bot falou na conversa há menos de aviso_demora_janela_s (0 = sempre sai).
-    # Carrinho sem alteração há mais de carrinho_expira_h horas é arquivado na próxima mensagem do cliente.
-    aviso_demora_janela_s=120,carrinho_expira_h=6,
+    aviso_demora_janela_s=120,
     # AVS1. Enquanto o agente processa: 'presenca' = só "digitando…" (padrão); 'presenca_e_texto_contextual' = também um texto curto
     # depois de slow_notice_s, e só no meio de um pedido ou de uma busca; 'off' = nada. Os textos são sorteados sem repetir o último.
     aviso_espera_modo='presenca',aviso_espera_textos=['Já te respondo 😊','Só mais um instantinho','Um momento, por favor'],
-    # UX3.1. acoes_recentes do pacote: chamadas de Skill da conversa nos últimos N minutos (0 = lista vazia).
-    acoes_recentes_min=15,
     # CFG1-a/CFG1-c. Reações, fora do horário e transbordo: executados desde o CFG1-c (pedido agendado ainda não).
     reacoes='off',reacoes_emojis=['❤️','😊','👍','🙏'],reacoes_max_dia=2,
     fora_do_horario='atender',fora_do_horario_aceita_agendado=False,
@@ -44,6 +41,10 @@ PADROES = dict(debounce_s=4,debounce_curto_s=1.5,debounce_palavras=6,max_wait_s=
     transbordo_fora_do_horario='Nossa equipe não está disponível agora.[[ Voltamos {retorno_equipe}.]] Deixei seu recado e, enquanto isso, sigo te ajudando por aqui.',
     # SOL1. notificar_equipe: o agente avisa a equipe (evento, catering, encomenda…) sem pausar o bot.
     notificar_equipe='off',transbordo_destino_externo=False)
+# MULTI1-b: comportamentos que um módulo declara (com o padrão) entram aqui; só valem para agente com o módulo.
+from modulos import REGISTRO as _MODULOS
+for _m in _MODULOS.values():
+    for _campo,_spec in _m.comportamentos.items(): COMPORTAMENTO.add(_campo);PADROES[_campo]=_spec[6]
 
 
 class Configuracoes:
@@ -125,10 +126,12 @@ class Configuracoes:
 
     async def da_empresa_listas(self, tenant_id):
         """(motivos de transferência, módulos em uso) somando os agentes da empresa. Sem agente, os do núcleo e nenhum módulo."""
-        from modulos import modulos_efetivos,motivos_efetivos,chaves_da_empresa,MOTIVOS_NUCLEO,_em_ordem,ORDEM_MOTIVOS,REGISTRO
-        chaves = await chaves_da_empresa(self.repo.db,tenant_id);motivos = list(MOTIVOS_NUCLEO);modulos = set()
-        for a in await self.repo.db.fetch("SELECT modelo_id,modelo_versao,modulos_ligados FROM agentes WHERE tenant_id=$1",tenant_id):
+        from modulos import modulos_efetivos,chaves_da_empresa,MOTIVOS_NUCLEO,_em_ordem,REGISTRO
+        chaves = await chaves_da_empresa(self.repo.db,tenant_id);dos_modelos = [];modulos = set()
+        for a in await self.repo.db.fetch("SELECT modelo_id,modelo_versao,modulos_ligados FROM agentes WHERE tenant_id=$1 ORDER BY id",tenant_id):
             modelo = await self.repo.modelo(tenant_id,a['modelo_id'],a['modelo_versao'])
             if not modelo: continue
-            mods = modulos_efetivos(modelo,a['modulos_ligados'],chaves);modulos.update(mods);motivos += motivos_efetivos(modelo,mods)
-        return _em_ordem(motivos,ORDEM_MOTIVOS),[m for m in REGISTRO if m in modulos]
+            modulos.update(modulos_efetivos(modelo,a['modulos_ligados'],chaves));dos_modelos += list(modelo.get('motivos_transferencia') or [])
+        # Mesma ordem do agente: núcleo, módulos em uso, modelos.
+        em_uso = [m for m in REGISTRO if m in modulos]
+        return _em_ordem(list(MOTIVOS_NUCLEO)+[i for m in em_uso for i in REGISTRO[m].motivos_transferencia]+dos_modelos),em_uso

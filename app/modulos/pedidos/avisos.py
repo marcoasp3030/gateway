@@ -1,28 +1,18 @@
-"""Avisos internos (Fase 4, bloco 3): caixa de saída para o que o gateway envia por conta própria.
+"""Avisos do módulo de pedidos: pedido novo para a unidade e status do pedido ao cliente (Fase 4, PED1).
 
-O aviso é gravado na mesma transação do fato (pedido fechado, pedido decidido, conversa aguardando
-atendente) e enviado depois pelo agendador. A recepção nunca chama o canal. Aviso para unidade ou
-alerta só sai de verdade quando o agente do canal está com envio real; senão fica "simulado"."""
-import logging,re,time
-from canais import uazapi
+A caixa de saída, o alerta de transbordo e o despacho são do núcleo (nucleo/avisos.py, MULTI1-b); os nomes antigos
+continuam valendo daqui."""
+import re
 from nucleo.contatos import nome_da_conversa
-
-log=logging.getLogger('gateway.avisos')
-MAX_TENTATIVAS=3
-MOTIVOS={'erro_agente':'erro do agente','tempo_esgotado':'agente não respondeu a tempo','circuito_aberto':'agente fora do ar',
-         'entrega_incerta':'entrega incerta de uma resposta','transferido_pelo_agente':'transferência pedida pelo agente',
-         'silencio_sem_motivo':'agente ficou sem responder'}
+from nucleo.avisos import (MAX_TENTATIVAS,MOTIVOS,RECUSA_CERTA,incerto,mascarar_numero,numero_para_o_alerta,enfileirar,  # noqa: F401
+                           destino_do_alerta,avisar_transbordo,despachar)
+from nucleo import avisos as _nucleo
 
 
 def reais(valor):
     if valor is None: return 'a confirmar'
     inteiro,centavos=f'{float(valor):.2f}'.split('.')
     return 'R$ '+re.sub(r'(?<=\d)(?=(\d{3})+$)','.',inteiro)+','+centavos
-
-
-def mascarar_numero(telefone):
-    d=''.join(c for c in str(telefone or '') if c.isdigit())
-    return d[:4]+'****'+d[-4:] if len(d)>=10 else '(sem número)'
 
 
 def texto_pedido_unidade(p,itens,nome_unidade):
@@ -124,26 +114,10 @@ def texto_cliente(p,nome_unidade,modelo=None):
                                            'motivo':motivo,'nome_cliente':primeiro_nome(p['cliente_nome'])})
 
 
-def numero_para_o_alerta(telefone,mascarar):
-    """Telefone do cliente no alerta: inteiro para a equipe interna; mascarado quando o destino é um grupo externo."""
-    if mascarar: return mascarar_numero(telefone)
-    from nucleo.contatos import e164,formatado
-    return formatado(e164(telefone)) or '(sem número)'
-
-
 def texto_transbordo(telefone,nome,motivo,detalhe,pedido,painel_url,mascarar=True,equipe_ausente=False):
-    linhas=['⚠️ CONVERSA AGUARDANDO ATENDENTE',f'Cliente: {nome or "(sem nome)"} — {numero_para_o_alerta(telefone,mascarar)}',
-            'Motivo: '+MOTIVOS.get(motivo,motivo)+(f' ({detalhe})' if detalhe else '')]
-    if equipe_ausente: linhas.append('Fora do horário da equipe: o bot continua atendendo e o cliente foi avisado.')
-    if pedido: linhas.append(f'Pedido: {pedido["numero"]} ({pedido["status"]})')
-    if painel_url: linhas.append(f'Painel: {painel_url}')
-    return '\n'.join(linhas)
-
-
-async def enfileirar(conn,tenant,tipo,referencia,texto,destino=None,conversa=None):
-    """Grava o aviso (uma vez por fato). Chamar dentro da transação do fato."""
-    return await conn.fetchval('''INSERT INTO avisos_internos(tenant_id,tipo,referencia,texto,destino,conversation_id)
-        VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (tenant_id,tipo,referencia) DO NOTHING RETURNING id''',tenant,tipo,referencia,texto[:4000],destino,conversa)
+    """Forma antiga (com o pedido): o texto é o do núcleo com a linha do pedido."""
+    return _nucleo.texto_transbordo(telefone,nome,motivo,detalhe,[f'Pedido: {pedido["numero"]} ({pedido["status"]})'] if pedido else [],
+                                    painel_url,mascarar,equipe_ausente)
 
 
 async def nome_da_unidade(conn,tenant,codigo):
@@ -166,89 +140,3 @@ async def avisar_cliente_do_pedido(conn,tenant,p):
     await enfileirar(conn,tenant,'pedido_cliente',f'{p["numero"]}:{p["status"]}',
                      texto_cliente({**dict(p),'cliente_nome':atual or p['cliente_nome']},await nome_da_unidade(conn,tenant,p['unidade']),modelo),None,p['conversation_id'])
     return 'enfileirado'
-
-
-# Falha em que o provedor recusou a chamada: a mensagem com certeza não saiu. Qualquer outra pode ter saído.
-RECUSA_CERTA='recusado_pelo_provedor'
-
-
-def incerto(erro): return erro!=RECUSA_CERTA
-
-
-async def destino_do_alerta(conn,tenant,cfg=None,conversa=None):
-    """(telefone de alerta da equipe ou None, pendência ou None). T1: vale a configuração `transbordo_alerta`
-    (com herança) e, na falta dela, o número antigo da empresa. O número da própria instância não serve de destino:
-    o alerta não é enviado e a pendência fica no log e na auditoria da empresa."""
-    destino=(cfg or {}).get('transbordo_alerta')
-    if not destino:
-        destino=await conn.fetchval('SELECT coalesce(c.transbordo_alerta,t.whatsapp_alerta_transbordo) FROM tenants t LEFT JOIN tenant_config c ON c.tenant_id=t.id WHERE t.id=$1',tenant)
-    if not destino: return None,None
-    if await conn.fetchval('SELECT EXISTS(SELECT 1 FROM tenant_canais WHERE tenant_id=$1 AND numero_instancia=$2)',tenant,destino):
-        log.warning('Alerta à equipe não enviado: o telefone de alerta é o número da própria instância')
-        from admin.servico import auditar
-        await auditar(conn,tenant,'sistema','transbordo.alerta_pendente',conversa or tenant)
-        return None,'numero_da_instancia'
-    return destino,None
-
-
-async def avisar_transbordo(conn,tenant,conversa,motivo,detalhe=None,painel_url=None,cfg=None,equipe_ausente=False):
-    """Conversa entrou em "aguardando atendente" → aviso curto ao telefone de alerta da equipe (vazio = desligado)."""
-    destino,_=await destino_do_alerta(conn,tenant,cfg,conversa)
-    if not destino: return None
-    conv=await conn.fetchrow('SELECT telefone,nome,aguardando_atendente_desde FROM conversas WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa)
-    if not conv: return None
-    pedido=await conn.fetchrow("SELECT numero,status FROM pedidos WHERE tenant_id=$1 AND conversation_id=$2 ORDER BY id DESC LIMIT 1",tenant,conversa)
-    marca=conv['aguardando_atendente_desde'].isoformat() if conv['aguardando_atendente_desde'] else str(time.time())
-    nome,_=await nome_da_conversa(conn,tenant,conversa)
-    return await enfileirar(conn,tenant,'transbordo',conversa+'@'+marca,
-        texto_transbordo(conv['telefone'],nome,motivo,(detalhe or '')[:120] or None,pedido,painel_url,
-                         bool((cfg or {}).get('transbordo_destino_externo')),equipe_ausente),destino,conversa)
-
-
-async def _canal_de_envio(db,tenant,conversa):
-    """Canal por onde o aviso sai: o da conversa, se for uazapi; senão o primeiro uazapi ativo da empresa com credencial."""
-    if conversa:
-        c=await db.fetchrow("""SELECT k.* FROM conversas v JOIN tenant_canais k ON k.tenant_id=v.tenant_id AND k.id=v.canal_id
-            WHERE v.tenant_id=$1 AND v.conversation_id=$2 AND k.tipo='uazapi' AND k.ativo AND k.credenciais_enc ? 'fernet'""",tenant,conversa)
-        if c: return c
-    return await db.fetchrow("SELECT * FROM tenant_canais WHERE tenant_id=$1 AND tipo='uazapi' AND ativo AND credenciais_enc ? 'fernet' ORDER BY id LIMIT 1",tenant)
-
-
-async def _enviar(pipeline,a):
-    """Devolve o status final do aviso."""
-    db=pipeline.db;tenant=a['tenant_id']
-    if a['tipo']=='pedido_cliente':
-        # Aviso transacional (PED1): sai mesmo com o bot pausado por atendente; respeita piloto e envio de teste.
-        numero,_,status=a['referencia'].partition(':')
-        return await pipeline.enviar_transacional(tenant,a['conversation_id'],a['texto'],{'numero':numero,'status':status})
-    import json
-    canal=await _canal_de_envio(db,tenant,a['conversation_id'])
-    if not canal: return 'simulado'
-    canal=dict(canal)
-    if isinstance(canal['credenciais_enc'],str): canal['credenciais_enc']=json.loads(canal['credenciais_enc'])
-    cfg=await pipeline.cfg.efetiva(tenant,canal['agente_id'])
-    if cfg['send_mode']!='live' or cfg['status']!='ativo': return 'simulado'
-    await uazapi.enviar(pipeline.http,pipeline.cofre,tenant,canal,a['destino'],a['texto'])
-    return 'enviado'
-
-
-async def despachar(pipeline,limite=20):
-    """Envia os avisos pendentes. Aviso preso em "enviando" (processo caiu no meio) não é reenviado."""
-    db=pipeline.db
-    await db.execute("UPDATE avisos_internos SET status='falhou',erro='envio_interrompido' WHERE status='enviando' AND criado_em<now()-interval '10 minutes'")
-    enviados=0
-    for linha in await db.fetch("SELECT id FROM avisos_internos WHERE status='pendente' ORDER BY id LIMIT $1",limite):
-        a=await db.fetchrow("UPDATE avisos_internos SET status='enviando',tentativas=tentativas+1 WHERE id=$1 AND status='pendente' RETURNING *",linha['id'])
-        if not a: continue
-        try:
-            final=await _enviar(pipeline,a)
-            await db.execute("UPDATE avisos_internos SET status=$2,erro=NULL,enviado_em=CASE WHEN $2 IN ('enviado','simulado') THEN now() END WHERE id=$1",a['id'],final)
-            enviados+=int(final=='enviado')
-        except Exception as erro:
-            # Falha antes de sair (ou recusa do provedor): tenta de novo até o limite. Sem detalhes do erro no log.
-            # Aviso ao cliente nunca é reenviado (poderia chegar duas vezes); os internos tentam de novo.
-            de_novo=a['tipo']!='pedido_cliente' and a['tentativas']<MAX_TENTATIVAS
-            await db.execute("UPDATE avisos_internos SET status=$2,erro=$3 WHERE id=$1",a['id'],'pendente' if de_novo else 'falhou',
-                             RECUSA_CERTA if getattr(erro,'certo',False) else type(erro).__name__)
-            log.warning('Aviso interno não enviado (%s)%s',type(erro).__name__,'' if de_novo else '; desistindo')
-    return enviados

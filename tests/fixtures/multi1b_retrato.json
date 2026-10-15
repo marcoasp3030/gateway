@@ -449,6 +449,11 @@
     "destino": null,
     "texto": "[anonimizado]",
     "tipo": "pedido_cliente"
+   },
+   {
+    "destino": "5511900000092",
+    "texto": "[anonimizado]",
+    "tipo": "transbordo"
    }
   ],
   "carrinhos": [
@@ -498,7 +503,7 @@
  "anuncio_falso": {
   "alertas": [
    {
-    "detalhe": "Empresa: bykoji · agente: bykoji_atendimento · turno 12 · conversa de final 0014\nO agente disse que fechou o pedido, mas fechar_pedido não teve sucesso. O cliente recebeu o pedido para confirmar de novo.",
+    "detalhe": "Empresa: bykoji · agente: bykoji_atendimento · turno 13 · conversa de final 0014\nO agente disse que fechou o pedido, mas fechar_pedido não teve sucesso. O cliente recebeu o pedido para confirmar de novo.",
     "nivel": "aviso",
     "titulo": "pedido anunciado sem fechar"
    }
@@ -4740,6 +4745,14 @@
    {
     "destino": "5511900000092",
     "erro": null,
+    "referencia": "bykoji:can_<id>:5511900000001@<agora-do-banco>",
+    "status": "simulado",
+    "texto": "⚠️ CONVERSA AGUARDANDO ATENDENTE\nCliente: (sem nome) — +55 11 90000-0001\nMotivo: transferência pedida pelo agente (pediu_humano)\nPedido: <numero> (confirmado)\nPainel: https://painel.luxbrain.com.br",
+    "tipo": "transbordo"
+   },
+   {
+    "destino": "5511900000092",
+    "erro": null,
     "referencia": "bykoji:can_<id>:55119000000012@<agora-do-banco>",
     "status": "simulado",
     "texto": "⚠️ CONVERSA AGUARDANDO ATENDENTE\nCliente: (sem nome) — +55119000000012\nMotivo: transferência pedida pelo agente (pediu_humano)\nPainel: https://painel.luxbrain.com.br",
@@ -4813,11 +4826,11 @@
      "direcao": "saida",
      "em": "<agora-do-banco>",
      "origem": "bot",
-     "texto": "Seu pedido foi confirmado pela unidade.",
+     "texto": "Seu pedido está confirmado.",
      "tipo": "texto"
     },
     "ultima_em": "<variavel>",
-    "ultima_mensagem": "Seu pedido foi confirmado pela unidade.",
+    "ultima_mensagem": "Seu pedido está confirmado.",
     "unidade_preferida": "patio_guedala",
     "unidade_preferida_nome": "Pátio Guedala"
    },
@@ -5154,6 +5167,53 @@
     "ultima_mensagem": "Estamos fechados agora; abrimos amanhã às 11h.",
     "unidade_preferida": null,
     "unidade_preferida_nome": null
+   },
+   {
+    "agente_id": "bykoji_atendimento",
+    "aguardando_atendente_desde": null,
+    "aguardando_motivo": null,
+    "atualizado_em": "<variavel>",
+    "bot_pausado_ate": null,
+    "canal": "api",
+    "canal_id": "can_<id>",
+    "canal_info": {
+     "icone": "code",
+     "id": "can_<id>",
+     "nome": "API",
+     "teste": true,
+     "tipo": "api"
+    },
+    "contato_id": "ct_<id>",
+    "conversation_id": "bykoji:can_<id>:55119000000019",
+    "desfecho": null,
+    "encerrada_em": null,
+    "estado": "bot",
+    "limitado_ate": null,
+    "nome": null,
+    "nome_exibicao": "+55119000000019",
+    "nome_origem": "telefone",
+    "nomes": {
+     "cadastro": null,
+     "informado": null,
+     "perfil": null
+    },
+    "pedido_aberto": null,
+    "solicitacao_aberta": null,
+    "status": "ativa",
+    "telefone": "55119000000019",
+    "telefone_e164": "+55119000000019",
+    "telefone_formatado": "+55119000000019",
+    "ultima": {
+     "direcao": "saida",
+     "em": "<agora-do-banco>",
+     "origem": "sistema",
+     "texto": "Oi! 😊 No momento a By Koji está fechada. Voltamos amanhã às 11h. Quando abrirmos, é só mandar uma mensagem por aqui que a gente te atende!",
+     "tipo": "texto"
+    },
+    "ultima_em": "<variavel>",
+    "ultima_mensagem": "Oi! 😊 No momento a By Koji está fechada. Voltamos amanhã às 11h. Quando abrirmos, é só mandar uma mensagem por aqui que a gente te atende!",
+    "unidade_preferida": null,
+    "unidade_preferida_nome": null
    }
   ],
   "metricas": {
@@ -5185,7 +5245,7 @@
     "mais_antiga_s": 0.0
    },
    "fora_do_horario": {
-    "avisos_enviados": 0,
+    "avisos_enviados": 1,
     "mensagens_sem_resposta": 0
    },
    "picotadas": {
@@ -5194,9 +5254,9 @@
     "espera_p95_ms": "<variavel>",
     "mensagens_por_turno": {
      "dois": 1,
-     "media": 1.07,
+     "media": 1.06,
      "tres_ou_mais": 0,
-     "um": 14
+     "um": 17
     },
     "refazer_recusado": {},
     "turnos_refeitos": 3
@@ -5221,13 +5281,13 @@
    "total_p95_ms": "<variavel>",
    "transbordo": {
     "transferencias": {
-     "dentro_do_horario": 3,
+     "dentro_do_horario": 4,
      "fora_do_horario": 0
     }
    },
    "transferencias_sem_recusa_mantidas": 1,
    "transferencias_sem_recusa_refeitas": 1,
-   "turnos": 18
+   "turnos": 21
   },
   "skill_registro": [
    {
@@ -5342,6 +5402,52 @@
     "status": 200
    }
   ],
+  "solicitacoes": {
+   "itens": [
+    {
+     "alerta": {
+      "em": "<agora-do-banco>",
+      "status": "simulado"
+     },
+     "atendido_por": null,
+     "atualizacoes": 0,
+     "atualizado_em": "<variavel>",
+     "cliente": {
+      "contato_id": "ct_<id>",
+      "nome": "+55119000000013",
+      "nome_origem": "telefone",
+      "telefone": "+55119000000013"
+     },
+     "concluido_em": null,
+     "conversa": {
+      "estado": "bot",
+      "pedido_aberto": null
+     },
+     "conversation_id": "bykoji:can_<id>:55119000000013",
+     "criado_em": "<variavel>",
+     "dados": {
+      "data": "sábado",
+      "local": null,
+      "observacao": null,
+      "pessoas": 50
+     },
+     "id": 1,
+     "motivo": "evento_ou_encomenda",
+     "motivo_informado": null,
+     "nota": null,
+     "numero": "S-0001",
+     "origem": "convertida",
+     "proximos_status": [
+      "em_andamento",
+      "concluida",
+      "cancelada"
+     ],
+     "status": "aberta",
+     "tipo": "evento"
+    }
+   ],
+   "proximo_cursor": null
+  },
   "unidade": {
    "itens": [
     {
@@ -6488,6 +6594,550 @@
    }
   ]
  },
+ "so_avisar_com_pedido": {
+  "alertas": [],
+  "avisos": [],
+  "conversa": {
+   "aguardando": false,
+   "aguardando_motivo": null,
+   "desfecho": null,
+   "pausada": null,
+   "unidade_preferida": null
+  },
+  "mensagens": [
+   {
+    "conteudo": "Seu pedido está confirmado.",
+    "direcao": "saida",
+    "meta": null,
+    "origem": "bot",
+    "parte": 1,
+    "tipo": "texto"
+   }
+  ],
+  "pacotes": [
+   {
+    "acoes_ja_executadas": [],
+    "acoes_recentes": [
+     {
+      "ha_segundos": "<variavel>",
+      "item": "Edamame",
+      "quantidade": 2,
+      "resultado": "ok",
+      "skill": "adicionar_item"
+     },
+     {
+      "detalhe": "horario, modalidade, unidade",
+      "ha_segundos": "<variavel>",
+      "item": null,
+      "quantidade": null,
+      "resultado": "ok",
+      "skill": "definir_entrega"
+     },
+     {
+      "detalhe": "pedido <numero>",
+      "ha_segundos": "<variavel>",
+      "item": null,
+      "quantidade": null,
+      "resultado": "ok",
+      "skill": "fechar_pedido"
+     }
+    ],
+    "agente": {
+     "modelo": {
+      "id": "atendente_delivery",
+      "nome": "Atendente delivery",
+      "versao": 1
+     },
+     "modulos": [
+      "catalogo",
+      "pedidos"
+     ],
+     "motivos_transferencia": [
+      {
+       "id": "pediu_humano",
+       "rotulo": "Cliente pediu atendente"
+      },
+      {
+       "id": "reclamacao",
+       "rotulo": "Reclamação"
+      },
+      {
+       "id": "pedido_para_confirmar",
+       "rotulo": "Pedido para confirmar"
+      },
+      {
+       "id": "pagamento",
+       "rotulo": "Pagamento"
+      },
+      {
+       "id": "restricao_alimentar",
+       "rotulo": "Restrição alimentar"
+      },
+      {
+       "id": "evento_ou_encomenda",
+       "rotulo": "Evento ou encomenda"
+      },
+      {
+       "id": "catering",
+       "rotulo": "Catering"
+      },
+      {
+       "id": "fora_do_escopo",
+       "rotulo": "Fora do escopo"
+      },
+      {
+       "id": "assunto_proibido",
+       "rotulo": "Assunto proibido"
+      }
+     ],
+     "segmento": "delivery",
+     "tipos_solicitacao": [
+      {
+       "id": "evento",
+       "rotulo": "Evento"
+      },
+      {
+       "id": "catering",
+       "rotulo": "Catering"
+      },
+      {
+       "id": "encomenda",
+       "rotulo": "Encomenda"
+      },
+      {
+       "id": "orcamento",
+       "rotulo": "Orçamento"
+      },
+      {
+       "id": "parceria",
+       "rotulo": "Parceria"
+      },
+      {
+       "id": "outro",
+       "rotulo": "Outro"
+      }
+     ]
+    },
+    "agente_id": "bykoji_atendimento",
+    "agora": "2030-11-05T23:30:00-03:00",
+    "aviso_do_gateway": null,
+    "calendario": {
+     "dias": [
+      {
+       "data": "2030-11-05",
+       "dia_semana": "terça-feira",
+       "feriado": null,
+       "observacao": null,
+       "rotulo": "hoje",
+       "tipo_feriado": null
+      },
+      {
+       "data": "2030-11-06",
+       "dia_semana": "quarta-feira",
+       "feriado": null,
+       "observacao": null,
+       "rotulo": "amanhã",
+       "tipo_feriado": null
+      },
+      {
+       "data": "2030-11-07",
+       "dia_semana": "quinta-feira",
+       "feriado": null,
+       "observacao": null,
+       "rotulo": null,
+       "tipo_feriado": null
+      },
+      {
+       "data": "2030-11-08",
+       "dia_semana": "sexta-feira",
+       "feriado": null,
+       "observacao": null,
+       "rotulo": null,
+       "tipo_feriado": null
+      },
+      {
+       "data": "2030-11-09",
+       "dia_semana": "sábado",
+       "feriado": null,
+       "observacao": null,
+       "rotulo": null,
+       "tipo_feriado": null
+      },
+      {
+       "data": "2030-11-10",
+       "dia_semana": "domingo",
+       "feriado": null,
+       "observacao": null,
+       "rotulo": null,
+       "tipo_feriado": null
+      },
+      {
+       "data": "2030-11-11",
+       "dia_semana": "segunda-feira",
+       "feriado": null,
+       "observacao": null,
+       "rotulo": null,
+       "tipo_feriado": null
+      },
+      {
+       "data": "2030-11-12",
+       "dia_semana": "terça-feira",
+       "feriado": null,
+       "observacao": null,
+       "rotulo": null,
+       "tipo_feriado": null
+      }
+     ],
+     "fuso": "America/Sao_Paulo"
+    },
+    "canal": {
+     "id": "can_<id>",
+     "publico": "clientes",
+     "tipo": "api"
+    },
+    "cliente": {
+     "nome": null,
+     "nome_origem": null,
+     "resumo_anterior": null,
+     "unidade_preferida": null
+    },
+    "contexto_modulos": {
+     "catalogo": {
+      "itens_ativos": 7
+     },
+     "pedidos": {
+      "carrinho": {
+       "agendado_para": null,
+       "atualizado_em": null,
+       "conversation_id": "bykoji:can_<id>:5511900000001",
+       "endereco": null,
+       "faltando": [
+        "itens",
+        "modalidade"
+       ],
+       "horario": null,
+       "horario_aviso": null,
+       "horario_vencido": false,
+       "itens": [],
+       "itens_indisponiveis": [],
+       "maioridade_confirmada": false,
+       "modalidade": null,
+       "numero_itens": 0,
+       "observacao": null,
+       "pedido_minimo": null,
+       "pode_fechar": false,
+       "subtotal": null,
+       "taxa_entrega": null,
+       "tem_alcoolico": false,
+       "total": null,
+       "unidade": null
+      },
+      "carrinho_expirado": false,
+      "itens_expirados": [],
+      "ultimo_pedido": {
+       "atualizado_em": "<variavel>",
+       "criado_em": "<variavel>",
+       "numero": "<numero>",
+       "status": "confirmado",
+       "status_descricao": "Confirmado pela unidade",
+       "total": 68.0
+      },
+      "ultimos_pedidos": [
+       {
+        "atualizado_em": "<variavel>",
+        "numero": "<numero>",
+        "status": "confirmado",
+        "status_descricao": "Confirmado pela unidade",
+        "total": 68.0,
+        "unidade": "patio_guedala"
+       }
+      ]
+     },
+     "solicitacoes": []
+    },
+    "conversation_id": "bykoji:can_<id>:5511900000001",
+    "equipe_disponivel": false,
+    "fora_do_horario": true,
+    "historico": [
+     {
+      "content": "oi",
+      "enviada_em": "<variavel>",
+      "role": "user"
+     },
+     {
+      "content": "Olá! Bem-vindo à By Koji 🍣 Quer ver o cardápio?\n\n1. Ver cardápio",
+      "enviada_em": "<variavel>",
+      "role": "assistant"
+     },
+     {
+      "content": "quero ver o cardápio",
+      "enviada_em": "<variavel>",
+      "role": "user"
+     },
+     {
+      "content": "Temos entradas, pratos quentes e mais. O Edamame sai por R$ 34,00.",
+      "enviada_em": "<variavel>",
+      "role": "assistant"
+     },
+     {
+      "content": "quero 2 edamame",
+      "enviada_em": "<variavel>",
+      "role": "user"
+     },
+     {
+      "content": "Anotei 2 Edamame. Mais alguma coisa?",
+      "enviada_em": "<variavel>",
+      "role": "assistant"
+     },
+     {
+      "content": "retiro às 14h, qual o total?",
+      "enviada_em": "<variavel>",
+      "role": "user"
+     },
+     {
+      "content": "Total R$ 68,00, retirada às 14h no Pátio Guedala. Posso fechar?\n\n1. Confirmar pedido",
+      "enviada_em": "<variavel>",
+      "role": "assistant"
+     },
+     {
+      "content": "pode fechar",
+      "enviada_em": "<variavel>",
+      "role": "user"
+     },
+     {
+      "content": "Pedido feito! Número {numero}.",
+      "enviada_em": "<variavel>",
+      "role": "assistant"
+     },
+     {
+      "content": "Oba! Seu pedido nº <numero> foi confirmado pela unidade Pátio Guedala ✅",
+      "enviada_em": "<variavel>",
+      "role": "assistant"
+     },
+     {
+      "content": "e meu pedido?",
+      "enviada_em": "<variavel>",
+      "role": "user"
+     },
+     {
+      "content": "Seu pedido foi confirmado pela unidade.",
+      "enviada_em": "<variavel>",
+      "role": "assistant"
+     },
+     {
+      "content": "quero falar com alguém sobre o pedido",
+      "enviada_em": "<variavel>",
+      "role": "user"
+     },
+     {
+      "content": "Vou chamar a equipe.",
+      "enviada_em": "<variavel>",
+      "role": "assistant"
+     }
+    ],
+    "instrucoes_agente": "",
+    "mensagens_do_lote": [
+     {
+      "enviada_em": "<variavel>",
+      "texto": "e o meu pedido?",
+      "tipo": "texto"
+     }
+    ],
+    "message": "e o meu pedido?",
+    "modelo_id": "atendente_delivery",
+    "modo_resposta": "sync",
+    "perfil_atendimento": {
+     "apresentacao_inicial": true,
+     "assuntos_proibidos": [],
+     "descricao_negocio": "",
+     "emojis": "moderado",
+     "mensagem_boas_vindas": null,
+     "mensagem_despedida": null,
+     "motivos_transferencia": [
+      "pediu_humano",
+      "reclamacao",
+      "pedido_para_confirmar",
+      "pagamento",
+      "restricao_alimentar",
+      "evento_ou_encomenda",
+      "catering",
+      "fora_do_escopo",
+      "assunto_proibido"
+     ],
+     "nome_atendente": null,
+     "nome_empresa": "By Koji",
+     "pedir_nome": false,
+     "regras_da_casa": "",
+     "sugestoes": "leve",
+     "tamanho_respostas": "curtas",
+     "tom": "equilibrado",
+     "tratamento": "voce"
+    },
+    "perfil_versao": "e0.a2",
+    "proxima_abertura": {
+     "codigo": "patio_guedala",
+     "data": "2030-11-06",
+     "dia_semana": "quarta-feira",
+     "hora": "11:00",
+     "unidade": "Pátio Guedala"
+    },
+    "recursos": {
+     "botoes": false,
+     "emojis_de_reacao": [],
+     "lista": false,
+     "notificar_equipe": true,
+     "reacoes": false
+    },
+    "request_id": "<variavel>",
+    "retomada": "<variavel>",
+    "retorno_equipe": {
+     "data": "2030-11-06",
+     "dia_semana": "quarta-feira",
+     "hora": "11:00"
+    },
+    "session_id": "<variavel>",
+    "tarefa": "responder",
+    "tempo_desde_ultima": "<variavel>",
+    "tenant_id": "bykoji",
+    "ultima_interacao": null,
+    "unidades": [
+     {
+      "aberta_agora": false,
+      "aceita_retirada": null,
+      "area_entrega": null,
+      "codigo": "patio_guedala",
+      "endereco": null,
+      "fecha_as": null,
+      "formas_pagamento": null,
+      "horarios": {
+       "dom": [
+        [
+         "11:00",
+         "23:00"
+        ]
+       ],
+       "qua": [
+        [
+         "11:00",
+         "23:00"
+        ]
+       ],
+       "qui": [
+        [
+         "11:00",
+         "23:00"
+        ]
+       ],
+       "sab": [
+        [
+         "11:00",
+         "23:00"
+        ]
+       ],
+       "seg": [
+        [
+         "11:00",
+         "23:00"
+        ]
+       ],
+       "sex": [
+        [
+         "11:00",
+         "23:00"
+        ]
+       ],
+       "ter": [
+        [
+         "11:00",
+         "23:00"
+        ]
+       ]
+      },
+      "id": "uni_<id>",
+      "itens_no_cardapio": 4,
+      "motivo_fechada": "horario",
+      "nome": "Pátio Guedala",
+      "pausa_motivo": null,
+      "pausada_ate": null,
+      "pedido_minimo": null,
+      "proxima_abertura": "2030-11-06T11:00-03:00",
+      "regras": null,
+      "taxa_entrega": null,
+      "telefone": null,
+      "tem_cardapio": true
+     }
+    ]
+   }
+  ],
+  "skills": [],
+  "turnos": [
+   {
+    "acao": "nenhuma",
+    "anuncio_falso": null,
+    "aviso_demora": false,
+    "desfecho": null,
+    "equipe_fora_do_horario": null,
+    "motivo_silencio": null,
+    "origem": "cliente",
+    "refazer_recusado": null,
+    "resposta": {
+     "acao": "nenhuma",
+     "resposta": [
+      "Seu pedido está confirmado."
+     ]
+    },
+    "status": "ok",
+    "transferencia_sem_recusa": null
+   }
+  ]
+ },
+ "so_avisar_sem_pedido": {
+  "alertas": [],
+  "avisos": [],
+  "conversa": {
+   "aguardando": false,
+   "aguardando_motivo": null,
+   "desfecho": null,
+   "pausada": null,
+   "unidade_preferida": null
+  },
+  "mensagens": [
+   {
+    "conteudo": "Oi! 😊 No momento a By Koji está fechada. Voltamos amanhã às 11h. Quando abrirmos, é só mandar uma mensagem por aqui que a gente te atende!",
+    "direcao": "saida",
+    "meta": {
+     "fora_do_horario": {
+      "ate": "2030-11-06T11:00-03:00"
+     }
+    },
+    "origem": "sistema",
+    "parte": null,
+    "tipo": "texto"
+   }
+  ],
+  "pacotes": [],
+  "skills": [],
+  "turnos": [
+   {
+    "acao": "silencio",
+    "anuncio_falso": null,
+    "aviso_demora": false,
+    "desfecho": null,
+    "equipe_fora_do_horario": null,
+    "motivo_silencio": "fora_do_horario",
+    "origem": "cliente",
+    "refazer_recusado": null,
+    "resposta": {
+     "acao": "silencio",
+     "fora_do_horario": "avisado",
+     "motivo": "fora_do_horario",
+     "resposta": []
+    },
+    "status": "ok",
+    "transferencia_sem_recusa": null
+   }
+  ]
+ },
  "transferencia": {
   "alertas": [],
   "avisos": [
@@ -6862,6 +7512,493 @@
      "motivo": "pediu_humano",
      "resposta": [
       "Claro, vou chamar um atendente."
+     ]
+    },
+    "status": "ok",
+    "transferencia_sem_recusa": null
+   }
+  ]
+ },
+ "transferencia_com_pedido": {
+  "alertas": [],
+  "avisos": [
+   {
+    "destino": "5511900000092",
+    "erro": null,
+    "referencia": "bykoji:can_<id>:5511900000001@<agora-do-banco>",
+    "status": "pendente",
+    "texto": "⚠️ CONVERSA AGUARDANDO ATENDENTE\nCliente: (sem nome) — +55 11 90000-0001\nMotivo: transferência pedida pelo agente (pediu_humano)\nPedido: <numero> (confirmado)\nPainel: https://painel.luxbrain.com.br",
+    "tipo": "transbordo"
+   }
+  ],
+  "conversa": {
+   "aguardando": true,
+   "aguardando_motivo": "transferido_pelo_agente",
+   "desfecho": null,
+   "pausada": true,
+   "unidade_preferida": null
+  },
+  "mensagens": [
+   {
+    "conteudo": "Vou chamar a equipe.",
+    "direcao": "saida",
+    "meta": null,
+    "origem": "bot",
+    "parte": 1,
+    "tipo": "texto"
+   }
+  ],
+  "pacotes": [
+   {
+    "acoes_ja_executadas": [],
+    "acoes_recentes": [
+     {
+      "ha_segundos": "<variavel>",
+      "item": "Edamame",
+      "quantidade": 2,
+      "resultado": "ok",
+      "skill": "adicionar_item"
+     },
+     {
+      "detalhe": "horario, modalidade, unidade",
+      "ha_segundos": "<variavel>",
+      "item": null,
+      "quantidade": null,
+      "resultado": "ok",
+      "skill": "definir_entrega"
+     },
+     {
+      "detalhe": "pedido <numero>",
+      "ha_segundos": "<variavel>",
+      "item": null,
+      "quantidade": null,
+      "resultado": "ok",
+      "skill": "fechar_pedido"
+     }
+    ],
+    "agente": {
+     "modelo": {
+      "id": "atendente_delivery",
+      "nome": "Atendente delivery",
+      "versao": 1
+     },
+     "modulos": [
+      "catalogo",
+      "pedidos"
+     ],
+     "motivos_transferencia": [
+      {
+       "id": "pediu_humano",
+       "rotulo": "Cliente pediu atendente"
+      },
+      {
+       "id": "reclamacao",
+       "rotulo": "Reclamação"
+      },
+      {
+       "id": "pedido_para_confirmar",
+       "rotulo": "Pedido para confirmar"
+      },
+      {
+       "id": "pagamento",
+       "rotulo": "Pagamento"
+      },
+      {
+       "id": "restricao_alimentar",
+       "rotulo": "Restrição alimentar"
+      },
+      {
+       "id": "evento_ou_encomenda",
+       "rotulo": "Evento ou encomenda"
+      },
+      {
+       "id": "catering",
+       "rotulo": "Catering"
+      },
+      {
+       "id": "fora_do_escopo",
+       "rotulo": "Fora do escopo"
+      },
+      {
+       "id": "assunto_proibido",
+       "rotulo": "Assunto proibido"
+      }
+     ],
+     "segmento": "delivery",
+     "tipos_solicitacao": [
+      {
+       "id": "evento",
+       "rotulo": "Evento"
+      },
+      {
+       "id": "catering",
+       "rotulo": "Catering"
+      },
+      {
+       "id": "encomenda",
+       "rotulo": "Encomenda"
+      },
+      {
+       "id": "orcamento",
+       "rotulo": "Orçamento"
+      },
+      {
+       "id": "parceria",
+       "rotulo": "Parceria"
+      },
+      {
+       "id": "outro",
+       "rotulo": "Outro"
+      }
+     ]
+    },
+    "agente_id": "bykoji_atendimento",
+    "agora": "2030-11-05T13:00:00-03:00",
+    "aviso_do_gateway": null,
+    "calendario": {
+     "dias": [
+      {
+       "data": "2030-11-05",
+       "dia_semana": "terça-feira",
+       "feriado": null,
+       "observacao": null,
+       "rotulo": "hoje",
+       "tipo_feriado": null
+      },
+      {
+       "data": "2030-11-06",
+       "dia_semana": "quarta-feira",
+       "feriado": null,
+       "observacao": null,
+       "rotulo": "amanhã",
+       "tipo_feriado": null
+      },
+      {
+       "data": "2030-11-07",
+       "dia_semana": "quinta-feira",
+       "feriado": null,
+       "observacao": null,
+       "rotulo": null,
+       "tipo_feriado": null
+      },
+      {
+       "data": "2030-11-08",
+       "dia_semana": "sexta-feira",
+       "feriado": null,
+       "observacao": null,
+       "rotulo": null,
+       "tipo_feriado": null
+      },
+      {
+       "data": "2030-11-09",
+       "dia_semana": "sábado",
+       "feriado": null,
+       "observacao": null,
+       "rotulo": null,
+       "tipo_feriado": null
+      },
+      {
+       "data": "2030-11-10",
+       "dia_semana": "domingo",
+       "feriado": null,
+       "observacao": null,
+       "rotulo": null,
+       "tipo_feriado": null
+      },
+      {
+       "data": "2030-11-11",
+       "dia_semana": "segunda-feira",
+       "feriado": null,
+       "observacao": null,
+       "rotulo": null,
+       "tipo_feriado": null
+      },
+      {
+       "data": "2030-11-12",
+       "dia_semana": "terça-feira",
+       "feriado": null,
+       "observacao": null,
+       "rotulo": null,
+       "tipo_feriado": null
+      }
+     ],
+     "fuso": "America/Sao_Paulo"
+    },
+    "canal": {
+     "id": "can_<id>",
+     "publico": "clientes",
+     "tipo": "api"
+    },
+    "cliente": {
+     "nome": null,
+     "nome_origem": null,
+     "resumo_anterior": null,
+     "unidade_preferida": null
+    },
+    "contexto_modulos": {
+     "catalogo": {
+      "itens_ativos": 7
+     },
+     "pedidos": {
+      "carrinho": {
+       "agendado_para": null,
+       "atualizado_em": null,
+       "conversation_id": "bykoji:can_<id>:5511900000001",
+       "endereco": null,
+       "faltando": [
+        "itens",
+        "modalidade"
+       ],
+       "horario": null,
+       "horario_aviso": null,
+       "horario_vencido": false,
+       "itens": [],
+       "itens_indisponiveis": [],
+       "maioridade_confirmada": false,
+       "modalidade": null,
+       "numero_itens": 0,
+       "observacao": null,
+       "pedido_minimo": null,
+       "pode_fechar": false,
+       "subtotal": null,
+       "taxa_entrega": null,
+       "tem_alcoolico": false,
+       "total": null,
+       "unidade": null
+      },
+      "carrinho_expirado": false,
+      "itens_expirados": [],
+      "ultimo_pedido": {
+       "atualizado_em": "<variavel>",
+       "criado_em": "<variavel>",
+       "numero": "<numero>",
+       "status": "confirmado",
+       "status_descricao": "Confirmado pela unidade",
+       "total": 68.0
+      },
+      "ultimos_pedidos": [
+       {
+        "atualizado_em": "<variavel>",
+        "numero": "<numero>",
+        "status": "confirmado",
+        "status_descricao": "Confirmado pela unidade",
+        "total": 68.0,
+        "unidade": "patio_guedala"
+       }
+      ]
+     },
+     "solicitacoes": []
+    },
+    "conversation_id": "bykoji:can_<id>:5511900000001",
+    "equipe_disponivel": true,
+    "fora_do_horario": false,
+    "historico": [
+     {
+      "content": "oi",
+      "enviada_em": "<variavel>",
+      "role": "user"
+     },
+     {
+      "content": "Olá! Bem-vindo à By Koji 🍣 Quer ver o cardápio?\n\n1. Ver cardápio",
+      "enviada_em": "<variavel>",
+      "role": "assistant"
+     },
+     {
+      "content": "quero ver o cardápio",
+      "enviada_em": "<variavel>",
+      "role": "user"
+     },
+     {
+      "content": "Temos entradas, pratos quentes e mais. O Edamame sai por R$ 34,00.",
+      "enviada_em": "<variavel>",
+      "role": "assistant"
+     },
+     {
+      "content": "quero 2 edamame",
+      "enviada_em": "<variavel>",
+      "role": "user"
+     },
+     {
+      "content": "Anotei 2 Edamame. Mais alguma coisa?",
+      "enviada_em": "<variavel>",
+      "role": "assistant"
+     },
+     {
+      "content": "retiro às 14h, qual o total?",
+      "enviada_em": "<variavel>",
+      "role": "user"
+     },
+     {
+      "content": "Total R$ 68,00, retirada às 14h no Pátio Guedala. Posso fechar?\n\n1. Confirmar pedido",
+      "enviada_em": "<variavel>",
+      "role": "assistant"
+     },
+     {
+      "content": "pode fechar",
+      "enviada_em": "<variavel>",
+      "role": "user"
+     },
+     {
+      "content": "Pedido feito! Número {numero}.",
+      "enviada_em": "<variavel>",
+      "role": "assistant"
+     },
+     {
+      "content": "Oba! Seu pedido nº <numero> foi confirmado pela unidade Pátio Guedala ✅",
+      "enviada_em": "<variavel>",
+      "role": "assistant"
+     },
+     {
+      "content": "e meu pedido?",
+      "enviada_em": "<variavel>",
+      "role": "user"
+     },
+     {
+      "content": "Seu pedido foi confirmado pela unidade.",
+      "enviada_em": "<variavel>",
+      "role": "assistant"
+     }
+    ],
+    "instrucoes_agente": "",
+    "mensagens_do_lote": [
+     {
+      "enviada_em": "<variavel>",
+      "texto": "quero falar com alguém sobre o pedido",
+      "tipo": "texto"
+     }
+    ],
+    "message": "quero falar com alguém sobre o pedido",
+    "modelo_id": "atendente_delivery",
+    "modo_resposta": "sync",
+    "perfil_atendimento": {
+     "apresentacao_inicial": true,
+     "assuntos_proibidos": [],
+     "descricao_negocio": "",
+     "emojis": "moderado",
+     "mensagem_boas_vindas": null,
+     "mensagem_despedida": null,
+     "motivos_transferencia": [
+      "pediu_humano",
+      "reclamacao",
+      "pedido_para_confirmar",
+      "pagamento",
+      "restricao_alimentar",
+      "evento_ou_encomenda",
+      "catering",
+      "fora_do_escopo",
+      "assunto_proibido"
+     ],
+     "nome_atendente": null,
+     "nome_empresa": "By Koji",
+     "pedir_nome": false,
+     "regras_da_casa": "",
+     "sugestoes": "leve",
+     "tamanho_respostas": "curtas",
+     "tom": "equilibrado",
+     "tratamento": "voce"
+    },
+    "perfil_versao": "e0.a1",
+    "proxima_abertura": null,
+    "recursos": {
+     "botoes": false,
+     "emojis_de_reacao": [],
+     "lista": false,
+     "notificar_equipe": true,
+     "reacoes": false
+    },
+    "request_id": "<variavel>",
+    "retomada": "<variavel>",
+    "retorno_equipe": null,
+    "session_id": "<variavel>",
+    "tarefa": "responder",
+    "tempo_desde_ultima": "<variavel>",
+    "tenant_id": "bykoji",
+    "ultima_interacao": null,
+    "unidades": [
+     {
+      "aberta_agora": true,
+      "aceita_retirada": null,
+      "area_entrega": null,
+      "codigo": "patio_guedala",
+      "endereco": null,
+      "fecha_as": "2030-11-05T23:00-03:00",
+      "formas_pagamento": null,
+      "horarios": {
+       "dom": [
+        [
+         "11:00",
+         "23:00"
+        ]
+       ],
+       "qua": [
+        [
+         "11:00",
+         "23:00"
+        ]
+       ],
+       "qui": [
+        [
+         "11:00",
+         "23:00"
+        ]
+       ],
+       "sab": [
+        [
+         "11:00",
+         "23:00"
+        ]
+       ],
+       "seg": [
+        [
+         "11:00",
+         "23:00"
+        ]
+       ],
+       "sex": [
+        [
+         "11:00",
+         "23:00"
+        ]
+       ],
+       "ter": [
+        [
+         "11:00",
+         "23:00"
+        ]
+       ]
+      },
+      "id": "uni_<id>",
+      "itens_no_cardapio": 4,
+      "motivo_fechada": null,
+      "nome": "Pátio Guedala",
+      "pausa_motivo": null,
+      "pausada_ate": null,
+      "pedido_minimo": null,
+      "proxima_abertura": null,
+      "regras": null,
+      "taxa_entrega": null,
+      "telefone": null,
+      "tem_cardapio": true
+     }
+    ]
+   }
+  ],
+  "skills": [],
+  "turnos": [
+   {
+    "acao": "transferir_humano",
+    "anuncio_falso": null,
+    "aviso_demora": false,
+    "desfecho": null,
+    "equipe_fora_do_horario": false,
+    "motivo_silencio": null,
+    "origem": "cliente",
+    "refazer_recusado": null,
+    "resposta": {
+     "acao": "transferir_humano",
+     "motivo": "pediu_humano",
+     "resposta": [
+      "Vou chamar a equipe."
      ]
     },
     "status": "ok",
@@ -7294,7 +8431,7 @@
  "transferencia_sem_recusa": {
   "alertas": [
    {
-    "detalhe": "Empresa: bykoji · agente: bykoji_atendimento · turno 14 · conversa de final 0015\nO agente transferiu por \"pedido para confirmar\" sem nenhuma Skill ter recusado nada, mesmo depois de refazer o turno.",
+    "detalhe": "Empresa: bykoji · agente: bykoji_atendimento · turno 15 · conversa de final 0015\nO agente transferiu por \"pedido para confirmar\" sem nenhuma Skill ter recusado nada, mesmo depois de refazer o turno.",
     "nivel": "aviso",
     "titulo": "transferência sem tentativa"
    }

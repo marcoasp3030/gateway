@@ -1,5 +1,6 @@
 """Registro explícito de capacidades. Cada módulo possui contrato próprio."""
-from dataclasses import dataclass
+import importlib
+from dataclasses import dataclass,field
 from fastapi import HTTPException
 from nucleo.banco import escopo
 
@@ -14,10 +15,31 @@ class Modulo:
     # Motivos de transferência e tipos de solicitação próprios ({"id","rotulo"}), que somam aos do núcleo e do modelo.
     motivos_transferencia: tuple = ()
     tipos_solicitacao: tuple = ()
-    # Comportamentos que só existem para agente (ou empresa) com o módulo.
-    comportamentos: tuple = ()
+    # Comportamentos que só existem para agente (ou empresa) com o módulo:
+    # {campo: (grupo, tipo, mínimo, máximo, opções, disponível, padrão)} — mesmo formato de nucleo.atendimento.COMPORTAMENTOS + o padrão.
+    comportamentos: dict = field(default_factory=dict)
     # Telas do painel que dependem do módulo (identificadores para o menu).
     telas: tuple = ()
+    # MULTI1-b: o núcleo lê daqui o que antes era fixo nele.
+    # Skills: {(método, rota): nome} para o registro de chamadas; as que têm efeito para fora não deixam refazer o turno.
+    skills: dict = field(default_factory=dict)
+    skills_com_efeito: tuple = ()
+    # Ações que o agente pode devolver além das do núcleo; as com efeito para fora não deixam refazer; as que aceitam botões.
+    acoes: tuple = ()
+    acoes_com_efeito: tuple = ()
+    acoes_com_botao: tuple = ()
+    # Motivos de transferência que só valem depois de uma Skill ter recusado algo no turno (guarda "transferência sem recusa").
+    motivos_com_recusa: tuple = ()
+    # Campos da unidade que vão ao agente no pacote (só para agente com o módulo).
+    campos_da_unidade: tuple = ()
+    # Módulo com as funções-gancho (importado só quando usado): antes_do_turno, numero_interno, em_andamento, acoes_do_turno,
+    # acoes_recentes, guarda_da_resposta, resumo_para_alerta, resumo_das_conversas, anonimizar, metricas, enviar_aviso, unidades_no_pacote.
+    ganchos: str | None = None
+
+    def gancho(self,nome):
+        """A função-gancho `nome` do módulo, ou None se ele não declara."""
+        if not self.ganchos: return None
+        return getattr(importlib.import_module(self.ganchos),nome,None)
 
 async def vazio(repo, tenant, conversa):
     escopo(tenant)
@@ -35,27 +57,60 @@ async def pedidos_contexto(repo, tenant, conversa):
 
 REGISTRO={
  'catalogo':Modulo('catalogo',('006_catalogo.sql','021_catalogo_pedidos.sql'),('/api/v1/catalogo/busca',),('ferramentas:catalogo',),catalogo_contexto,
-                   telas=('cardapio',)),
+                   telas=('cardapio',),skills={('GET','/api/v1/catalogo/busca'):'buscar_catalogo'},ganchos='modulos.catalogo.ganchos'),
  'pedidos':Modulo('pedidos',('021_catalogo_pedidos.sql','022_pedidos_dados.sql'),('/api/v1/carrinho/{conversation_id}','/api/v1/pedidos'),('ferramentas:pedidos',),pedidos_contexto,
                   motivos_transferencia=({'id':'pedido_para_confirmar','rotulo':'Pedido para confirmar'},),
-                  comportamentos=('carrinho_expira_h','acoes_recentes_min'),telas=('pedidos','avisos_de_pedido')),
+                  comportamentos={
+                      # UX3.1: acoes_recentes do pacote = chamadas de Skill da conversa nos últimos N minutos (0 = lista vazia).
+                      'acoes_recentes_min':('ritmo','inteiro',0,1440,None,True,15),
+                      # UX3: carrinho sem alteração há mais de N horas é arquivado na próxima mensagem do cliente.
+                      'carrinho_expira_h':('pedidos','inteiro',1,720,None,True,6)},
+                  telas=('pedidos','avisos_de_pedido'),
+                  skills={('GET','/api/v1/carrinho/{conversation_id}'):'ver_carrinho',
+                          ('POST','/api/v1/carrinho/{conversation_id}/itens'):'adicionar_item',
+                          ('PATCH','/api/v1/carrinho/{conversation_id}/itens/{linha_id}'):'alterar_item',
+                          ('DELETE','/api/v1/carrinho/{conversation_id}/itens/{linha_id}'):'remover_item',
+                          ('DELETE','/api/v1/carrinho/{conversation_id}'):'esvaziar_carrinho',
+                          ('PUT','/api/v1/carrinho/{conversation_id}/entrega'):'definir_entrega',
+                          ('POST','/api/v1/pedidos'):'fechar_pedido',
+                          ('GET','/api/v1/pedidos'):'consultar_pedido',
+                          ('GET','/api/v1/pedidos/{numero}'):'consultar_pedido',
+                          ('POST','/api/v1/pedidos/{numero}/cancelar'):'cancelar_pedido'},
+                  skills_com_efeito=('fechar_pedido','cancelar_pedido'),
+                  acoes=('pedido_fechado',),acoes_com_efeito=('pedido_fechado',),acoes_com_botao=('pedido_fechado',),
+                  motivos_com_recusa=('pedido_para_confirmar',),
+                  campos_da_unidade=('formas_pagamento','taxa_entrega','pedido_minimo','area_entrega','aceita_retirada'),
+                  ganchos='modulos.pedidos.ganchos'),
 }
 
 # Camada do núcleo: valem para todo agente, qualquer que seja o modelo e os módulos.
 MOTIVOS_NUCLEO=({'id':'pediu_humano','rotulo':'Cliente pediu atendente'},{'id':'reclamacao','rotulo':'Reclamação'})
 TIPOS_NUCLEO=({'id':'outro','rotulo':'Outro'},)
-# Ordem em que os motivos de hoje aparecem no perfil (mantém o pacote do By Koji igual). Os novos vêm depois, na ordem declarada.
-ORDEM_MOTIVOS=('pediu_humano','reclamacao','pedido_para_confirmar','pagamento','restricao_alimentar','evento_ou_encomenda','catering','fora_do_escopo','assunto_proibido')
-ORDEM_TIPOS=('evento','catering','encomenda','orcamento','parceria','outro')
 COMPORTAMENTOS_DE_MODULO={c:nome for nome,m in REGISTRO.items() for c in m.comportamentos}
 
 
-def _em_ordem(itens,ordem):
-    """Sem repetição (o primeiro vale) e na ordem de referência; o que não está nela vem depois, na ordem em que veio."""
+def declarados(atributo,modulos=None):
+    """Tudo o que os módulos declaram num atributo de tupla, sem repetir, na ordem do registro. `modulos` = só estes."""
+    saida=[]
+    for nome,m in REGISTRO.items():
+        if modulos is not None and nome not in modulos: continue
+        for x in getattr(m,atributo):
+            if x not in saida: saida.append(x)
+    return tuple(saida)
+
+
+def ganchos(nome,modulos=None):
+    """[(módulo, função)] dos módulos que declaram o gancho `nome`. Sem `modulos`: todos os do registro
+    (ganchos que só olham dados do próprio módulo: sem dado, não há efeito)."""
+    return [(m,f) for m,mod in REGISTRO.items() if (modulos is None or m in modulos) for f in [mod.gancho(nome)] if f]
+
+
+def _em_ordem(itens):
+    """Sem repetição (o primeiro vale), na ordem em que vieram."""
     vistos={}
     for item in itens:
         if isinstance(item,dict) and item.get('id') and item['id'] not in vistos: vistos[item['id']]=dict(item)
-    return sorted(vistos.values(),key=lambda i:(ordem.index(i['id']) if i['id'] in ordem else len(ordem)+list(vistos).index(i['id'])))
+    return list(vistos.values())
 
 
 def modulos_efetivos(modelo,ligados_no_agente,chaves_da_empresa):
@@ -70,17 +125,17 @@ def modulos_efetivos(modelo,ligados_no_agente,chaves_da_empresa):
 
 
 def motivos_efetivos(modelo,modulos):
-    """Motivos de transferência de um agente: núcleo + modelo + módulos ligados, com rótulo."""
-    itens=list(MOTIVOS_NUCLEO)+list(modelo.get('motivos_transferencia') or [])
+    """Motivos de transferência de um agente, com rótulo: os do núcleo, depois os dos módulos ligados, depois os do modelo."""
+    itens=list(MOTIVOS_NUCLEO)
     for m in modulos: itens+=list(REGISTRO[m].motivos_transferencia)
-    return _em_ordem(itens,ORDEM_MOTIVOS)
+    return _em_ordem(itens+list(modelo.get('motivos_transferencia') or []))
 
 
 def tipos_efetivos(modelo,modulos):
-    """Tipos de solicitação à equipe de um agente: núcleo + modelo + módulos ligados, com rótulo."""
-    itens=list(modelo.get('tipos_solicitacao') or [])+list(TIPOS_NUCLEO)
+    """Tipos de solicitação à equipe de um agente, com rótulo: os do modelo, depois os dos módulos ligados, e "outro" por último."""
+    itens=list(modelo.get('tipos_solicitacao') or [])
     for m in modulos: itens+=list(REGISTRO[m].tipos_solicitacao)
-    return [{'id':i['id'],'rotulo':i['rotulo']} for i in _em_ordem(itens,ORDEM_TIPOS)]
+    return [{'id':i['id'],'rotulo':i['rotulo']} for i in _em_ordem(itens+list(TIPOS_NUCLEO))]
 
 
 async def chaves_da_empresa(db,tenant):

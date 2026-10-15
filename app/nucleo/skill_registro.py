@@ -10,20 +10,10 @@ from urllib.parse import parse_qsl
 
 log=logging.getLogger('gateway.skills')
 MAX_LIDO=65536
-SKILLS={
- ('GET','/api/v1/catalogo/busca'):'buscar_catalogo',
- ('GET','/api/v1/unidades'):'info_unidades',
- ('GET','/api/v1/carrinho/{conversation_id}'):'ver_carrinho',
- ('POST','/api/v1/carrinho/{conversation_id}/itens'):'adicionar_item',
- ('PATCH','/api/v1/carrinho/{conversation_id}/itens/{linha_id}'):'alterar_item',
- ('DELETE','/api/v1/carrinho/{conversation_id}/itens/{linha_id}'):'remover_item',
- ('DELETE','/api/v1/carrinho/{conversation_id}'):'esvaziar_carrinho',
- ('PUT','/api/v1/carrinho/{conversation_id}/entrega'):'definir_entrega',
- ('POST','/api/v1/pedidos'):'fechar_pedido',
- ('GET','/api/v1/pedidos'):'consultar_pedido',
- ('GET','/api/v1/pedidos/{numero}'):'consultar_pedido',
- ('POST','/api/v1/pedidos/{numero}/cancelar'):'cancelar_pedido',
-}
+# Skills do núcleo; as dos módulos vêm das declarações deles (modulos.REGISTRO[...].skills).
+SKILLS={('GET','/api/v1/unidades'):'info_unidades'}
+from modulos import REGISTRO as _MODULOS
+for _m in _MODULOS.values(): SKILLS.update(_m.skills)
 
 
 def _json(bruto):

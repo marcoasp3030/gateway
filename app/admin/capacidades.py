@@ -145,7 +145,8 @@ async def gravar_modelo(request,dados,actor,identidade=None,tenant=None):
         validar(Comportamento,final['comportamento_padrao'])
         if final.get('perfil_padrao') is not None:
             from nucleo.atendimento import validar_perfil
-            _,erros=validar_perfil(final['perfil_padrao'])
+            from modulos import motivos_efetivos
+            _,erros=validar_perfil(final['perfil_padrao'],[x['id'] for x in motivos_efetivos(final,final['modulos_permitidos'])])
             if erros: raise HTTPException(400,{'campo':'perfil_padrao','motivo':erros[0]['campo']})
         valores=[]
         for k in COLUNAS_DO_MODELO:

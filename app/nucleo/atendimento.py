@@ -4,9 +4,10 @@ nada aqui executa comportamento nem fala com banco."""
 import re
 import unicodedata
 
-MOTIVOS_TRANSFERENCIA=('pediu_humano','reclamacao','pedido_para_confirmar','pagamento','restricao_alimentar','evento_ou_encomenda','catering','fora_do_escopo','assunto_proibido')
 # Nunca desligáveis: o cliente sempre consegue chegar a uma pessoa, e reclamação sempre sobe.
 MOTIVOS_FIXOS=('pediu_humano','reclamacao')
+# MULTI1-b: o núcleo só conhece os seus; os do segmento vêm do modelo e os de cada módulo, do módulo (modulos.motivos_efetivos).
+MOTIVOS_TRANSFERENCIA=MOTIVOS_FIXOS
 MAX_ASSUNTOS=15
 NOME=re.compile(r"[^\W\d_](?:[^\W\d_]|[ '\-]){1,29}")
 
@@ -41,14 +42,12 @@ COMPORTAMENTOS={
     'debounce_incompleta_s':('ritmo','decimal',1,15,None,True),'debounce_palavras':('ritmo','inteiro',1,50,None,True),
     'max_wait_s':('ritmo','inteiro',1,30,None,True),'media_wait_s':('ritmo','inteiro',0,60,None,True),
     'refazer_turno':('ritmo','escolha',None,None,['on','off'],True),'history_turns':('ritmo','inteiro',0,100,None,True),
-    'acoes_recentes_min':('ritmo','inteiro',0,1440,None,True),
     'slow_notice_s':('mensagens','inteiro',0,300,None,True),'aviso_demora':('mensagens','texto',0,300,None,True),
     'aviso_demora_janela_s':('mensagens','inteiro',0,3600,None,True),
     'aviso_espera_modo':('mensagens','escolha',None,None,['off','presenca','presenca_e_texto_contextual'],True),
     'aviso_espera_textos':('mensagens','lista_textos',1,6,None,True),'fallback':('mensagens','texto',15,500,None,True),
     'botoes_interativos':('mensagens','escolha',None,None,['on','off'],True),
     'pause_minutes':('atendimento_humano','inteiro',0,1440,None,True),'encerrar_vazia_min':('atendimento_humano','inteiro',1,1440,None,True),
-    'carrinho_expira_h':('pedidos','inteiro',1,720,None,True),
     'reacoes':('reacoes','escolha',None,None,['on','off'],True),'reacoes_emojis':('reacoes','lista_escolhas',1,8,list(EMOJIS_DE_REACAO),True),
     'reacoes_max_dia':('reacoes','inteiro',0,10,None,True),
     'fora_do_horario':('fora_do_horario','escolha',None,None,['atender','so_avisar'],True),
@@ -58,6 +57,10 @@ COMPORTAMENTOS={
     # SOL1: avisar a equipe sem parar o atendimento; destino do alerta marcado como grupo externo mascara o telefone.
     'notificar_equipe':('transbordo','escolha',None,None,['on','off'],True),'transbordo_destino_externo':('transbordo','booleano',None,None,None,True),
 }
+# MULTI1-b: os comportamentos declarados pelos módulos (carrinho_expira_h, acoes_recentes_min…) entram aqui.
+from modulos import REGISTRO as _MODULOS
+for _m in _MODULOS.values():
+    for _campo,_spec in _m.comportamentos.items(): COMPORTAMENTOS[_campo]=tuple(_spec[:6])
 # Variáveis aceitas nos textos que o gateway envia sozinho (CFG1-c).
 VARIAVEIS_DE_TEXTO={'fora_do_horario_mensagem':('proxima_abertura','nome_empresa','abre'),'transbordo_fora_do_horario':('retorno_equipe','horario')}
 # De operação e proteção: fora da versão, efeito imediato, só a plataforma muda (pelas rotas de sempre).
@@ -119,7 +122,7 @@ def _texto(valor,regra):
 def validar_perfil(dados,motivos=None):
     """Valida o perfil que um escopo define. Devolve (limpo, erros): chaves com None = herda.
     erros: [{"campo","motivo"}] com todos os problemas de uma vez.
-    `motivos`: ids de motivo de transferência aceitos neste escopo (MULTI1-a); None = a lista de sempre."""
+    `motivos`: ids de motivo de transferência aceitos neste escopo (MULTI1-a); None = só os do núcleo."""
     limpo={};erros=[]
     if not isinstance(dados,dict): return {},[{'campo':'perfil','motivo':'tipo'}]
     for campo,valor in dados.items():
@@ -179,7 +182,7 @@ def resolver_perfil(*camadas,nome_da_empresa=None,motivos=None):
         for campo in PERFIL:
             if isinstance(dados,dict) and dados.get(campo) is not None:
                 perfil[campo]=dados[campo];origem[campo]=nome
-    # MULTI1-a: só os motivos que valem neste escopo (núcleo + modelo + módulos), na ordem deles. Sem a lista, a de sempre.
+    # MULTI1-a: só os motivos que valem neste escopo (núcleo + módulos + modelo), na ordem deles. Sem a lista, os do núcleo.
     validos=list(motivos) if motivos is not None else list(MOTIVOS_TRANSFERENCIA)
     if origem['motivos_transferencia']=='plataforma': perfil['motivos_transferencia']=list(validos)
     perfil['motivos_transferencia']=[m for m in validos if m in perfil['motivos_transferencia'] or m in MOTIVOS_FIXOS]

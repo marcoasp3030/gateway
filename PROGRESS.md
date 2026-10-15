@@ -1277,3 +1277,9 @@ PY
 - Módulo efetivo = modelo E empresa E agente; empresa sem registro = ligado; chave da empresa e criar/alterar modelo só plataforma. Motivos e tipos em três camadas com rótulo; `converte_em_solicitacao` no motivo. Comportamentos de módulo escondidos e recusados (`modulo_desligado`) sem o módulo.
 - Bloco `agente` no pacote do Skyone (sem instruções de módulo). Webhook da instância uazapi cadastrado pelo gateway (criar canal, trocar credenciais, rotacionar segredo; `POST …/canais/{id}/webhook` para refazer).
 - Testes: `tests/test_multi1a.py` (7); testes antigos passaram a usar o modelo `generico_teste` (o `assistente_generico` ficou inativo) e `X-Role: plataforma` onde trocam modelo ou chave de módulo.
+
+## MULTI1-b — núcleo sem regra de delivery — 2026-10-15
+
+- Retrato do By Koji gravado antes de mexer (13b328a) e ampliado depois com cenários extraídos do código antigo; o teste prova o resultado idêntico campo a campo (`tests/test_multi1b_retrato.py`, `tests/fixtures/multi1b_retrato.json`).
+- Os 21 pontos da seção 3 da `docs/ESPEC_MULTI1.md` foram para declarações e ganchos do registro de módulos (`modulos/pedidos/ganchos.py`, `modulos/catalogo/ganchos.py`); caixa de avisos no núcleo (`nucleo/avisos.py`). Detalhe na seção 11.
+- Testes próprios: núcleo sem importar os módulos, agente sem módulos sem campos de delivery, anonimização (LGPD) — achada falha antiga: observação de cada item não é apagada (aguarda decisão).

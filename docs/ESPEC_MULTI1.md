@@ -292,3 +292,42 @@ Bloco novo na raiz, sempre presente:
           "tipos_solicitacao":[{"id":"evento","rotulo":"Evento"},…]}
 ```
 
+---
+
+## 11. MULTI1-b implementado — núcleo sem regra de delivery
+
+Sem migração. O By Koji não muda: `tests/test_multi1b_retrato.py` roda 19 cenários fixos (saudação, cardápio, adicionar item, resumo, fechar pedido com a decisão da unidade pelo WhatsApp interno, consulta, transferências com e sem pedido, turno refeito, aviso à equipe, pedido anunciado sem fechar, transferência com e sem recusa, carrinho expirado, fora do horário, modo "só avisar" com e sem pedido) e compara campo a campo com o retrato gravado **no código de antes** (`tests/fixtures/multi1b_retrato.json`): pacotes, respostas das Skills, mensagens, turnos, avisos internos, alertas, conversas, solicitações, métricas e unidades do painel, registro de Skills e anonimização.
+
+### 11.1 O que cada um dos 21 pontos virou
+
+| # | Agora |
+|---|---|
+| 1 | Gancho `numero_interno` do módulo de pedidos (a recepção pergunta aos módulos) |
+| 2 | Gancho `GUARDAS_DA_RESPOSTA` (o pipeline roda as guardas dos módulos do agente: refaz uma vez com o recado, depois segura) |
+| 3 | Guarda genérica de "transferência sem recusa" para os motivos que o módulo declara em `motivos_com_recusa`, com o recado dele |
+| 4 | Gancho `antes_do_turno` (expirar carrinho) |
+| 5 | `skills_com_efeito`, `acoes_com_efeito` declarados; gancho `acoes_do_turno` |
+| 6, 7, 10 | Gancho `em_andamento(para=…)`: "só avisar", aviso de espera e venda em andamento da solicitação |
+| 8, 9 | Caixa de avisos, alerta de transbordo e despacho em `nucleo/avisos.py`; a linha "Pedido:" vem do gancho `resumo_para_alerta`; aviso ao cliente pelo `ENVIO_DE_AVISO` do módulo |
+| 10, 11 | Tipos e motivos do núcleo: só `outro` e `pediu_humano`/`reclamacao`; o resto vem do modelo e dos módulos. Ordem: motivos = núcleo, módulos, modelo; tipos = modelo, módulos, `outro` |
+| 12 | `carrinho_expira_h` e `acoes_recentes_min` declarados no módulo (limites e padrão); as colunas continuam nas tabelas de sempre |
+| 13 | `acoes_recentes` pelo gancho; `tem_cardapio`/`itens_no_cardapio` e a unidade "que atende" pelo módulo de catálogo; ação `pedido_fechado` declarada |
+| 14 | Campos de entrega e pagamento da unidade no pacote declarados pelo módulo (`campos_da_unidade`) |
+| 15 | `expediente` recebe só um conjunto de unidades; quem diz quais é o catálogo |
+| 16 | `acoes_com_botao` declarado |
+| 17 | Skills declaradas pelo módulo (o núcleo só tem `info_unidades`) |
+| 18 | Gancho `metricas` (mesmas chaves de antes, na raiz) |
+| 19 | Gancho `resumo_das_conversas` (pedido aberto e unidade do último carrinho), também na lista de solicitações |
+| 20 | Gancho `anonimizar` |
+| 21 | Cadastro da unidade no painel e a Skill `info_unidades` **sem mudança** (contrato do painel); só o pacote ficou por módulo |
+
+Rotas dos módulos montadas pelo registro. Teste estático: núcleo, adaptador, canais e API admin não importam os módulos nem leem as tabelas deles (`tests/test_multi1b.py`).
+
+### 11.2 Mudança para quem não é delivery
+
+Agente **sem** o módulo de pedidos não recebe mais no pacote os campos de entrega e pagamento da unidade; sem o catálogo, não recebe `tem_cardapio`/`itens_no_cardapio`, e a próxima abertura é a de qualquer unidade. Hoje isso vale para os agentes de teste em `assistente_generico` (bench, bykoji de teste, luxtia, postman_teste). Para o By Koji, nada muda.
+
+### 11.3 Achado da anonimização (LGPD), sem mudança neste bloco
+
+O teste próprio da anonimização (`tests/test_multi1b.py`) achou uma falha que já existia antes do MULTI1 (o retrato confirma): a **observação de cada item** (no carrinho e na lista de itens do pedido) não é apagada. Endereço, observação geral, nome e telefone do pedido, motivos dos eventos, avisos e solicitações são apagados. O teste registra a falha até a decisão de corrigir.
+

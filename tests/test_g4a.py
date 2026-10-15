@@ -260,7 +260,7 @@ def test_info_unidades_entrega_retirada_pagamentos_e_pacote_sem_mudanca():
             # Campos antigos continuam (prompt de hoje); o pacote de cada turno não cresceu.
             assert c['taxa_entrega']==7.0 and c['aceita_retirada'] is True
             from nucleo.horarios import pacote
-            p=[x for x in await pacote(conn,'alpha','America/Sao_Paulo') if x['codigo']=='centro'][0]
+            p=[x for x in await pacote(conn,'alpha','America/Sao_Paulo',modulos=('catalogo','pedidos')) if x['codigo']=='centro'][0]
             assert set(p)=={'id','nome','aberta_agora','proxima_abertura','motivo_fechada','fecha_as','pausada_ate','pausa_motivo','codigo','endereco','telefone',
                             'formas_pagamento','taxa_entrega','pedido_minimo','area_entrega','aceita_retirada','regras','horarios','tem_cardapio','itens_no_cardapio'}
             assert u3

@@ -11,8 +11,12 @@ ADMIN={'X-Actor':'ana','X-Role':'admin'}
 E='/admin/v1/tenants/alpha/atendimento'
 
 
+DELIVERY=['pediu_humano','reclamacao','pedido_para_confirmar','pagamento','restricao_alimentar','evento_ou_encomenda','catering','fora_do_escopo','assunto_proibido']
+
+
 def test_validacao_do_perfil_e_heranca():
-    v=A.validar_perfil
+    # MULTI1-b: o núcleo só conhece pediu_humano e reclamacao; os do delivery vêm do modelo e do módulo de pedidos.
+    v=lambda dados: A.validar_perfil(dados,DELIVERY)
     ok,erros=v({'nome_atendente':'  Koji ','tom':'descontraido','apresentacao_inicial':False,'regras_da_casa':'Sem troca de ingredientes.\nPedido grande demora mais.  ',
                 'assuntos_proibidos':[{'assunto':' Política e religião ','acao':'recusar'},{'assunto':'Vagas de emprego','acao':'transferir'}],
                 'motivos_transferencia':['pagamento'],'mensagem_boas_vindas':'','emojis':None})
@@ -32,13 +36,13 @@ def test_validacao_do_perfil_e_heranca():
     assert v({'nome_atendente':'A'})[1][0]['motivo']=='tamanho' and v({'nome_atendente':'Ana Maria'})[1]==[] and v({'regras_da_casa':'\n'.join('x'*3 for _ in range(22))})[1][0]['motivo']=='linhas'
     # Herança campo a campo; lista do nível mais específico substitui; nulo herda; o pacote sempre traz todos os campos.
     perfil,origem=A.resolver_perfil(('segmento',{'tom':'formal','emojis':'nenhum','assuntos_proibidos':[{'assunto':'A','acao':'recusar'}]}),
-                                   ('empresa',{'tom':'descontraido','assuntos_proibidos':[{'assunto':'B','acao':'transferir'}],'emojis':None}),('agente',{'nome_atendente':'Koji','motivos_transferencia':['pagamento']}))
+                                   ('empresa',{'tom':'descontraido','assuntos_proibidos':[{'assunto':'B','acao':'transferir'}],'emojis':None}),('agente',{'nome_atendente':'Koji','motivos_transferencia':['pagamento']}),motivos=DELIVERY)
     assert (perfil['tom'],origem['tom'])==('descontraido','empresa') and (perfil['emojis'],origem['emojis'])==('nenhum','segmento') and (perfil['nome_atendente'],origem['nome_atendente'])==('Koji','agente')
     assert perfil['assuntos_proibidos']==[{'assunto':'B','acao':'transferir'}] and (perfil['tamanho_respostas'],origem['tamanho_respostas'])==('curtas','plataforma')
     assert perfil['motivos_transferencia']==['pediu_humano','reclamacao','pagamento']
-    bloco=A.bloco_do_pacote(A.resolver_perfil()[0])
+    bloco=A.bloco_do_pacote(A.resolver_perfil(motivos=DELIVERY)[0])
     assert list(bloco)==list(A.PERFIL) and list(bloco)[:3]==['nome_empresa','descricao_negocio','nome_atendente'] and bloco=={'nome_empresa':None,'descricao_negocio':'','nome_atendente':None,'apresentacao_inicial':True,'tom':'equilibrado','emojis':'moderado','tamanho_respostas':'curtas','tratamento':'voce',
-        'pedir_nome':False,'sugestoes':'leve','regras_da_casa':'','assuntos_proibidos':[],'motivos_transferencia':list(A.MOTIVOS_TRANSFERENCIA),'mensagem_boas_vindas':None,'mensagem_despedida':None}
+        'pedir_nome':False,'sugestoes':'leve','regras_da_casa':'','assuntos_proibidos':[],'motivos_transferencia':DELIVERY,'mensagem_boas_vindas':None,'mensagem_despedida':None}
     # CFG1-a.1: nome_empresa vale o nome cadastrado até alguém definir outro; descricao_negocio começa vazia.
     p,o=A.resolver_perfil(('segmento',{}),nome_da_empresa='  By  Koji ');assert (p['nome_empresa'],o['nome_empresa'],p['descricao_negocio'],o['descricao_negocio'])==('By Koji','cadastro','','plataforma')
     p,o=A.resolver_perfil(('empresa',{'nome_empresa':'Koji Sushi','descricao_negocio':'restaurante japonês com delivery'}),nome_da_empresa='By Koji');assert (p['nome_empresa'],o['nome_empresa'],p['descricao_negocio'],o['descricao_negocio'])==('Koji Sushi','empresa','restaurante japonês com delivery','empresa')

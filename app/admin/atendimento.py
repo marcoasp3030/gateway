@@ -374,7 +374,8 @@ async def segmentos(request:Request):
 
 
 def _segmento(m):
-    perfil,_=A.resolver_perfil(('segmento',m.get('perfil_padrao')))
+    from modulos import motivos_efetivos
+    perfil,_=A.resolver_perfil(('segmento',m.get('perfil_padrao')),motivos=[x['id'] for x in motivos_efetivos(m,m.get('modulos_padrao') or [])])
     return {'id':m['id'],'nome':m['nome'],'versao':m['versao'],'modulos':m['modulos'],'perfil_padrao':A.bloco_do_pacote(perfil),
             'segmento':m.get('segmento'),'ativo':m.get('ativo',True),'skyone_ref':m.get('skyone_ref'),
             'modulos_permitidos':m.get('modulos_permitidos'),'modulos_padrao':m.get('modulos_padrao'),

@@ -1,4 +1,4 @@
-"""Solicitações para a equipe (SOL1, docs/ESPEC_SOL1.md): o agente avisa a equipe (evento, catering, encomenda…)
+"""Solicitações para a equipe (SOL1, docs/ESPEC_SOL1.md): o agente avisa a equipe (no delivery: evento, catering, encomenda…)
 e continua atendendo. Aqui ficam a validação do que o agente devolve, o registro (uma aberta por conversa e motivo),
 o alerta e a conversão de transferência em aviso."""
 import json
@@ -8,12 +8,10 @@ from nucleo.atendimento import MOTIVOS_TRANSFERENCIA
 from nucleo.contatos import nome_da_conversa,e164,formatado
 
 log=logging.getLogger('gateway.solicitacoes')
-TIPOS=('evento','catering','encomenda','orcamento','parceria','outro')
+# MULTI1-b: o núcleo só tem "outro"; os tipos de cada segmento vêm do modelo do agente e dos módulos (modulos.tipos_efetivos).
+TIPOS=('outro',)
 MAX_DATA,MAX_LOCAL,MAX_OBSERVACAO,MAX_PESSOAS=80,160,500,100000
 CAMPOS=('data','pessoas','local','observacao')
-# Transferência por estes motivos, com venda em andamento, vira aviso à equipe (o bot não é pausado).
-MOTIVOS_QUE_NAO_PAUSAM=('evento_ou_encomenda','catering')
-PEDIDO_ATIVO=('aguardando_loja','confirmado','em_preparo','pronto_retirada','saiu_entrega')
 ABERTAS=('aberta','em_andamento')
 STATUS=('aberta','em_andamento','concluida','cancelada')
 INTERVALO_DE_ATUALIZACAO_MIN=30
@@ -43,9 +41,8 @@ def validar(valor):
 
 def que_nao_pausam(cfg):
     """Motivos de transferência que viram aviso à equipe com venda em andamento: os marcados `converte_em_solicitacao`
-    na lista do agente (MULTI1-a). Sem a lista, os de sempre."""
-    lista=cfg.get('motivos_transferencia_permitidos')
-    return [m['id'] for m in lista if m.get('converte_em_solicitacao')] if lista else list(MOTIVOS_QUE_NAO_PAUSAM)
+    na lista do agente (MULTI1-a)."""
+    return [m['id'] for m in cfg.get('motivos_transferencia_permitidos') or [] if m.get('converte_em_solicitacao')]
 
 
 def motivo_do_catalogo(motivo,motivos=None):
@@ -56,14 +53,15 @@ def motivo_do_catalogo(motivo,motivos=None):
 
 
 async def venda_em_andamento(db,tenant,conversa):
-    """Há carrinho aberto com itens, ou pedido ativo, nesta conversa?"""
-    return bool(await db.fetchval("""SELECT EXISTS(SELECT 1 FROM carrinhos k JOIN carrinho_itens l ON l.tenant_id=k.tenant_id AND l.carrinho_id=k.id
-            WHERE k.tenant_id=$1 AND k.conversation_id=$2 AND k.status='aberto')
-        OR EXISTS(SELECT 1 FROM pedidos WHERE tenant_id=$1 AND conversation_id=$2 AND status=ANY($3::text[]))""",tenant,conversa,list(PEDIDO_ATIVO)))
+    """Há venda em andamento nesta conversa, segundo os módulos (pedidos: carrinho aberto com itens, ou pedido ativo)?"""
+    from modulos import ganchos
+    for _,f in ganchos('em_andamento'):
+        if await f(db,tenant,conversa,'solicitacao'): return True
+    return False
 
 
 async def converter(db,tenant,conversa,cfg,resultado):
-    """Proteção: transferir_humano por evento/encomenda/catering, com venda em andamento, vira notificar_equipe.
+    """Proteção: transferir_humano por um motivo que converte em solicitação, com venda em andamento, vira notificar_equipe.
     Altera `resultado` no lugar (acao e acao_original) e devolve True se converteu. Falha aqui nunca derruba o turno."""
     try:
         if (not resultado or resultado.get('acao')!='transferir_humano' or cfg.get('notificar_equipe')!='on'
@@ -97,7 +95,7 @@ async def registrar(conn,tenant,conversa,cfg,resultado,painel_url=None):
     if cfg.get('notificar_equipe')!='on': return None
     from admin.servico import auditar
     from nucleo.webhooks import emitir
-    from modulos.pedidos import avisos
+    from nucleo import avisos
     motivos=[m['id'] for m in cfg['motivos_transferencia_permitidos']] if cfg.get('motivos_transferencia_permitidos') else None
     tipos=[t['id'] for t in cfg['tipos_solicitacao_permitidos']] if cfg.get('tipos_solicitacao_permitidos') else list(TIPOS)
     motivo,informado=motivo_do_catalogo(resultado.get('motivo'),motivos)

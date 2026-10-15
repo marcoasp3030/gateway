@@ -196,7 +196,7 @@ def test_configuracao_por_unidade_e_pacote_ao_agente():
             for ruim in ({'codigo':'Pátio'},{'whatsapp_pedidos':'11-9999'},{'taxa_entrega':-1}):
                 assert (await client.patch(f'/admin/v1/tenants/alpha/unidades/{uid}',json=ruim)).status_code in (400,422),ruim
             # Pacote ao agente: dados da unidade, nulo para o que não foi informado; o WhatsApp de pedidos não vai.
-            p=[u for u in await pacote(conn,'alpha','America/Sao_Paulo') if u['codigo']=='patio_guedala'][0]
+            p=[u for u in await pacote(conn,'alpha','America/Sao_Paulo',modulos=('catalogo','pedidos')) if u['codigo']=='patio_guedala'][0]
             assert (p['codigo'],p['endereco'],p['telefone'],p['taxa_entrega'],p['pedido_minimo'],p['aceita_retirada'],p['regras'])==('patio_guedala','Av. Comendador Adibo Ares, 9',None,12.5,None,True,'Horários do salão.')
             assert 'whatsapp_pedidos' not in p and 'telefone_whatsapp' not in p and p['horarios']=={'seg':[['12:00','15:00'],['19:00','22:00']]} and 'aberta_agora' in p
             json.dumps(p)   # serializável (sem Decimal)

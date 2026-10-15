@@ -9,6 +9,7 @@ from nucleo import expediente,pipeline as PL
 from nucleo.banco import Repositorio
 from nucleo.configuracao import Configuracoes
 from modulos.pedidos import agendamento as AG
+from modulos.pedidos.ganchos import AVISO_TRANSFERENCIA
 from test_migrations import banco,migrar,DSN
 from test_admin import preparar
 from test_pipeline_multi import RedisFila
@@ -113,7 +114,7 @@ def test_transferencia_por_pedido_para_confirmar_sem_recusa_de_skill(tmp_path,mo
                 c1=await conversa('a1')
                 roteiro[:]=[transfere('Vou transferir para a equipe confirmar o cardápio 🙏'),fala('Aqui estão as categorias do cardápio. Qual você quer ver?')]
                 await rodar(c1)
-                assert len(pacotes)==2 and pacotes[0]['aviso_do_gateway'] is None and pacotes[1]['aviso_do_gateway']==PL.AVISO_TRANSFERENCIA and 'pedido_para_confirmar' in PL.AVISO_TRANSFERENCIA
+                assert len(pacotes)==2 and pacotes[0]['aviso_do_gateway'] is None and pacotes[1]['aviso_do_gateway']==AVISO_TRANSFERENCIA and 'pedido_para_confirmar' in AVISO_TRANSFERENCIA
                 assert [m['conteudo'] for m in await saidas(c1)]==['Aqui estão as categorias do cardápio. Qual você quer ver?'] and not await aguardando(c1) and not alertas
                 ts=await turnos(c1);assert quadro(ts)==[('refeito','refeito'),('ok',None)] and ts[1]['refeito_de']==ts[0]['id']
 

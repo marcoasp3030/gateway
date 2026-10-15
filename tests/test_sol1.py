@@ -28,11 +28,13 @@ def test_validacao_da_solicitacao_e_catalogo():
     assert len(v({'data':'x'*200})['data'])==80 and len(v({'local':'x'*500})['local'])==160 and len(v({'observacao':'x'*900})['observacao'])==500
     assert v({'observacao':'linha 1\nlinha 2\x00'})['observacao']=='linha 1 linha 2' and v({})=={'tipo':'outro'}
     assert v(None) is None and v('evento') is None and v([1]) is None
-    assert [v({'tipo':t})['tipo'] for t in S.TIPOS]==list(S.TIPOS)==['evento','catering','encomenda','orcamento','parceria','outro']
+    # MULTI1-b: o núcleo só tem "outro"; os tipos do delivery vêm do modelo.
+    assert [v({'tipo':t})['tipo'] for t in ('evento','catering','encomenda','orcamento','parceria','outro')]==['evento','catering','encomenda','orcamento','parceria','outro'] and S.TIPOS==('outro',)
     # Motivo: do catálogo, ou "fora_do_escopo" guardando o texto recebido. catering entrou no catálogo, ligado por padrão.
-    assert S.motivo_do_catalogo('Evento_ou_encomenda ')==('evento_ou_encomenda',None) and S.motivo_do_catalogo('catering')==('catering',None)
+    m=['pediu_humano','reclamacao','evento_ou_encomenda','catering','fora_do_escopo']   # MULTI1-b: a lista vem do agente
+    assert S.motivo_do_catalogo('Evento_ou_encomenda ',m)==('evento_ou_encomenda',None) and S.motivo_do_catalogo('catering',m)==('catering',None)
     assert S.motivo_do_catalogo('cliente quer orçamento')==('fora_do_escopo','cliente quer orçamento') and S.motivo_do_catalogo(None)==('fora_do_escopo',None)
-    assert 'catering' in A.MOTIVOS_TRANSFERENCIA and 'catering' in A.resolver_perfil()[0]['motivos_transferencia']
+    assert 'catering' not in A.MOTIVOS_TRANSFERENCIA and 'catering' in A.resolver_perfil(motivos=['pediu_humano','reclamacao','catering'])[0]['motivos_transferencia']
     # Alerta: telefone inteiro para a equipe; mascarado quando o destino é grupo externo; sem texto de conversa.
     s={'numero':'S-0001','tipo':'evento','dados':{'data':'25 de dezembro','pessoas':50,'observacao':'Só queria saber.'}}
     t=S.texto_do_alerta(s,'Jussara Santos','5511942717046',False,'https://painel.exemplo.com')

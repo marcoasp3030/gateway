@@ -18,9 +18,7 @@ SELECAO="""SELECT s.*,v.telefone,v.canal_id,k.tipo AS canal_tipo,v.nome AS nome_
         CASE WHEN v.encerrada_em IS NOT NULL THEN 'encerrada' WHEN v.aguardando_atendente_desde IS NOT NULL THEN 'aguardando_atendente'
              WHEN v.bot_pausado_ate>now() THEN 'atendente' ELSE 'bot' END AS estado,
         (SELECT a.status FROM avisos_internos a WHERE a.tenant_id=s.tenant_id AND a.tipo='solicitacao' AND a.referencia LIKE s.numero||':%' ORDER BY a.id DESC LIMIT 1) AS alerta_status,
-        (SELECT a.enviado_em FROM avisos_internos a WHERE a.tenant_id=s.tenant_id AND a.tipo='solicitacao' AND a.referencia LIKE s.numero||':%' ORDER BY a.id DESC LIMIT 1) AS alerta_em,
-        (SELECT json_build_object('numero',p.numero,'status',p.status) FROM pedidos p WHERE p.tenant_id=s.tenant_id AND p.conversation_id=s.conversation_id
-            AND p.status NOT IN ('concluido','recusado','cancelado') ORDER BY p.id DESC LIMIT 1) AS pedido_aberto
+        (SELECT a.enviado_em FROM avisos_internos a WHERE a.tenant_id=s.tenant_id AND a.tipo='solicitacao' AND a.referencia LIKE s.numero||':%' ORDER BY a.id DESC LIMIT 1) AS alerta_em
     FROM solicitacoes s
     LEFT JOIN conversas v ON v.tenant_id=s.tenant_id AND v.conversation_id=s.conversation_id
     LEFT JOIN tenant_canais k ON k.tenant_id=v.tenant_id AND k.id=v.canal_id
@@ -39,13 +37,23 @@ class Atualizacao(Estrito):
 def _json(v): return json.loads(v) if isinstance(v,str) else v
 
 
-def retrato(r):
+async def pedidos_abertos(db,tenant_id,rows):
+    """{conversa: pedido aberto} pelos módulos (pedidos: o último pedido não encerrado da conversa)."""
+    from modulos import ganchos
+    conversas=[r['conversation_id'] for r in rows if r['conversation_id']];saida={}
+    for _,f in ganchos('resumo_das_conversas'):
+        for conv,dados in (await f(db,tenant_id,conversas)).items():
+            if dados.get('pedido_aberto'): saida[conv]=dados['pedido_aberto']
+    return saida
+
+
+def retrato(r,pedido_aberto=None):
     quem=exibicao({'nome':r['contato_nome'] or r['nome_conversa'],'nome_cadastro':r['nome_cadastro'],'nome_informado':r['nome_informado'],'nome_perfil':r['nome_perfil'],
                    'anonimizado_em':r['anonimizado_em'],'telefone':r['telefone']},r['telefone'],r['canal_tipo'])
     return {'id':r['id'],'numero':r['numero'],'status':r['status'],'motivo':r['motivo'],'motivo_informado':r['motivo_informado'],'tipo':r['tipo'],'origem':r['origem'],
             'dados':{c:(_json(r['dados']) or {}).get(c) for c in ('data','pessoas','local','observacao')},
             'cliente':{'nome':quem['nome_exibicao'],'nome_origem':quem['nome_origem'],'telefone':quem['telefone_e164'],'contato_id':r['contato_id']},
-            'conversation_id':r['conversation_id'],'conversa':{'estado':r['estado'],'pedido_aberto':_json(r['pedido_aberto'])},
+            'conversation_id':r['conversation_id'],'conversa':{'estado':r['estado'],'pedido_aberto':pedido_aberto},
             'alerta':{'status':r['alerta_status'] or 'sem_destino','em':r['alerta_em']},
             'atualizacoes':r['atualizacoes'],'criado_em':r['criado_em'],'atualizado_em':r['atualizado_em'],
             'atendido_por':r['atendido_por'],'concluido_em':r['concluido_em'],'nota':r['nota'],'proximos_status':list(PROXIMOS[r['status']])}
@@ -69,7 +77,8 @@ async def lista(request:Request,tenant_id:str,status:str|None=None,motivo:str|No
         AND ($8::text IS NULL OR strpos(lower(s.numero),lower($8))>0 OR strpos(lower(concat_ws(' ',v.nome,ct.nome_cadastro,ct.nome_informado,ct.nome_perfil)),lower($8))>0
              OR ($9<>'' AND strpos(coalesce(v.telefone,''),$9)>0))
         ORDER BY s.id DESC LIMIT $10""",tenant_id,varios,motivo,tipo,desde,ate,cursor,termo,digitos,limite+1)
-    return {'itens':[retrato(r) for r in rows[:limite]],'proximo_cursor':rows[limite-1]['id'] if len(rows)>limite else None}
+    abertos=await pedidos_abertos(request.app.state.db,tenant_id,rows[:limite])
+    return {'itens':[retrato(r,abertos.get(r['conversation_id'])) for r in rows[:limite]],'proximo_cursor':rows[limite-1]['id'] if len(rows)>limite else None}
 
 
 @router.get('/tenants/{tenant_id}/solicitacoes/contagem')
@@ -84,7 +93,7 @@ async def contagem(request:Request,tenant_id:str):
 async def _uma(db,tenant_id,sid):
     r=await db.fetchrow(SELECAO+' WHERE s.tenant_id=$1 AND s.id=$2',tenant_id,sid)
     if not r: raise HTTPException(404,'NOT_FOUND')
-    return retrato(r)
+    return retrato(r,(await pedidos_abertos(db,tenant_id,[r])).get(r['conversation_id']))
 
 
 @router.get('/tenants/{tenant_id}/solicitacoes/{sid}')

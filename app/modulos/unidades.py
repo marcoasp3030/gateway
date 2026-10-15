@@ -52,5 +52,6 @@ async def info_unidades(request:Request,conversation_id:str,unidade:str|None=Que
         if not rows: raise HTTPException(404,'NOT_FOUND')
     fuso=await db.fetchval('SELECT timezone FROM tenants WHERE id=$1',t)
     # DISP1: unidade sem nenhum item que possa ser pedido não tem cardápio para oferecer.
-    cardapio=await H.itens_no_cardapio(db,t)
+    from modulos.catalogo.ganchos import itens_no_cardapio
+    cardapio=await itens_no_cardapio(db,t)
     return {'unidades':[{**await unidade_para_o_agente(db,t,r,fuso),'tem_cardapio':cardapio.get(r['codigo'],0)>0,'itens_no_cardapio':cardapio.get(r['codigo'],0)} for r in rows]}

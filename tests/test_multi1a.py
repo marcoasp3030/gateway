@@ -9,6 +9,9 @@ pytestmark=pytest.mark.skipif(not DSN,reason='Banco de testes obrigatório')
 
 PLAT={'X-Role':'plataforma'}
 ADMIN_ALPHA={'X-Role':'admin','X-Tenant-Scope':'alpha'}
+# As listas do By Koji (núcleo + módulo de pedidos + modelo de delivery), iguais às de antes do MULTI1.
+MOTIVOS_BYKOJI=['pediu_humano','reclamacao','pedido_para_confirmar','pagamento','restricao_alimentar','evento_ou_encomenda','catering','fora_do_escopo','assunto_proibido']
+TIPOS_BYKOJI=['evento','catering','encomenda','orcamento','parceria','outro']
 
 
 def erro(r):
@@ -148,10 +151,10 @@ def test_motivos_e_tipos_em_camadas_e_by_koji_igual():
             await criar(c)
             # By Koji (modelo de delivery com pedidos): as mesmas 9 opções e 6 tipos de antes, na mesma ordem.
             cfg=await app.state.configuracoes.efetiva('bykoji','bykoji_atendimento')
-            assert [m['id'] for m in cfg['motivos_transferencia_permitidos']]==list(A.MOTIVOS_TRANSFERENCIA)
-            assert [t['id'] for t in cfg['tipos_solicitacao_permitidos']]==list(S.TIPOS)
+            assert [m['id'] for m in cfg['motivos_transferencia_permitidos']]==MOTIVOS_BYKOJI
+            assert [t['id'] for t in cfg['tipos_solicitacao_permitidos']]==TIPOS_BYKOJI
             assert all(m['rotulo'] for m in cfg['motivos_transferencia_permitidos']) and list(S.que_nao_pausam(cfg))==['evento_ou_encomenda','catering']
-            assert cfg['perfil_atendimento']['motivos_transferencia']==list(A.MOTIVOS_TRANSFERENCIA)
+            assert cfg['perfil_atendimento']['motivos_transferencia']==MOTIVOS_BYKOJI
             # Atendimento geral: núcleo + modelo, sem os do módulo de pedidos.
             g=(await agente_de(c,'alpha','atendimento_geral')).json()['id']
             cg=await app.state.configuracoes.efetiva('alpha',g)
@@ -226,8 +229,8 @@ def test_pacote_traz_o_bloco_agente(monkeypatch):
         ag=p['agente']
         assert set(ag)=={'modelo','segmento','modulos','motivos_transferencia','tipos_solicitacao'}
         assert ag['modelo']['id']==cfg['modelo_id'] and ag['segmento']=='delivery' and ag['modulos']==['catalogo','pedidos']
-        assert [m['id'] for m in ag['motivos_transferencia']]==list(A.MOTIVOS_TRANSFERENCIA) and all(set(m)=={'id','rotulo'} for m in ag['motivos_transferencia'])
-        assert [t['id'] for t in ag['tipos_solicitacao']]==list(S.TIPOS)
+        assert [m['id'] for m in ag['motivos_transferencia']]==MOTIVOS_BYKOJI and all(set(m)=={'id','rotulo'} for m in ag['motivos_transferencia'])
+        assert [t['id'] for t in ag['tipos_solicitacao']]==TIPOS_BYKOJI
         assert 'instrucoes_modulos' not in json.dumps(p)   # decisão 7: sem texto de instruções de módulo no pacote
     banco(cenario)
 
