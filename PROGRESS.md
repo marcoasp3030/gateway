@@ -1264,3 +1264,7 @@ PY
 - O `docs/ANALISE_COMPORTAMENTO_1.md` tinha sido reescrito por outra sessão, sem commit, com conversas pessoais de terceiros no Anexo B. A versão integral foi guardada fora do repositório (`/home/twadmin/backups/gateway/docs-fora-do-git/`) e a do repositório ficou sem esse conteúdo.
 - AVS1 implementado: `aviso_espera_modo` (padrão `presenca`), "digitando…" renovado a cada 20 s pelo turno inteiro, texto de espera só no modo `presenca_e_texto_contextual` e no meio de algo, três textos aprovados com rodízio, `slow_notice_s` padrão 30. Migração 042. Testes em `tests/test_avs1.py` (3). Contrato em `docs/ESPEC_AVS1.md`.
 - **AVS1 implantado em 13/10/2026 18:26 UTC:** `gateway:256169c`, schema 42, trava com 278 passed (0 falhas, 0 pulados). Volta: `gateway:d34db19`. Backup: `pre-avs1-20261013T182637Z`. By Koji herda `aviso_espera_modo: presenca`.
+
+## Auditoria multiagente — 2026-10-15
+
+- `docs/AUDITORIA_MULTIAGENTE.md`: o quanto o gateway está pronto para outros tipos de agente e outras empresas (passos de criação, módulos, canais, isolamento, módulo financeiro, painel). **Só leitura; nada alterado.**
