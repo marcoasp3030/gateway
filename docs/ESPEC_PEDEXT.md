@@ -123,3 +123,7 @@ Confirmar, despachar, cancelar e responder pelo gateway (gestor de pedidos próp
 | 6 | Dados pessoais do marketplace | Sem telefone, CPF e endereço completo; bairro e cidade sim |
 | 7 | Adicionais | Linhas próprias ligadas ao item (a análise pode somar ou separar) |
 | 8 | Loja de homologação | Pedidos com `origem=teste` |
+
+## 9. Aprovado pelo Marco (16/10/2026)
+
+Linha geral aprovada: iFood por polling com confirmação; 99Food por webhook direto no gateway com polling de reserva; só espelhar (sem confirmar nem cancelar no marketplace); cliente de marketplace sem unir ao do WhatsApp, só com o id em hash; credenciais só pelo script; amostra anonimizada dos eventos da 99Food que o painel já guarda para fixar o formato. As 8 decisões da seção 8 aguardam resposta.
