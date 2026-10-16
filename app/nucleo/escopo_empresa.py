@@ -29,9 +29,12 @@ def do_pedido(request):
     return valor or None
 
 
+IDS_NO_CAMINHO=re.compile(r'/(?:[a-z]{2,4}_[0-9a-f]{12,32}|\d+)(?=/|$)')
+
+
 def rota_sem_ids(caminho):
-    """Caminho para log e alerta, sem a empresa."""
-    return EMPRESA_NO_CAMINHO.sub('/admin/v1/tenants/{t}',caminho)[:120]
+    """Caminho para log e alerta, sem a empresa e sem ids (agente, canal, contato, número): um aviso por rota, não por registro."""
+    return IDS_NO_CAMINHO.sub('/{id}',EMPRESA_NO_CAMINHO.sub('/admin/v1/tenants/{t}',caminho))[:120]
 
 
 def conferir(request,papel):

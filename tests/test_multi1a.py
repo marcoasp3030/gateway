@@ -82,7 +82,8 @@ def test_sem_cabecalho_na_transicao_registra_e_avisa_e_com_a_exigencia_recusa(mo
                 assert (await c.get(f'/admin/v1/tenants/alpha/agentes/{a}',headers={'X-Role':'membro'})).status_code==200
             linhas=[r.getMessage() for r in caplog.records if r.name=='gateway.escopo']
             assert linhas==['Chamada do painel sem X-Tenant-Scope: papel=admin GET /admin/v1/tenants/{t}/agentes',
-                            'Chamada do painel sem X-Tenant-Scope: papel=membro GET /admin/v1/tenants/{t}/agentes/'+a]
+                            'Chamada do painel sem X-Tenant-Scope: papel=membro GET /admin/v1/tenants/{t}/agentes/{id}']
+            assert a not in str(caplog.text) and a not in str(alertas)   # nem o id do agente vai para o log
             assert [x[:2] for x in alertas]==[('painel_sem_escopo','aviso')]*2 and 'bravo' not in str(alertas)
             # Plataforma sem cabeçalho não gera aviso.
             alertas.clear();assert (await c.get('/admin/v1/tenants/bravo/agentes',headers=PLAT)).status_code==200 and alertas==[]
