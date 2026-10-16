@@ -1283,3 +1283,8 @@ PY
 - Retrato do By Koji gravado antes de mexer (13b328a) e ampliado depois com cenários extraídos do código antigo; o teste prova o resultado idêntico campo a campo (`tests/test_multi1b_retrato.py`, `tests/fixtures/multi1b_retrato.json`).
 - Os 21 pontos da seção 3 da `docs/ESPEC_MULTI1.md` foram para declarações e ganchos do registro de módulos (`modulos/pedidos/ganchos.py`, `modulos/catalogo/ganchos.py`); caixa de avisos no núcleo (`nucleo/avisos.py`). Detalhe na seção 11.
 - Testes próprios: núcleo sem importar os módulos, agente sem módulos sem campos de delivery, anonimização (LGPD) — achada falha antiga: observação de cada item não é apagada (aguarda decisão).
+
+## AN1 (especificação) e LGPD1 + origem do pedido — 2026-10-16
+
+- `docs/ESPEC_AN1.md`: auditoria dos dados de venda (só WhatsApp gera pedido; By Koji com 0 pedidos reais; itens guardam nome, categoria e preço da venda) e especificação da análise de vendas, com as decisões do Marco (seção 10).
+- LGPD1 + origem (migração 044): `pedidos.origem` (real, piloto, simulado, teste) e `pedidos.canal` gravados no fechamento; pedidos anteriores marcados como teste; anonimização passa a apagar a observação de cada item e a levar `skill_chamadas`, `skill_registro` e `catalogo_vistos` para o identificador novo. Testes: `tests/test_lgpd1.py` e o de anonimização em `tests/test_multi1b.py`.

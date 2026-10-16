@@ -19,3 +19,8 @@ async def unidades_que_atendem(db,tenant):
     """HOR2: unidades onde dá para pedir (com cardápio). A próxima abertura que vai ao agente é a de uma delas.
     Conjunto vazio = empresa sem nenhum item com preço: vale qualquer unidade."""
     return {codigo for codigo,n in (await itens_no_cardapio(db,tenant)).items() if n>0}
+
+
+async def anonimizar(conn,tenant,antiga,nova):
+    """LGPD1: o que a conversa buscou no catálogo passa para o identificador novo (o antigo contém o telefone)."""
+    await conn.execute('UPDATE catalogo_vistos SET conversation_id=$3 WHERE tenant_id=$1 AND conversation_id=$2',tenant,antiga,nova)

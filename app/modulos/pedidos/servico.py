@@ -481,6 +481,26 @@ async def ultimos(conn,tenant,conversa,fuso=None):
              'atualizado_em':r['atualizado_em'].astimezone(z).isoformat(timespec='seconds')} for r in rows]
 
 
+ORIGENS=('real','piloto','simulado','teste')
+# Canal do pedido a partir do tipo do canal da conversa (uazapi é o WhatsApp).
+CANAL_DO_TIPO={'uazapi':'whatsapp'}
+
+
+async def origem_e_canal(conn,tenant,conversa):
+    """(origem, canal) do pedido que está sendo fechado (LGPD1/AN1). Na ordem: empresa de teste → 'teste'; conversa simulada,
+    agente em mock ou envio de teste → 'simulado'; cliente da lista do piloto com o piloto ligado → 'piloto'; senão 'real'."""
+    from nucleo.banco import Repositorio
+    from nucleo.configuracao import Configuracoes
+    v=await conn.fetchrow("""SELECT v.agente_id,v.telefone,v.simulada,v.canal,k.tipo,t.tenant_teste FROM conversas v JOIN tenants t ON t.id=v.tenant_id
+        LEFT JOIN tenant_canais k ON k.tenant_id=v.tenant_id AND k.id=v.canal_id WHERE v.tenant_id=$1 AND v.conversation_id=$2""",tenant,conversa)
+    canal=CANAL_DO_TIPO.get(v['tipo'] or v['canal'],v['tipo'] or v['canal'])
+    if v['tenant_teste']: return 'teste',canal
+    cfg=await Configuracoes(Repositorio(conn)).efetiva(tenant,v['agente_id'])
+    if v['simulada'] or cfg.get('agente_mode')=='mock' or cfg.get('send_mode')!='live': return 'simulado',canal
+    if cfg.get('modo_piloto') and v['telefone'] in (cfg.get('contatos_permitidos') or []): return 'piloto',canal
+    return 'real',canal
+
+
 async def fechar(conn,tenant,conversa):
     """Fecha o carrinho em pré-pedido (aguardando a unidade). Revalida tudo com o catálogo de agora."""
     await travar(conn,tenant,conversa)
@@ -515,12 +535,13 @@ async def fechar(conn,tenant,conversa):
             'observacao':l['observacao'],'alcoolico':l['alcoolico']} for l in ls]
     conv=await conn.fetchrow('SELECT telefone FROM conversas WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa)
     nome,_=await nome_da_conversa(conn,tenant,conversa)
+    origem,canal=await origem_e_canal(conn,tenant,conversa)
     p=await conn.fetchrow('''INSERT INTO pedidos(tenant_id,numero,conversation_id,carrinho_id,unidade,modalidade,endereco,horario,observacao,
-        itens,subtotal,taxa_entrega,total,cliente_nome,cliente_telefone,tem_alcoolico,maioridade_confirmada,agendado_para)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *''',
+        itens,subtotal,taxa_entrega,total,cliente_nome,cliente_telefone,tem_alcoolico,maioridade_confirmada,agendado_para,origem,canal)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *''',
         tenant,await _numero(conn,tenant),conversa,c['id'],c['unidade'],c['modalidade'],c['endereco'] if c['modalidade']=='delivery' else None,
         c['horario'],c['observacao'],json.dumps(itens,ensure_ascii=False),subtotal,taxa,subtotal+(taxa or 0),nome,conv['telefone'],
-        tem_alcool,bool(c['maioridade_confirmada']),agendado)
+        tem_alcool,bool(c['maioridade_confirmada']),agendado,origem,canal)
     await conn.execute("UPDATE carrinhos SET status='fechado',atualizado_em=now() WHERE tenant_id=$1 AND id=$2",tenant,c['id'])
     await registrar_evento(conn,tenant,p['id'],None,'aguardando_loja','agente','agente')
     return p

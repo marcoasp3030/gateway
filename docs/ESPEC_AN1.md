@@ -239,3 +239,26 @@ Cada um com testes de cálculo (pedidos fixos com resultado conhecido, inclusive
 | 9 | Ficha do cliente | Só admin e plataforma; membro vê a lista mascarada |
 | 10 | Quem vê a análise | Todos os papéis da empresa veem os números; exportação só admin e plataforma |
 | 11 | Ordem | Depois de ENC1/FUP1, ou antes? Hoje não há pedido real para analisar: proposta é AN1-a logo após a entrada do primeiro cliente real ou junto com a entrada de pedidos externos |
+
+---
+
+## 10. Decisões do Marco (16/10/2026)
+
+1. Canais: AN1 só com WhatsApp, já com o campo `canal`; iFood e 99Food num bloco próprio, **PEDEXT** (`docs/ESPEC_PEDEXT.md`). Cliente de marketplace **não se une** ao cliente do WhatsApp.
+2. Faturado: de `confirmado` em diante; `aguardando_loja` à parte como em aberto; faturamento = total com taxa, com itens e taxa separados.
+3. xlsx: dependência `openpyxl` aprovada (fixada no `requirements.txt` quando o primeiro bloco que gera xlsx entrar — AN1-c ou ARQ1).
+4. Marca de origem **já**, junto do LGPD1 (seção 11).
+5. Ordem: LGPD1 + marca de origem → troca da senha do Postgres (horário combinado com o Marco) → ENC1-a → FUP1-a → FUP1-b + ENC1-b → PEDEXT → AN1-a → AN1-b → AN1-c.
+
+## 11. LGPD1 + origem do pedido (implementado)
+
+Migração 044. No fechamento, o pedido grava:
+
+- `origem`: `teste` (empresa de teste) → `simulado` (conversa simulada pelo painel, agente em `mock` ou envio `dry`) → `piloto` (cliente da lista do piloto, com o piloto ligado) → `real`, nessa ordem de precedência. A Skill do agente não mostra a marca.
+- `canal`: `whatsapp` (canal uazapi) ou `api`; os do PEDEXT virão depois.
+- Os pedidos anteriores à migração ficaram `teste` (os 11 do By Koji), com o canal da conversa.
+
+Painel: `origem` e `canal` em cada pedido de `GET /tenants/{t}/pedidos` e do detalhe; filtro `?origem=real` (várias separadas por vírgula; valor inválido → 400 `{"campo":"origem","motivo":"opcao"}`).
+
+LGPD1 (anonimização), além do que já saía: a observação de cada item (no carrinho e na lista de itens do pedido, que mantém o campo, vazio) e os registros que ainda ficavam com o identificador antigo da conversa (que contém o telefone): `skill_chamadas`, `skill_registro` e `catalogo_vistos`. Nenhum contato tinha sido anonimizado em produção, então não havia dado antigo a corrigir.
+

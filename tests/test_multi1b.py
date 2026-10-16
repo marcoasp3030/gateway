@@ -100,17 +100,19 @@ def test_anonimizacao_tira_dados_pessoais_de_carrinho_pedido_eventos_avisos_e_so
             pessoais=(telefone,nome,'Joana',endereco,obs,'Acácias')
             for tabela,filtro in (('carrinhos','conversation_id=$2'),('carrinho_itens','carrinho_id IN (SELECT id FROM carrinhos WHERE tenant_id=$1 AND conversation_id=$2)'),
                                   ('pedidos','conversation_id=$2'),('pedido_eventos','pedido_id IN (SELECT id FROM pedidos WHERE tenant_id=$1 AND conversation_id=$2)'),
-                                  ('avisos_internos','conversation_id=$2'),('solicitacoes','conversation_id=$2')):
+                                  ('avisos_internos','conversation_id=$2'),('solicitacoes','conversation_id=$2'),
+                                  # LGPD1: registros das Skills e do catálogo passam para o identificador novo.
+                                  ('skill_chamadas','conversation_id=$2'),('skill_registro','conversation_id=$2'),('catalogo_vistos','conversation_id=$2')):
                 linhas=await conn.fetch(f'SELECT row_to_json(t)::text AS dado FROM {tabela} t WHERE tenant_id=$1 AND {filtro}',T,novo)
                 assert linhas or tabela in ('avisos_internos',),tabela
                 for l in linhas:
-                    # Falha que já existia antes do MULTI1-b (o retrato confirma): a observação de cada item (no carrinho e na lista de
-                    # itens do pedido) não é apagada.
-                    # Fica registrada aqui até o Marco decidir; o resto dos dados pessoais sai.
-                    for dado in pessoais: assert dado not in l['dado'] or (tabela in ('carrinho_itens','pedidos') and dado==obs),(tabela,dado)
+                    # LGPD1: inclusive a observação de cada item (no carrinho e na lista de itens do pedido).
+                    for dado in pessoais: assert dado not in l['dado'],(tabela,dado)
                 # Nada ficou para trás com o identificador antigo.
                 assert not await conn.fetchval(f"SELECT count(*) FROM {tabela} t WHERE tenant_id=$1 AND row_to_json(t)::text LIKE '%'||$2||'%'",T,telefone),tabela
-            assert await conn.fetchval("SELECT count(*) FROM carrinho_itens WHERE tenant_id=$1 AND observacao=$2",T,obs)==1   # a falha registrada acima
+            assert not await conn.fetchval("SELECT count(*) FROM carrinho_itens WHERE tenant_id=$1 AND observacao IS NOT NULL",T)
+            itens=json.loads(await conn.fetchval('SELECT itens FROM pedidos WHERE tenant_id=$1 AND conversation_id=$2',T,novo))
+            assert [(i['nome'],i['quantidade'],i['observacao']) for i in itens]==[('Edamame',2,None)]   # a lista continua com o mesmo formato
             p=await conn.fetchrow('SELECT numero,status,total,cliente_nome,cliente_telefone,endereco,observacao FROM pedidos WHERE tenant_id=$1 AND conversation_id=$2',T,novo)
             assert (p['numero'],p['status'],float(p['total']))==(numero,'aguardando_loja',68.0) and p['cliente_nome'] is None and p['cliente_telefone'] is None
             assert await conn.fetchval("SELECT count(*) FROM carrinhos WHERE tenant_id=$1 AND conversation_id=$2",T,novo)==2

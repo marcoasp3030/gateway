@@ -269,7 +269,8 @@ def resumo_painel(r):
     """Pedido como o painel vê na lista (inclui telefone do cliente: uso interno)."""
     b=servico.retrato_pedido(r)
     aviso=None if r['aviso_evento'] is None else {'status':'desligado' if r['aviso_evento']=='desligado' else (r['aviso_status'] or 'pendente')}
-    return {**b,'id':r['id'],'cliente_telefone':r['cliente_telefone'],'decidido_por':r['decidido_por'],
+    # LGPD1/AN1: em que condição o pedido nasceu (real, piloto, simulado, teste) e por onde entrou.
+    return {**b,'id':r['id'],'origem':r['origem'],'canal':r['canal'],'cliente_telefone':r['cliente_telefone'],'decidido_por':r['decidido_por'],
             'unidade_nome':r['unidade_nome'] or r['unidade'],'numero_itens':sum(i['quantidade'] for i in b['itens']),
             'cliente':{'nome':r['cliente_nome'],'telefone':e164(r['cliente_telefone']),
                        'canal':{'id':r['canal_id'],'tipo':r['canal_tipo'],'nome':r['canal_nome'],'icone':ICONES.get(r['canal_tipo'])} if r['canal_id'] else None},
@@ -285,9 +286,11 @@ async def detalhe_painel(db,tenant_id,numero):
 
 @admin.get('/tenants/{tenant_id}/pedidos')
 async def lista(request:Request,tenant_id:str,status:str|None=None,unidade:str|None=None,modalidade:Literal['delivery','retirada']|None=None,
-                desde:datetime|None=None,ate:datetime|None=None,busca:str|None=None,limite:int=50,cursor:int=0):
+                desde:datetime|None=None,ate:datetime|None=None,busca:str|None=None,limite:int=50,cursor:int=0,origem:str|None=None):
     if not await Repositorio(request.app.state.db).tenant(tenant_id): raise HTTPException(404,'NOT_FOUND')
     varios=[s for s in (status or '').split(',') if s] or None
+    origens=[o for o in (origem or '').split(',') if o] or None
+    if origens and any(o not in servico.ORIGENS for o in origens): raise HTTPException(400,{'campo':'origem','motivo':'opcao'})
     if (not 1<=limite<=100 or cursor<0 or (varios and any(s not in servico.STATUS for s in varios)) or (busca is not None and not 2<=len(busca.strip())<=100)
             or any(d is not None and d.tzinfo is None for d in (desde,ate))): raise HTTPException(400,'VALIDATION_ERROR')
     termo=busca.strip() if busca else None;digitos=''.join(c for c in termo or '' if c.isdigit())
@@ -296,7 +299,8 @@ async def lista(request:Request,tenant_id:str,status:str|None=None,unidade:str|N
         AND ($6::text IS NULL OR p.modalidade=$6) AND ($7::timestamptz IS NULL OR p.criado_em>=$7) AND ($8::timestamptz IS NULL OR p.criado_em<$8)
         AND ($9::text IS NULL OR strpos(lower(p.numero),lower($9))>0 OR strpos(lower(coalesce(p.cliente_nome,'')),lower($9))>0
              OR ($10<>'' AND strpos(coalesce(p.cliente_telefone,''),$10)>0))
-        ORDER BY p.id DESC LIMIT $5""",tenant_id,varios,unidade,cursor,limite+1,modalidade,desde,ate,termo,digitos)
+        AND ($11::text[] IS NULL OR p.origem=ANY($11))
+        ORDER BY p.id DESC LIMIT $5""",tenant_id,varios,unidade,cursor,limite+1,modalidade,desde,ate,termo,digitos,origens)
     return {'itens':[resumo_painel(r) for r in rows[:limite]],'proximo_cursor':rows[limite-1]['id'] if len(rows)>limite else None}
 
 

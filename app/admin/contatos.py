@@ -111,7 +111,9 @@ async def anonimizar(request:Request,tenant_id:str,cid:str,body:Confirmacao,acto
                 await c.execute("UPDATE audit_log SET alvo=$3,dados='{}'::jsonb WHERE tenant_id=$1 AND alvo=$2",t,old,new)
                 # O que os módulos guardam da conversa (pedidos: carrinho, pedido e eventos) também perde os dados pessoais.
                 from modulos import ganchos
-                for _,limpar in ganchos('anonimizar'): await limpar(c,t,new)
+                for _,limpar in ganchos('anonimizar'): await limpar(c,t,old,new)
+                # LGPD1: o registro das Skills (só nomes de campos e status) passa para o identificador novo.
+                await c.execute('UPDATE skill_registro SET conversation_id=$3 WHERE tenant_id=$1 AND conversation_id=$2',t,old,new)
                 await c.execute("UPDATE avisos_internos SET conversation_id=$3,texto='[anonimizado]',referencia=md5(referencia) WHERE tenant_id=$1 AND conversation_id=$2",t,old,new)
                 await c.execute("UPDATE solicitacoes SET dados='{}'::jsonb,nota=NULL,motivo_informado=NULL WHERE tenant_id=$1 AND conversation_id=$2",t,new)
             # Brutos sem vínculo legados: só anonimiza registros que contêm identificador.

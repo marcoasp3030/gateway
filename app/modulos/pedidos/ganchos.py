@@ -90,11 +90,19 @@ async def resumo_das_conversas(db,tenant,conversas):
     return saida
 
 
-async def anonimizar(conn,tenant,conversa):
-    """LGPD: carrinho e pedido acompanham a troca do identificador (ON UPDATE CASCADE); saem endereço, observações e dados do cliente."""
-    await conn.execute('UPDATE carrinhos SET endereco=NULL,observacao=NULL WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa)
-    await conn.execute('UPDATE pedidos SET endereco=NULL,observacao=NULL,cliente_nome=NULL,cliente_telefone=NULL WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa)
-    await conn.execute("UPDATE pedido_eventos SET motivo=NULL,por='anonimizado' WHERE tenant_id=$1 AND pedido_id IN (SELECT id FROM pedidos WHERE tenant_id=$1 AND conversation_id=$2)",tenant,conversa)
+async def anonimizar(conn,tenant,antiga,nova):
+    """LGPD: carrinho e pedido acompanham a troca do identificador (ON UPDATE CASCADE); saem endereço, observações (a geral e a de
+    cada item, LGPD1) e dados do cliente. O registro curto das Skills (sem endereço nem observação) passa para o identificador novo."""
+    await conn.execute('UPDATE carrinhos SET endereco=NULL,observacao=NULL WHERE tenant_id=$1 AND conversation_id=$2',tenant,nova)
+    await conn.execute('UPDATE carrinho_itens SET observacao=NULL WHERE tenant_id=$1 AND carrinho_id IN '
+                       '(SELECT id FROM carrinhos WHERE tenant_id=$1 AND conversation_id=$2)',tenant,nova)
+    # Cada item do pedido continua com o campo "observacao", vazio.
+    await conn.execute("""UPDATE pedidos SET endereco=NULL,observacao=NULL,cliente_nome=NULL,cliente_telefone=NULL,
+        itens=(SELECT coalesce(jsonb_agg(CASE WHEN jsonb_typeof(i)='object' AND i ? 'observacao' THEN i||'{"observacao":null}'::jsonb ELSE i END ORDER BY n),'[]'::jsonb)
+               FROM jsonb_array_elements(itens) WITH ORDINALITY AS x(i,n))
+        WHERE tenant_id=$1 AND conversation_id=$2""",tenant,nova)
+    await conn.execute("UPDATE pedido_eventos SET motivo=NULL,por='anonimizado' WHERE tenant_id=$1 AND pedido_id IN (SELECT id FROM pedidos WHERE tenant_id=$1 AND conversation_id=$2)",tenant,nova)
+    await conn.execute('UPDATE skill_chamadas SET conversation_id=$3 WHERE tenant_id=$1 AND conversation_id=$2',tenant,antiga,nova)
 
 
 async def metricas(db,tenant,agente):
