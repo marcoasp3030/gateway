@@ -14,6 +14,7 @@ from nucleo.autenticacao import painel, exigir_admin
 from nucleo.banco import Repositorio
 from nucleo.configuracao import Configuracoes
 from nucleo.contatos import exibicao, canal_info
+from nucleo import atendimentos
 from canais import uazapi
 from agentes.controle import CredencialRecusada, CircuitoAberto
 
@@ -153,7 +154,9 @@ async def conversas(request: Request, tenant: str, agente: str | None = None, ca
         m.conteudo AS ultima_mensagem,m.enviada_em AS ultima_em,m.direcao AS ultima_direcao,m.origem AS ultima_origem,m.tipo AS ultima_tipo,
         ct.nome AS contato_nome,ct.nome_cadastro,ct.nome_informado,ct.nome_perfil,ct.anonimizado_em,
         k.tipo AS canal_tipo,k.nome AS canal_nome,t.tenant_teste,
-        c.unidade_preferida,u.nome AS unidade_preferida_nome
+        c.unidade_preferida,u.nome AS unidade_preferida_nome,
+        a.id AS at_id,a.numero AS at_numero,a.estado AS at_estado,a.aberto_em AS at_aberto_em,a.encerrado_em AS at_encerrado_em,
+        a.motivo_encerramento AS at_motivo_encerramento
         FROM conversas c
         JOIN tenants t ON t.id=c.tenant_id
         LEFT JOIN tenant_canais k ON k.tenant_id=c.tenant_id AND k.id=c.canal_id
@@ -162,6 +165,7 @@ async def conversas(request: Request, tenant: str, agente: str | None = None, ca
             SELECT conteudo,enviada_em,direcao,origem,tipo FROM mensagens WHERE tenant_id=c.tenant_id
             AND conversation_id=c.conversation_id ORDER BY id DESC LIMIT 1) m ON true
         LEFT JOIN tenant_unidades u ON u.tenant_id=c.tenant_id AND u.codigo=c.unidade_preferida
+        LEFT JOIN atendimentos a ON a.tenant_id=c.tenant_id AND a.id=c.atendimento_id
         WHERE c.tenant_id=$1 AND ($2::text IS NULL OR c.agente_id=$2)
         AND ($3::text IS NULL OR c.canal_id=$3)
         AND ($4::text IS NULL OR (CASE WHEN c.bot_pausado_ate>now() THEN 'pausada' ELSE 'ativa' END)=$4)
@@ -229,7 +233,11 @@ def conversa_do_painel(r, resumo=None, nomes_das_unidades=None):
             'unidade_preferida': linha['unidade_preferida'],
             'unidade_preferida_nome': linha['unidade_preferida_nome'] or linha['unidade_preferida'],
             'estado': linha['estado'], 'ultima': ultima,
-            'pedido_aberto': resumo.get('pedido_aberto')}
+            'pedido_aberto': resumo.get('pedido_aberto'),
+            # ENC1-a: o atendimento atual (aberto, ou o último encerrado); nulo em conversa sem atendimento.
+            'atendimento': None if not linha.get('at_id') else atendimentos.para_o_painel(
+                {'id': linha['at_id'], 'numero': linha['at_numero'], 'estado': linha['at_estado'], 'aberto_em': linha['at_aberto_em'],
+                 'encerrado_em': linha['at_encerrado_em'], 'motivo_encerramento': linha['at_motivo_encerramento']}, linha)}
 
 
 async def pausar(request, tenant, conv, minutos, actor, acao):

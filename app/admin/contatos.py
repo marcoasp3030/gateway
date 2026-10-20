@@ -116,6 +116,8 @@ async def anonimizar(request:Request,tenant_id:str,cid:str,body:Confirmacao,acto
                 await c.execute('UPDATE skill_registro SET conversation_id=$3 WHERE tenant_id=$1 AND conversation_id=$2',t,old,new)
                 await c.execute("UPDATE avisos_internos SET conversation_id=$3,texto='[anonimizado]',referencia=md5(referencia) WHERE tenant_id=$1 AND conversation_id=$2",t,old,new)
                 await c.execute("UPDATE solicitacoes SET dados='{}'::jsonb,nota=NULL,motivo_informado=NULL WHERE tenant_id=$1 AND conversation_id=$2",t,new)
+                # ENC1-a: os atendimentos acompanham a troca do identificador (ON UPDATE CASCADE); o resumo sai.
+                await c.execute('UPDATE atendimentos SET resumo=NULL WHERE tenant_id=$1 AND conversation_id=$2',t,new)
             # Brutos sem vínculo legados: só anonimiza registros que contêm identificador.
             for raw in await c.fetch('SELECT id,payload,contato_id FROM webhook_raw WHERE tenant_id=$1',t):
                 if raw['contato_id']==cid or contem(str(raw['payload']),ident):

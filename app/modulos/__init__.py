@@ -33,7 +33,8 @@ class Modulo:
     # Campos da unidade que vão ao agente no pacote (só para agente com o módulo).
     campos_da_unidade: tuple = ()
     # Módulo com as funções-gancho (importado só quando usado): antes_do_turno, numero_interno, em_andamento, acoes_do_turno,
-    # acoes_recentes, guarda_da_resposta, resumo_para_alerta, resumo_das_conversas, anonimizar, metricas, enviar_aviso, unidades_no_pacote.
+    # acoes_recentes, guarda_da_resposta, resumo_para_alerta, resumo_das_conversas, anonimizar, metricas, enviar_aviso, unidades_no_pacote;
+    # ENC1-a: encerra_no_turno, sem_retorno, resumo_do_atendimento, resumo_dos_atendimentos.
     ganchos: str | None = None
 
     def gancho(self,nome):

@@ -204,10 +204,13 @@ MAX_ACOES_RECENTES=20
 
 async def acoes_recentes(db,tenant,conversa,minutos):
     """Chamadas de Skill desta conversa nos últimos `minutos` (UX3.1): as 20 mais recentes, da mais antiga
-    para a mais nova, com há quantos segundos foi cada uma. Mesmo resumo de acoes_ja_executadas."""
+    para a mais nova, com há quantos segundos foi cada uma. Mesmo resumo de acoes_ja_executadas.
+    ENC1-a: só as do atendimento atual (Skill de um atendimento encerrado não vale como "acabei de fazer")."""
     if not minutos or minutos<=0: return []
     rows=await db.fetch("""SELECT skill,dados,resultado,greatest(0,extract(epoch FROM now()-criado_em))::int ha FROM skill_chamadas
-        WHERE tenant_id=$1 AND conversation_id=$2 AND criado_em>now()-make_interval(mins=>$3) ORDER BY id DESC LIMIT $4""",
+        WHERE tenant_id=$1 AND conversation_id=$2 AND criado_em>now()-make_interval(mins=>$3)
+        AND atendimento_id IS NOT DISTINCT FROM (SELECT atendimento_id FROM conversas WHERE tenant_id=$1 AND conversation_id=$2)
+        ORDER BY id DESC LIMIT $4""",
         tenant,conversa,int(minutos),MAX_ACOES_RECENTES)
     return [{**_acao(r),'ha_segundos':r['ha']} for r in reversed(rows)]
 
@@ -632,6 +635,11 @@ async def contexto(repo,tenant,conversa):
     """Bloco contexto_modulos.pedidos do pacote ao agente: carrinho aberto, carrinho que expirou e o último pedido da conversa."""
     conn=repo.db   # só leituras: serve conexão ou pool
     carrinho=await retrato(conn,tenant,conversa)
+    # ENC1-a: carrinho guardado de um atendimento anterior (o agente não oferece sozinho; usa se o cliente quiser continuar).
+    carrinho['de_atendimento_anterior']=bool(carrinho['itens']) and bool(await conn.fetchval("""SELECT k.atualizado_em<a.aberto_em FROM carrinhos k
+        JOIN conversas c ON c.tenant_id=k.tenant_id AND c.conversation_id=k.conversation_id
+        JOIN atendimentos a ON a.tenant_id=c.tenant_id AND a.id=c.atendimento_id
+        WHERE k.tenant_id=$1 AND k.conversation_id=$2 AND k.status='aberto'""",tenant,conversa))
     if carrinho['atualizado_em']:
         # No fuso da empresa, como as demais datas do pacote.
         from zoneinfo import ZoneInfo

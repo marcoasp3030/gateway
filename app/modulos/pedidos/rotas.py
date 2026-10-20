@@ -465,13 +465,15 @@ async def recusar(request:Request,tenant_id:str,numero:str,dados:Decisao|None=No
 
 
 @admin.get('/tenants/{tenant_id}/skills/registro')
-async def registro_de_skills(request:Request,tenant_id:str,conversation_id:str|None=None,skill:str|None=None,limite:int=50,cursor:int=0):
-    """Todas as chamadas de Skill da empresa (PED2), da mais recente para a mais antiga: nomes dos campos recebidos, status, motivo e tempo."""
+async def registro_de_skills(request:Request,tenant_id:str,conversation_id:str|None=None,skill:str|None=None,limite:int=50,cursor:int=0,
+                             turno_id:int|None=None):
+    """Todas as chamadas de Skill da empresa (PED2), da mais recente para a mais antiga: nomes dos campos recebidos, status, motivo e tempo.
+    ENC1-a: cada chamada diz o turno (turno_id; fora_do_turno=true quando não havia turno em andamento) e o atendimento; ?turno_id= filtra."""
     if not await Repositorio(request.app.state.db).tenant(tenant_id): raise HTTPException(404,'NOT_FOUND')
-    if not 1<=limite<=200 or cursor<0: raise HTTPException(400,'VALIDATION_ERROR')
-    rows=await request.app.state.db.fetch("""SELECT id,conversation_id,skill,metodo,campos,ref,status,motivo,duracao_ms,criado_em FROM skill_registro
-        WHERE tenant_id=$1 AND ($2::text IS NULL OR conversation_id=$2) AND ($3::text IS NULL OR skill=$3) AND ($4=0 OR id<$4)
-        ORDER BY id DESC LIMIT $5""",tenant_id,conversation_id,skill,cursor,limite+1)
+    if not 1<=limite<=200 or cursor<0 or (turno_id is not None and turno_id<1): raise HTTPException(400,'VALIDATION_ERROR')
+    rows=await request.app.state.db.fetch("""SELECT id,conversation_id,skill,metodo,campos,ref,status,motivo,duracao_ms,criado_em,turno_id,fora_do_turno,atendimento_id
+        FROM skill_registro WHERE tenant_id=$1 AND ($2::text IS NULL OR conversation_id=$2) AND ($3::text IS NULL OR skill=$3) AND ($4=0 OR id<$4)
+        AND ($6::bigint IS NULL OR turno_id=$6) ORDER BY id DESC LIMIT $5""",tenant_id,conversation_id,skill,cursor,limite+1,turno_id)
     import json
     return {'itens':[{**dict(r),'ref':json.loads(r['ref']) if isinstance(r['ref'],str) else r['ref']} for r in rows[:limite]],
             'proximo_cursor':rows[limite-1]['id'] if len(rows)>limite else None}

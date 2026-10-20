@@ -101,6 +101,13 @@
     },
     "agente_id": "bykoji_atendimento",
     "agora": "2030-11-05T13:00:00-03:00",
+    "atendimento": {
+     "anterior": null,
+     "id": "at_<id>",
+     "motivo_inicio": "primeiro_contato",
+     "novo": false,
+     "numero": 1
+    },
     "aviso_do_gateway": null,
     "calendario": {
      "dias": [
@@ -191,6 +198,7 @@
        "agendado_para": null,
        "atualizado_em": null,
        "conversation_id": "bykoji:can_<id>:5511900000001",
+       "de_atendimento_anterior": false,
        "endereco": null,
        "faltando": [
         "itens",
@@ -619,6 +627,13 @@
     },
     "agente_id": "bykoji_atendimento",
     "agora": "2030-11-05T13:00:00-03:00",
+    "atendimento": {
+     "anterior": null,
+     "id": "at_<id>",
+     "motivo_inicio": "primeiro_contato",
+     "novo": true,
+     "numero": 1
+    },
     "aviso_do_gateway": null,
     "calendario": {
      "dias": [
@@ -709,6 +724,7 @@
        "agendado_para": null,
        "atualizado_em": null,
        "conversation_id": "bykoji:can_<id>:55119000000014",
+       "de_atendimento_anterior": false,
        "endereco": null,
        "faltando": [
         "itens",
@@ -946,6 +962,13 @@
     },
     "agente_id": "bykoji_atendimento",
     "agora": "2030-11-05T13:00:00-03:00",
+    "atendimento": {
+     "anterior": null,
+     "id": "at_<id>",
+     "motivo_inicio": "primeiro_contato",
+     "novo": true,
+     "numero": 1
+    },
     "aviso_do_gateway": "Você disse que o pedido foi fechado, mas fechar_pedido não foi chamado com sucesso. Chame fechar_pedido ou explique o que falta.",
     "calendario": {
      "dias": [
@@ -1036,6 +1059,7 @@
        "agendado_para": null,
        "atualizado_em": null,
        "conversation_id": "bykoji:can_<id>:55119000000014",
+       "de_atendimento_anterior": false,
        "endereco": null,
        "faltando": [
         "itens",
@@ -1375,6 +1399,13 @@
     },
     "agente_id": "bykoji_atendimento",
     "agora": "2030-11-05T13:00:00-03:00",
+    "atendimento": {
+     "anterior": null,
+     "id": "at_<id>",
+     "motivo_inicio": "primeiro_contato",
+     "novo": false,
+     "numero": 1
+    },
     "aviso_do_gateway": null,
     "calendario": {
      "dias": [
@@ -1465,6 +1496,7 @@
        "agendado_para": null,
        "atualizado_em": "<variavel>",
        "conversation_id": "bykoji:can_<id>:55119000000013",
+       "de_atendimento_anterior": false,
        "endereco": null,
        "faltando": [
         "modalidade",
@@ -1806,6 +1838,13 @@
     },
     "agente_id": "bykoji_atendimento",
     "agora": "2030-11-05T13:00:00-03:00",
+    "atendimento": {
+     "anterior": null,
+     "id": "at_<id>",
+     "motivo_inicio": "primeiro_contato",
+     "novo": false,
+     "numero": 1
+    },
     "aviso_do_gateway": null,
     "calendario": {
      "dias": [
@@ -1896,6 +1935,7 @@
        "agendado_para": null,
        "atualizado_em": null,
        "conversation_id": "bykoji:can_<id>:5511900000001",
+       "de_atendimento_anterior": false,
        "endereco": null,
        "faltando": [
         "itens",
@@ -2327,6 +2367,13 @@
     },
     "agente_id": "bykoji_atendimento",
     "agora": "2030-11-05T13:00:00-03:00",
+    "atendimento": {
+     "anterior": null,
+     "id": "at_<id>",
+     "motivo_inicio": "primeiro_contato",
+     "novo": false,
+     "numero": 1
+    },
     "aviso_do_gateway": null,
     "calendario": {
      "dias": [
@@ -2417,6 +2464,7 @@
        "agendado_para": null,
        "atualizado_em": null,
        "conversation_id": "bykoji:can_<id>:55119000000017",
+       "de_atendimento_anterior": false,
        "endereco": null,
        "faltando": [
         "itens",
@@ -2748,6 +2796,13 @@
     },
     "agente_id": "bykoji_atendimento",
     "agora": "2030-11-05T13:00:00-03:00",
+    "atendimento": {
+     "anterior": null,
+     "id": "at_<id>",
+     "motivo_inicio": "primeiro_contato",
+     "novo": true,
+     "numero": 1
+    },
     "aviso_do_gateway": null,
     "calendario": {
      "dias": [
@@ -2838,6 +2893,7 @@
        "agendado_para": null,
        "atualizado_em": null,
        "conversation_id": "bykoji:can_<id>:55119000000017",
+       "de_atendimento_anterior": false,
        "endereco": null,
        "faltando": [
         "itens",
@@ -3190,6 +3246,13 @@
     },
     "agente_id": "bykoji_atendimento",
     "agora": "2030-11-05T13:00:00-03:00",
+    "atendimento": {
+     "anterior": null,
+     "id": "at_<id>",
+     "motivo_inicio": "primeiro_contato",
+     "novo": false,
+     "numero": 1
+    },
     "aviso_do_gateway": null,
     "calendario": {
      "dias": [
@@ -3280,6 +3343,7 @@
        "agendado_para": null,
        "atualizado_em": null,
        "conversation_id": "bykoji:can_<id>:5511900000001",
+       "de_atendimento_anterior": false,
        "endereco": null,
        "faltando": [
         "itens",
@@ -3789,6 +3853,13 @@
     },
     "agente_id": "bykoji_atendimento",
     "agora": "2030-11-05T13:00:00-03:00",
+    "atendimento": {
+     "anterior": null,
+     "id": "at_<id>",
+     "motivo_inicio": "primeiro_contato",
+     "novo": false,
+     "numero": 1
+    },
     "aviso_do_gateway": null,
     "calendario": {
      "dias": [
@@ -3879,6 +3950,7 @@
        "agendado_para": "2030-11-05T14:00:00-03:00",
        "atualizado_em": "<variavel>",
        "conversation_id": "bykoji:can_<id>:5511900000001",
+       "de_atendimento_anterior": false,
        "endereco": null,
        "faltando": [],
        "horario": "hoje às 14h",
@@ -4298,6 +4370,13 @@
     },
     "agente_id": "bykoji_atendimento",
     "agora": "2030-11-05T23:30:00-03:00",
+    "atendimento": {
+     "anterior": null,
+     "id": "at_<id>",
+     "motivo_inicio": "primeiro_contato",
+     "novo": true,
+     "numero": 1
+    },
     "aviso_do_gateway": null,
     "calendario": {
      "dias": [
@@ -4388,6 +4467,7 @@
        "agendado_para": null,
        "atualizado_em": null,
        "conversation_id": "bykoji:can_<id>:55119000000018",
+       "de_atendimento_anterior": false,
        "endereco": null,
        "faltando": [
         "itens",
@@ -4788,6 +4868,14 @@
     "agente_id": "bykoji_atendimento",
     "aguardando_atendente_desde": null,
     "aguardando_motivo": null,
+    "atendimento": {
+     "aberto_em": "<agora-do-banco>",
+     "encerrado_em": null,
+     "estado": "aberto",
+     "id": "at_<id>",
+     "motivo_encerramento": null,
+     "numero": 1
+    },
     "atualizado_em": "<variavel>",
     "bot_pausado_ate": null,
     "canal": "api",
@@ -4838,6 +4926,14 @@
     "agente_id": "bykoji_atendimento",
     "aguardando_atendente_desde": "<agora-do-banco>",
     "aguardando_motivo": "transferido_pelo_agente",
+    "atendimento": {
+     "aberto_em": "<agora-do-banco>",
+     "encerrado_em": null,
+     "estado": "em_atendimento_humano",
+     "id": "at_<id>",
+     "motivo_encerramento": null,
+     "numero": 1
+    },
     "atualizado_em": "<variavel>",
     "bot_pausado_ate": "<agora-do-banco>",
     "canal": "api",
@@ -4885,6 +4981,14 @@
     "agente_id": "bykoji_atendimento",
     "aguardando_atendente_desde": null,
     "aguardando_motivo": null,
+    "atendimento": {
+     "aberto_em": "<agora-do-banco>",
+     "encerrado_em": null,
+     "estado": "aberto",
+     "id": "at_<id>",
+     "motivo_encerramento": null,
+     "numero": 1
+    },
     "atualizado_em": "<variavel>",
     "bot_pausado_ate": null,
     "canal": "api",
@@ -4937,6 +5041,14 @@
     "agente_id": "bykoji_atendimento",
     "aguardando_atendente_desde": null,
     "aguardando_motivo": null,
+    "atendimento": {
+     "aberto_em": "<agora-do-banco>",
+     "encerrado_em": null,
+     "estado": "aberto",
+     "id": "at_<id>",
+     "motivo_encerramento": null,
+     "numero": 1
+    },
     "atualizado_em": "<variavel>",
     "bot_pausado_ate": null,
     "canal": "api",
@@ -4984,6 +5096,14 @@
     "agente_id": "bykoji_atendimento",
     "aguardando_atendente_desde": "<agora-do-banco>",
     "aguardando_motivo": "transferido_pelo_agente",
+    "atendimento": {
+     "aberto_em": "<agora-do-banco>",
+     "encerrado_em": null,
+     "estado": "em_atendimento_humano",
+     "id": "at_<id>",
+     "motivo_encerramento": null,
+     "numero": 1
+    },
     "atualizado_em": "<variavel>",
     "bot_pausado_ate": "<agora-do-banco>",
     "canal": "api",
@@ -5031,6 +5151,14 @@
     "agente_id": "bykoji_atendimento",
     "aguardando_atendente_desde": "<agora-do-banco>",
     "aguardando_motivo": "transferido_pelo_agente",
+    "atendimento": {
+     "aberto_em": "<agora-do-banco>",
+     "encerrado_em": null,
+     "estado": "em_atendimento_humano",
+     "id": "at_<id>",
+     "motivo_encerramento": null,
+     "numero": 1
+    },
     "atualizado_em": "<variavel>",
     "bot_pausado_ate": "<agora-do-banco>",
     "canal": "api",
@@ -5078,6 +5206,14 @@
     "agente_id": "bykoji_atendimento",
     "aguardando_atendente_desde": null,
     "aguardando_motivo": null,
+    "atendimento": {
+     "aberto_em": "<agora-do-banco>",
+     "encerrado_em": null,
+     "estado": "aberto",
+     "id": "at_<id>",
+     "motivo_encerramento": null,
+     "numero": 1
+    },
     "atualizado_em": "<variavel>",
     "bot_pausado_ate": null,
     "canal": "api",
@@ -5125,6 +5261,14 @@
     "agente_id": "bykoji_atendimento",
     "aguardando_atendente_desde": null,
     "aguardando_motivo": null,
+    "atendimento": {
+     "aberto_em": "<agora-do-banco>",
+     "encerrado_em": null,
+     "estado": "aberto",
+     "id": "at_<id>",
+     "motivo_encerramento": null,
+     "numero": 1
+    },
     "atualizado_em": "<variavel>",
     "bot_pausado_ate": null,
     "canal": "api",
@@ -5172,6 +5316,14 @@
     "agente_id": "bykoji_atendimento",
     "aguardando_atendente_desde": null,
     "aguardando_motivo": null,
+    "atendimento": {
+     "aberto_em": "<agora-do-banco>",
+     "encerrado_em": null,
+     "estado": "aberto",
+     "id": "at_<id>",
+     "motivo_encerramento": null,
+     "numero": 1
+    },
     "atualizado_em": "<variavel>",
     "bot_pausado_ate": null,
     "canal": "api",
@@ -5260,6 +5412,14 @@
     },
     "refazer_recusado": {},
     "turnos_refeitos": 3
+   },
+   "por_versao_do_prompt": {
+    "sem_versao": {
+     "refeitos": 3,
+     "total_p50_ms": "<variavel>",
+     "transferencias": 4,
+     "turnos": 18
+    }
    },
    "reacoes": {
     "aplicadas": {
@@ -5654,6 +5814,13 @@
     },
     "agente_id": "bykoji_atendimento",
     "agora": "2030-11-05T13:00:00-03:00",
+    "atendimento": {
+     "anterior": null,
+     "id": "at_<id>",
+     "motivo_inicio": "primeiro_contato",
+     "novo": false,
+     "numero": 1
+    },
     "aviso_do_gateway": null,
     "calendario": {
      "dias": [
@@ -5744,6 +5911,7 @@
        "agendado_para": null,
        "atualizado_em": "<variavel>",
        "conversation_id": "bykoji:can_<id>:5511900000001",
+       "de_atendimento_anterior": false,
        "endereco": null,
        "faltando": [
         "modalidade"
@@ -6317,6 +6485,13 @@
     },
     "agente_id": "bykoji_atendimento",
     "agora": "2030-11-05T13:00:00-03:00",
+    "atendimento": {
+     "anterior": null,
+     "id": "at_<id>",
+     "motivo_inicio": "primeiro_contato",
+     "novo": true,
+     "numero": 1
+    },
     "aviso_do_gateway": null,
     "calendario": {
      "dias": [
@@ -6407,6 +6582,7 @@
        "agendado_para": null,
        "atualizado_em": null,
        "conversation_id": "bykoji:can_<id>:5511900000001",
+       "de_atendimento_anterior": false,
        "endereco": null,
        "faltando": [
         "itens",
@@ -6720,6 +6896,13 @@
     },
     "agente_id": "bykoji_atendimento",
     "agora": "2030-11-05T23:30:00-03:00",
+    "atendimento": {
+     "anterior": null,
+     "id": "at_<id>",
+     "motivo_inicio": "primeiro_contato",
+     "novo": false,
+     "numero": 1
+    },
     "aviso_do_gateway": null,
     "calendario": {
      "dias": [
@@ -6810,6 +6993,7 @@
        "agendado_para": null,
        "atualizado_em": null,
        "conversation_id": "bykoji:can_<id>:5511900000001",
+       "de_atendimento_anterior": false,
        "endereco": null,
        "faltando": [
         "itens",
@@ -7249,6 +7433,13 @@
     },
     "agente_id": "bykoji_atendimento",
     "agora": "2030-11-05T13:00:00-03:00",
+    "atendimento": {
+     "anterior": null,
+     "id": "at_<id>",
+     "motivo_inicio": "primeiro_contato",
+     "novo": true,
+     "numero": 1
+    },
     "aviso_do_gateway": null,
     "calendario": {
      "dias": [
@@ -7339,6 +7530,7 @@
        "agendado_para": null,
        "atualizado_em": null,
        "conversation_id": "bykoji:can_<id>:55119000000012",
+       "de_atendimento_anterior": false,
        "endereco": null,
        "faltando": [
         "itens",
@@ -7654,6 +7846,13 @@
     },
     "agente_id": "bykoji_atendimento",
     "agora": "2030-11-05T13:00:00-03:00",
+    "atendimento": {
+     "anterior": null,
+     "id": "at_<id>",
+     "motivo_inicio": "primeiro_contato",
+     "novo": false,
+     "numero": 1
+    },
     "aviso_do_gateway": null,
     "calendario": {
      "dias": [
@@ -7744,6 +7943,7 @@
        "agendado_para": null,
        "atualizado_em": null,
        "conversation_id": "bykoji:can_<id>:5511900000001",
+       "de_atendimento_anterior": false,
        "endereco": null,
        "faltando": [
         "itens",
@@ -8117,6 +8317,13 @@
     },
     "agente_id": "bykoji_atendimento",
     "agora": "2030-11-05T13:00:00-03:00",
+    "atendimento": {
+     "anterior": null,
+     "id": "at_<id>",
+     "motivo_inicio": "primeiro_contato",
+     "novo": true,
+     "numero": 1
+    },
     "aviso_do_gateway": null,
     "calendario": {
      "dias": [
@@ -8207,6 +8414,7 @@
        "agendado_para": null,
        "atualizado_em": null,
        "conversation_id": "bykoji:can_<id>:55119000000016",
+       "de_atendimento_anterior": false,
        "endereco": null,
        "faltando": [
         "itens",
@@ -8545,6 +8753,13 @@
     },
     "agente_id": "bykoji_atendimento",
     "agora": "2030-11-05T13:00:00-03:00",
+    "atendimento": {
+     "anterior": null,
+     "id": "at_<id>",
+     "motivo_inicio": "primeiro_contato",
+     "novo": true,
+     "numero": 1
+    },
     "aviso_do_gateway": null,
     "calendario": {
      "dias": [
@@ -8635,6 +8850,7 @@
        "agendado_para": null,
        "atualizado_em": null,
        "conversation_id": "bykoji:can_<id>:55119000000015",
+       "de_atendimento_anterior": false,
        "endereco": null,
        "faltando": [
         "itens",
@@ -8872,6 +9088,13 @@
     },
     "agente_id": "bykoji_atendimento",
     "agora": "2030-11-05T13:00:00-03:00",
+    "atendimento": {
+     "anterior": null,
+     "id": "at_<id>",
+     "motivo_inicio": "primeiro_contato",
+     "novo": true,
+     "numero": 1
+    },
     "aviso_do_gateway": "Você pediu transferência por pedido_para_confirmar, mas nenhuma Skill recusou nada neste turno. Chame a Skill necessária (buscar_catalogo, adicionar_item) antes; só transfira se ela recusar, ou explique o motivo real.",
     "calendario": {
      "dias": [
@@ -8962,6 +9185,7 @@
        "agendado_para": null,
        "atualizado_em": null,
        "conversation_id": "bykoji:can_<id>:55119000000015",
+       "de_atendimento_anterior": false,
        "endereco": null,
        "faltando": [
         "itens",
@@ -9263,6 +9487,13 @@
     },
     "agente_id": "bykoji_atendimento",
     "agora": "2030-11-05T13:00:00-03:00",
+    "atendimento": {
+     "anterior": null,
+     "id": "at_<id>",
+     "motivo_inicio": "primeiro_contato",
+     "novo": true,
+     "numero": 1
+    },
     "aviso_do_gateway": null,
     "calendario": {
      "dias": [
@@ -9353,6 +9584,7 @@
        "agendado_para": null,
        "atualizado_em": null,
        "conversation_id": "bykoji:can_<id>:55119000000013",
+       "de_atendimento_anterior": false,
        "endereco": null,
        "faltando": [
         "itens",
@@ -9605,6 +9837,13 @@
     },
     "agente_id": "bykoji_atendimento",
     "agora": "2030-11-05T13:00:00-03:00",
+    "atendimento": {
+     "anterior": null,
+     "id": "at_<id>",
+     "motivo_inicio": "primeiro_contato",
+     "novo": true,
+     "numero": 1
+    },
     "aviso_do_gateway": null,
     "calendario": {
      "dias": [
@@ -9695,6 +9934,7 @@
        "agendado_para": null,
        "atualizado_em": "<variavel>",
        "conversation_id": "bykoji:can_<id>:55119000000013",
+       "de_atendimento_anterior": false,
        "endereco": null,
        "faltando": [
         "modalidade",

@@ -1,6 +1,6 @@
 # ENC1-a — Atendimento identificado: começo, fim e reabertura
 
-**Situação: proposta para revisão do Marco, 16/10/2026. Nada implementado.** Base: `docs/ANALISE_COMPORTAMENTO_1.md` (seção 7) e as decisões E1–E5 de 13/10. Junto vem a instrumentação pedida: cada chamada de Skill ligada ao seu turno e a versão do prompt. O ENC1-b (inatividade com e sem follow-up, métricas) vem depois do FUP1-a, como combinado.
+**Situação: aprovada pelo Marco em 20/10/2026 (seção 6) e implementada (seção 7).** Base: `docs/ANALISE_COMPORTAMENTO_1.md` (seção 7) e as decisões E1–E5 de 13/10. Junto vem a instrumentação pedida: cada chamada de Skill ligada ao seu turno e a versão do prompt. O ENC1-b (inatividade com e sem follow-up, métricas) vem depois do FUP1-a, como combinado.
 
 ---
 
@@ -101,3 +101,34 @@ Um bloco grande (migração 045 com preenchimento das conversas existentes, pipe
 | 7 | Ligar Skill ao turno | Pelo turno em andamento da conversa (um por vez); sem turno em andamento, o último turno com `fora_do_turno=true`; nada vem do Skyone |
 | 8 | Versão do prompt | Campo `prompt_versao` no retorno do agente (até 40 caracteres); fora do formato vira nulo sem recusar a resposta |
 | 9 | Histórico | Só do atendimento atual; o anterior só como resumo (E4) — confirmar que vale também quando o cliente volta em menos de 30 min após um "obrigado" (novo atendimento, histórico curto) |
+
+## 6. Decisões do Marco (20/10/2026)
+
+- 1, 2, 4, 5, 6, 7 e 8: como propostas. `prompt_versao` no formato `v` + números e pontos, até 40 caracteres; fora do formato vira nulo.
+- 3: resumo vindo do agente **não, por enquanto**: só o resumo factual do gateway. O campo `resumo` fica previsto no retorno, mas é ignorado.
+- 9: sim, vale também na volta em menos de 30 min depois de um "obrigado": atendimento novo, histórico curto e o resumo do anterior com o pedido e o status.
+
+## 7. Implementado (migração 045)
+
+- **Tabela `atendimentos`** e `atendimento_id` em conversas, mensagens, turnos, pedidos, solicitações, `skill_registro` e `skill_chamadas`. As linhas novas nascem ligadas ao atendimento **aberto** da conversa por gatilho no banco, o que vale também para as gravadas pela imagem anterior enquanto a migração é aplicada. A mensagem do sistema que chega com o atendimento encerrado (aviso de status do pedido) fica sem atendimento e é adotada pelo próximo que abrir: o agente vê o aviso a que o cliente responde.
+- **Estado:** grava `aberto` ou `encerrado`. `em_atendimento_humano` é derivado da conversa (aguardando atendente ou pausada) na API, sem gravar.
+- **Migração das conversas existentes:** um atendimento por conversa, com `motivo_inicio` igual a `migracao`.
+  - Conversa aberta: atendimento `aberto`.
+  - Conversa encerrada: atendimento `encerrado`, com o desfecho de hoje. O motivo é `vazio` quando o desfecho era `vazia`; senão, `concluido`.
+- **Encerramento no turno (E3, decisão 4):**
+  - **Quando encerra:** o lote é só agradecimento ou fechamento (a mesma regra do AVS1, aplicada à mensagem inteira); o bot não deixou botões ou lista esperando escolha; e o módulo de pedidos confirma que há pedido não cancelado neste atendimento e nenhum carrinho aberto com itens.
+  - **Interpretação de "pergunta pendente":** conta como pendente só a escolha por botões ou lista. O "Posso ajudar em mais alguma coisa?", que o bot costuma mandar depois de fechar o pedido, é respondido pelo "obrigado".
+  - **Quando não encerra:** com outra mensagem do cliente já esperando (corrida), e com o agente transferindo, encerrando ou avisando a equipe.
+  - **Desfecho:** o do agente; sem ele, `pedido_feito`.
+- **Sem retorno em 30 min:** o agendador confere a cada minuto. Encerra o atendimento aberto cujo último pedido foi fechado há mais de 30 min sem nenhuma mensagem do cliente depois. Conversa com atendente fica como está. A conferência se repete sob a trava da conversa.
+- **Ganchos novos do módulo de pedidos:** `encerra_no_turno`, `sem_retorno`, `resumo_do_atendimento` e `resumo_dos_atendimentos`. O núcleo continua sem ler as tabelas de pedido.
+- **Resumo:** gravado ao encerrar e refeito no pacote, para levar o status atual do pedido. Exemplo: "Encerrado: pedido concluído e cliente agradeceu. Pedido 48213 (retirada, Pátio Guedala, R$ 68,00): confirmado pela unidade."
+- **Instrumentação:** a chamada de Skill grava o turno `em_andamento/processando` da conversa, também por gatilho. Sem turno em andamento, grava o último turno da conversa, com `fora_do_turno=true`.
+- **Retrato do By Koji:** regravado só com acréscimos (240 linhas novas, nenhuma alterada ou removida):
+  - `atendimento` em cada pacote (20);
+  - `contexto_modulos.pedidos.carrinho.de_atendimento_anterior=false` (20);
+  - `atendimento` em cada conversa da lista do painel (9);
+  - `por_versao_do_prompt` nas métricas.
+
+  Nenhum cenário do retrato encerra um atendimento, então histórico, respostas das Skills, mensagens e turnos ficaram idênticos.
+- **Testes:** `tests/test_enc1a.py` (7).

@@ -196,6 +196,8 @@ def criar_app(infra,db=None,redis=None):
     app.include_router(circuito)
     app.include_router(fila)
     app.include_router(gestao)
+    from admin.atendimentos import router as atendimentos
+    app.include_router(atendimentos)
     from admin.atendimento import router as atendimento
     app.include_router(atendimento)
     from admin.solicitacoes import router as solicitacoes

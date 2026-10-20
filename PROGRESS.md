@@ -1294,3 +1294,14 @@ PY
 
 - `docs/ESPEC_AN1.md`: auditoria dos dados de venda (só WhatsApp gera pedido; By Koji com 0 pedidos reais; itens guardam nome, categoria e preço da venda) e especificação da análise de vendas, com as decisões do Marco (seção 10).
 - LGPD1 + origem (migração 044): `pedidos.origem` (real, piloto, simulado, teste) e `pedidos.canal` gravados no fechamento; pedidos anteriores marcados como teste; anonimização passa a apagar a observação de cada item e a levar `skill_chamadas`, `skill_registro` e `catalogo_vistos` para o identificador novo. Testes: `tests/test_lgpd1.py` e o de anonimização em `tests/test_multi1b.py`.
+
+## Proteção contra implantação por fora e ENC1-a — 2026-10-20
+
+- Regras para todos os assistentes em `AGENTS.md`, `CLAUDE.md` e `GEMINI.md`: implantar só por `scripts/implantar.sh`; nunca escrever dado de cliente em docs, PROGRESS.md ou commits.
+- `implantar.sh` grava a imagem implantada em `backups/gateway/estado/imagem_implantada`. O `vigia.sh` (cron a cada 2 min) dispara alerta crítico "imagem fora do implantar.sh" quando gateway, worker ou agendador rodam outra imagem por duas conferências seguidas, e manda "normalizado" quando volta.
+- ENC1-a (`docs/ESPEC_ENC1A.md`, seções 6 e 7; migração 045):
+  - atendimento identificado dentro da conversa, com histórico do pacote só do atendimento atual e resumo factual do anterior;
+  - encerramento por pedido concluído com agradecimento, pedido sem retorno em 30 min, agente, conversa vazia ou painel;
+  - rotas de atendimentos no painel e eventos `atendimento.aberto`/`atendimento.encerrado`;
+  - Skill ligada ao turno e `prompt_versao` no retorno do agente.
+- Retrato do By Koji regravado só com acréscimos. Testes em `tests/test_enc1a.py` (7).

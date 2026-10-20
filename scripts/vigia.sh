@@ -43,4 +43,25 @@ ultimo=$(cat "$ESTADO/ultimo_backup_ok" 2>/dev/null || echo 0); horas=$(( ( $(da
 if [ "$ultimo" -eq 0 ]; then sh "$A" disparar backup-atrasado critico "backup atrasado" "Nenhum backup concluído ainda." >/dev/null
 elif [ "$horas" -ge 26 ]; then sh "$A" disparar backup-atrasado critico "backup atrasado" "Último concluído há $horas h." >/dev/null
 else sh "$A" normalizar backup-atrasado "backup atrasado" >/dev/null; fi
+
+# 5) Imagem fora do implantar.sh: gateway, worker e agendador têm de rodar a imagem que o implantar.sh gravou
+#    em $ESTADO/imagem_implantada ("<id> gateway:<commit>"). Sem o arquivo, a conferência fica desligada.
+#    Duas conferências seguidas, para não disparar na troca dos contêineres durante a própria implantação.
+esperada=$(cut -d' ' -f1 "$ESTADO/imagem_implantada" 2>/dev/null || true)
+if [ -n "$esperada" ]; then
+    fora=""; em_uso=""
+    for servico in gateway worker agendador; do
+        for id in $(compose ps -q "$servico" 2>/dev/null); do
+            i=$(docker inspect "$id" --format '{{.Image}}' 2>/dev/null || echo desconhecida)
+            [ "$i" = "$esperada" ] || { fora="$fora $servico"; em_uso=$i; }
+        done
+    done
+    diferente=nao; [ -n "$fora" ] && diferente=sim
+    if seguidas imagem-fora "$diferente" 2; then
+        tags=$(docker images --no-trunc --format '{{.Repository}}:{{.Tag}} {{.ID}}' | awk -v id="$em_uso" '$2==id {printf "%s ", $1}')
+        sh "$A" disparar imagem-fora critico "imagem fora do implantar.sh" "Serviços:$(echo "$fora" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+Em uso: ${tags:-$(echo "$em_uso" | cut -c8-19)}
+Esperada: $(cut -d' ' -f2 "$ESTADO/imagem_implantada")" >/dev/null
+    elif [ "$diferente" = nao ]; then sh "$A" normalizar imagem-fora "imagem fora do implantar.sh" >/dev/null; fi
+fi
 exit 0

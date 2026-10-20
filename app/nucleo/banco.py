@@ -98,11 +98,12 @@ class Repositorio:
             'SELECT * FROM modelos_agente WHERE id=$2 AND (tenant_id=$1 OR tenant_id IS NULL) ORDER BY versao DESC LIMIT 1',
             escopo(tenant_id),modelo_id))
 
-    async def historico(self, tenant_id, conversa_id, antes_id, limite):
+    async def historico(self, tenant_id, conversa_id, antes_id, limite, atendimento_id=None):
+        """Últimas `limite` mensagens antes do lote. Com `atendimento_id` (ENC1-a, E4), só as daquele atendimento."""
         if not 0 <= limite <= 100:
             raise ValueError('history_turns inválido')
         rows = await self.db.fetch('SELECT direcao,conteudo,enviada_em FROM mensagens '
             "WHERE tenant_id=$1 AND conversation_id=$2 AND id<$3 AND NOT (direcao='saida' AND coalesce(tipo,'')='reacao') "
-            'ORDER BY enviada_em DESC,id DESC LIMIT $4',
-            escopo(tenant_id),conversa_id,antes_id,limite)
+            'AND ($5::text IS NULL OR atendimento_id=$5) ORDER BY enviada_em DESC,id DESC LIMIT $4',
+            escopo(tenant_id),conversa_id,antes_id,limite,atendimento_id)
         return [dict(r) for r in reversed(rows)]

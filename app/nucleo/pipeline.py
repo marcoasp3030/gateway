@@ -15,6 +15,7 @@ from fastapi import HTTPException
 from agentes import skyone
 from canais import uazapi
 from nucleo import botoes
+from nucleo import atendimentos
 from nucleo.contatos import nome_de_perfil,gravar_informado
 from nucleo.banco import Repositorio
 from nucleo.configuracao import Configuracoes
@@ -32,10 +33,10 @@ def motivo_fallback(falha):
 
 
 def campos_do_retorno(resultado):
-    """(acao, motivo_silencio, desfecho) do Retorno do agente para gravar no turno."""
-    if not resultado: return None,None,None
+    """(acao, motivo_silencio, desfecho, prompt_versao) do Retorno do agente para gravar no turno."""
+    if not resultado: return None,None,None,None
     acao=resultado.get('acao')
-    return acao,(resultado.get('motivo') if acao=='silencio' else None),resultado.get('desfecho')
+    return acao,(resultado.get('motivo') if acao=='silencio' else None),resultado.get('desfecho'),resultado.get('prompt_versao')
 
 
 # Mensagem do atendente pelo celular que devolve a conversa ao bot na hora (não vai para o agente).
@@ -44,10 +45,11 @@ COMANDO_BOT='#bot'
 BLOQUEIO_CONTATO_MIN=5
 
 
-async def encerrar_conversa(conn,tenant,conversa,desfecho):
-    """Marca a conversa como encerrada (primeira marcação vale). Mensagem nova do cliente reabre."""
-    return bool(await conn.fetchval("""UPDATE conversas SET encerrada_em=now(),desfecho=$3,atualizado_em=now()
+async def encerrar_conversa(conn,tenant,conversa,desfecho,motivo='concluido'):
+    """Encerra o atendimento aberto e marca a conversa como encerrada (primeira marcação vale). Mensagem nova do cliente abre outro."""
+    marcada=bool(await conn.fetchval("""UPDATE conversas SET encerrada_em=now(),desfecho=$3,atualizado_em=now()
         WHERE tenant_id=$1 AND conversation_id=$2 AND encerrada_em IS NULL RETURNING true""",tenant,conversa,desfecho))
+    return await atendimentos.encerrar(conn,tenant,conversa,motivo,desfecho) is not None or marcada
 
 
 # Endereço do painel citado no alerta de transbordo (vazio = não cita).
@@ -284,6 +286,8 @@ return 1
                 if await conn.fetchval('''UPDATE conversas SET encerrada_em=NULL,desfecho=NULL WHERE tenant_id=$1 AND conversation_id=$2
                         AND encerrada_em IS NOT NULL RETURNING true''',tenant,conversa):
                     await auditar(conn,tenant,'sistema','conversa.reaberta',conversa)
+                # ENC1-a: mensagem do cliente sem atendimento aberto abre o próximo (o anterior nunca é reaproveitado).
+                await atendimentos.abrir_se_preciso(conn,tenant,conversa,cfg['id'])
                 # SEG07 por contato: mensagens demais em um minuto → registra, alerta e para de chamar o agente por um tempo.
                 limitado=await conn.fetchval('SELECT limitado_ate>now() FROM conversas WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa)
                 if not limitado and await conn.fetchval('''SELECT count(*) FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2
@@ -431,7 +435,7 @@ return 1
                     tenant,conversa,cfg['id'],conv['canal_id'],uuid.UUID(rid),len(itens),itens[0]['criado_em'],itens[-1]['criado_em'],inicio,fim_agente,
                     int((inicio-itens[-1]['criado_em']).total_seconds()*1000),int((fim_agente-inicio).total_seconds()*1000),
                     int((fim-itens[-1]['criado_em']).total_seconds()*1000),cfg['agente_mode'],status,erro,json.dumps(resultado) if resultado else None,fim if entregue else None,aviso)
-                await conn.execute('UPDATE turnos SET origem=$3,uso=$4::jsonb,acao=$5,motivo_silencio=$6,desfecho=$7 WHERE tenant_id=$1 AND request_id=$2',tenant,uuid.UUID(rid),origem,json.dumps(resultado.get('uso')) if resultado and resultado.get('uso') else None,*campos_do_retorno(resultado))
+                await conn.execute('UPDATE turnos SET origem=$3,uso=$4::jsonb,acao=$5,motivo_silencio=$6,desfecho=$7,prompt_versao=$8 WHERE tenant_id=$1 AND request_id=$2',tenant,uuid.UUID(rid),origem,json.dumps(resultado.get('uso')) if resultado and resultado.get('uso') else None,*campos_do_retorno(resultado))
                 if not motivo and status!='ignorado' and resultado and resultado.get('acao')=='transferir_humano':
                     motivo='silencio_sem_motivo' if resultado.get('silencio_sem_motivo') else 'transferido_pelo_agente'
                 # Ordem de travas: consumo antes de auditoria em todos os turnos.
@@ -448,6 +452,7 @@ return 1
                 if status=='ok' and resultado and resultado.get('acao') in ('transferir_humano','encerrar'):
                     from nucleo.webhooks import emitir
                     await emitir(conn,tenant,'conversa.transferida' if resultado['acao']=='transferir_humano' else 'conversa.encerrada',{'conversation_id':conversa,'agente_id':cfg['id']})
+                if status=='ok' and origem=='cliente': await self._encerramento_do_turno(conn,tenant,conversa,cfg,ids,resultado)
                 await conn.execute('UPDATE mensagens SET processada_em=now() WHERE tenant_id=$1 AND conversation_id=$2 AND id=ANY($3::bigint[])',tenant,conversa,ids)
                 await auditar(conn,tenant,'sistema','turno.'+status,conversa)
             await atualizar_cache(self.redis,self.prefixo,tenant,mes,total)
@@ -833,7 +838,7 @@ return 1
         # A resposta fica gravada antes de qualquer envio: se o worker cair, só falta enviar.
         if resultado and resultado.get('silencio_sem_motivo'): status='erro';erro='SILENCE_WITHOUT_REASON'
         return await self.db.fetchrow('''UPDATE turnos SET etapa='respondido',status=$3,erro=$4,resposta=$5::jsonb,
-            agente_fim=now(),aviso_demora=$6,uso=$7::jsonb,acao=$8,motivo_silencio=$9,desfecho=$10 WHERE tenant_id=$1 AND id=$2 RETURNING *''',
+            agente_fim=now(),aviso_demora=$6,uso=$7::jsonb,acao=$8,motivo_silencio=$9,desfecho=$10,prompt_versao=$11 WHERE tenant_id=$1 AND id=$2 RETURNING *''',
             tenant,turno['id'],status,erro,json.dumps(resultado) if resultado else None,aviso,
             json.dumps(resultado.get('uso')) if resultado and resultado.get('uso') else None,*campos_do_retorno(resultado))
 
@@ -1049,9 +1054,49 @@ return 1
             if status=='ok' and resultado and resultado.get('acao') in ('transferir_humano','encerrar'):
                 from nucleo.webhooks import emitir
                 await emitir(conn,tenant,'conversa.transferida' if resultado['acao']=='transferir_humano' else 'conversa.encerrada',{'conversation_id':conversa,'agente_id':cfg['id']})
+            if status=='ok' and turno['origem']=='cliente': await self._encerramento_do_turno(conn,tenant,conversa,cfg,turno['mensagem_ids'],resultado)
             await conn.execute('UPDATE mensagens SET processada_em=now() WHERE tenant_id=$1 AND conversation_id=$2 AND id=ANY($3::bigint[])',tenant,conversa,turno['mensagem_ids'])
             await auditar(conn,tenant,'sistema','turno.'+status,conversa)
         await atualizar_cache(self.redis,self.prefixo,tenant,mes,total)
+
+    async def _encerramento_do_turno(self,conn,tenant,conversa,cfg,mensagem_ids,resultado):
+        """ENC1-a (E3, decisão 4): o lote do cliente é só agradecimento/fechamento ("obrigado", "valeu", 👍; a mensagem inteira, como
+        no AVS1), o bot não deixou botões esperando resposta e um módulo diz que o atendimento terminou (pedidos: pedido fechado nele,
+        sem carrinho aberto com itens) → encerra na hora, qualquer que tenha sido a resposta (texto, silêncio ou reação). Sem despedida (E1)."""
+        if resultado and resultado.get('acao') in ('transferir_humano','encerrar','notificar_equipe'): return
+        a=await atendimentos.atual(conn,tenant,conversa)
+        if not a or a['estado']!='aberto': return
+        itens=await conn.fetch('SELECT conteudo,tipo FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND id=ANY($3::bigint[]) ORDER BY id',tenant,conversa,mensagem_ids)
+        if not itens or not parece_fechamento([dict(i) for i in itens]): return
+        # Corrida: o cliente já mandou outra coisa depois deste lote ("obrigado" … "e o horário?") → não encerra.
+        if await conn.fetchval("""SELECT EXISTS(SELECT 1 FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND direcao='entrada'
+            AND origem='cliente' AND processada_em IS NULL AND NOT (id=ANY($3::bigint[])))""",tenant,conversa,mensagem_ids): return
+        # Botões ou lista do bot à espera de escolha: o "ok" pode ser resposta a eles.
+        ultima=await conn.fetchval("""SELECT meta FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND direcao='saida' AND origem='bot'
+            AND coalesce(tipo,'')<>'reacao' AND coalesce(parte,1)<>0 AND id<$3 ORDER BY id DESC LIMIT 1""",tenant,conversa,min(mensagem_ids))
+        if atendimentos.com_botoes_pendentes(ultima): return
+        from modulos import ganchos
+        for _,f in ganchos('encerra_no_turno',cfg.get('modulos') or ()):
+            fim=await f(conn,tenant,conversa,a['id'])
+            if fim:
+                motivo,desfecho=fim
+                await encerrar_conversa(conn,tenant,conversa,(resultado or {}).get('desfecho') or desfecho,motivo)
+                return
+
+    async def encerrar_sem_retorno(self):
+        """ENC1-a (E3): atendimento com pedido fechado e nenhuma mensagem do cliente nos 30 min seguintes → encerra (pedido_sem_retorno).
+        Conversa com atendente (aguardando ou pausada) fica como está. Confere de novo sob a trava da conversa."""
+        from modulos import ganchos
+        encerrados=0
+        for _,f in ganchos('sem_retorno'):
+            for tenant,conversa,desfecho in await f(self.db):
+                async with self.db.acquire() as conn,conn.transaction():
+                    await conn.execute('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',conversa)
+                    if not await f(conn,tenant,conversa): continue
+                    if await conn.fetchval("""SELECT aguardando_atendente_desde IS NOT NULL OR coalesce(bot_pausado_ate>now(),false) FROM conversas
+                        WHERE tenant_id=$1 AND conversation_id=$2""",tenant,conversa): continue
+                    if await encerrar_conversa(conn,tenant,conversa,desfecho,'pedido_sem_retorno'): encerrados+=1
+        return encerrados
 
     async def recuperar(self):
         # Enumeração de trabalho com tenant retornado explicitamente; cada processamento usa o escopo.
@@ -1082,7 +1127,7 @@ return 1
                 await conn.execute('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',c['conversation_id'])
                 # Confere de novo sob a trava: o cliente pode ter escrito neste instante.
                 if await conn.fetchval("""SELECT max(criado_em) FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2""",c['tenant_id'],c['conversation_id'])!=c['ultima']: continue
-                if await encerrar_conversa(conn,c['tenant_id'],c['conversation_id'],'vazia'):
+                if await encerrar_conversa(conn,c['tenant_id'],c['conversation_id'],'vazia','vazio'):
                     await auditar(conn,c['tenant_id'],'sistema','conversa.encerrada',c['conversation_id']);encerradas+=1
         return encerradas
 

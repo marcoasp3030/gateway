@@ -91,9 +91,12 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
     if not tenant: raise LookupError('Tenant não encontrado')
     fuso = ZoneInfo(tenant['timezone'])
     iso = lambda quando: quando.astimezone(fuso).isoformat(timespec='seconds')
-    historico = await repo.historico(tenant_id,conversa_id,antes_id,cfg['history_turns'])
     rid = request_id or str(uuid.uuid4())
     agora = datetime.now(timezone.utc)
+    # ENC1-a: atendimento atual; o histórico é só dele (E4) e o anterior vai só como resumo.
+    from nucleo import atendimentos
+    atendimento = await atendimentos.do_pacote(repo.db,tenant_id,conversa_id,fuso,agora)
+    historico = await repo.historico(tenant_id,conversa_id,antes_id,cfg['history_turns'],atendimento['id'] if atendimento else None)
     do_lote = []; ultima_interacao = None; origens = []
     for i in (dict(x) for x in (lote or [])):
         item = {'enviada_em':iso(i.get('enviada_em') or i.get('criado_em') or agora),'tipo':i.get('tipo') or 'texto','texto':i['conteudo']}
@@ -186,7 +189,9 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
         'acoes_recentes':[a for _,f in ganchos('acoes_recentes',cfg.get('modulos') or ()) for a in await f(repo.db,tenant_id,conversa_id,cfg)],
         # Nome pela prioridade cadastro > informado > perfil (PED1-c); nunca o telefone. nome_origem diz de onde veio.
         'cliente':{'nome':nome_cliente,'nome_origem':nome_origem,'unidade_preferida':conv.get('unidade_preferida'),
-                   'resumo_anterior':(contato or {}).get('resumo')},
+                   'resumo_anterior':((atendimento or {}).get('anterior') or {}).get('resumo') or (contato or {}).get('resumo')},
+        # ENC1-a: atendimento atual (novo = primeiro turno entregue dele) e o anterior, resumido. Nulo só em conversa sem atendimento.
+        'atendimento':atendimento,
     }
 
 
@@ -279,6 +284,10 @@ async def _chamar(client,repo,cofre,tenant_id,cfg,payload):
         from nucleo.reacoes import do_retorno as reacao_do_retorno
         reacao=reacao_do_retorno(corpo.get('reacao'))
         if reacao: result['reacao']=reacao
+        # ENC1-a: versão do prompt que respondeu ("v6.7"). Fora do formato (v + números e pontos, até 40) vira nulo sem recusar.
+        versao=corpo.get('prompt_versao')
+        if isinstance(versao,str) and len(versao)<=40 and re.fullmatch(r'v[0-9]+(\.[0-9]+)*',versao): result['prompt_versao']=versao
+        # "resumo" no encerrar fica previsto no contrato, mas ignorado por enquanto (decisão 3 de 20/10): vale o resumo factual do gateway.
         uso=corpo.get('uso')
         if isinstance(uso,dict) and all(isinstance(k,str) and type(v) is int and v>=0 for k,v in uso.items()): result['uso']=uso
         # Não permitir eco da credencial mesmo dentro de campos do contrato.

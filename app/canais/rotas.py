@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime,timezone
 from fastapi import APIRouter,Request,HTTPException,Depends
 from pydantic import BaseModel,Field,AwareDatetime,ConfigDict
@@ -98,11 +99,13 @@ async def simular(request:Request,tenant_id:str,agente_id:str,dados:EntradaAPI,a
 
 
 @router.get('/admin/v1/tenants/{tenant_id}/conversas/{conversa_id}/mensagens',dependencies=[Depends(painel)])
-async def mensagens_admin(request:Request,tenant_id:str,conversa_id:str,antes:int|None=None,limite:int=100):
+async def mensagens_admin(request:Request,tenant_id:str,conversa_id:str,antes:int|None=None,limite:int=100,atendimento:str|None=None):
     if not 1<=limite<=100: raise HTTPException(400,{"campo":"limite"})
+    if atendimento is not None and not re.fullmatch(r'at_[0-9a-f]{24}',atendimento): raise HTTPException(400,{"campo":"atendimento"})
     if antes is not None and not 1<=antes<=9223372036854775807: raise HTTPException(400,{"campo":"antes"})
     if not await Repositorio(request.app.state.db).obter(tenant_id,'conversas',conversa_id): raise HTTPException(404,'NOT_FOUND')
-    rows=await request.app.state.db.fetch('SELECT id,conteudo,direcao,origem,enviada_em FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND ($3::bigint IS NULL OR id<$3) ORDER BY id DESC LIMIT $4',tenant_id,conversa_id,antes,limite+1)
+    # ENC1-a: ?atendimento=at_… filtra as mensagens de um atendimento; cada mensagem diz a qual pertence.
+    rows=await request.app.state.db.fetch('SELECT id,conteudo,direcao,origem,enviada_em,atendimento_id FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND ($3::bigint IS NULL OR id<$3) AND ($5::text IS NULL OR atendimento_id=$5) ORDER BY id DESC LIMIT $4',tenant_id,conversa_id,antes,limite+1,atendimento)
     return {'itens':[dict(r) for r in reversed(rows[:limite])],'tem_mais':len(rows)>limite}
 
 
@@ -188,4 +191,11 @@ async def metricas(request:Request,tenant_id:str,agente:str|None=None):
             # AVS1: avisos de espera em texto que saíram (no modo padrão, só "digitando…", fica em zero).
             'avisos_de_espera_enviados':await request.app.state.db.fetchval('SELECT count(*) FROM turnos WHERE tenant_id=$1 AND aviso_demora AND ($2::text IS NULL OR agente_id=$2)',tenant_id,agente),
             # HOR2: transferências por motivo que exige recusa de Skill (pedidos: pedido_para_confirmar) sem recusa (refeitas com aviso; mantidas = o agente repetiu).
-            'transferencias_sem_recusa_refeitas':semrec['refeitas'],'transferencias_sem_recusa_mantidas':semrec['mantidas']}
+            'transferencias_sem_recusa_refeitas':semrec['refeitas'],'transferencias_sem_recusa_mantidas':semrec['mantidas'],
+            # ENC1-a: por versão do prompt que respondeu (turnos sem prompt_versao em "sem_versao").
+            'por_versao_do_prompt':{r['versao']:{'turnos':r['turnos'],'transferencias':r['transferencias'],'refeitos':r['refeitos'],
+                                                 'total_p50_ms':int(r['p50']) if r['p50'] is not None else None}
+                                    for r in await request.app.state.db.fetch("""SELECT coalesce(prompt_versao,'sem_versao') versao,
+                count(*) FILTER (WHERE status<>'refeito') turnos,count(*) FILTER (WHERE acao='transferir_humano' AND status='ok') transferencias,
+                count(*) FILTER (WHERE status='refeito') refeitos,percentile_cont(0.5) WITHIN GROUP(ORDER BY total_ms) FILTER (WHERE status<>'refeito') p50
+                FROM turnos WHERE tenant_id=$1 AND etapa='concluido' AND ($2::text IS NULL OR agente_id=$2) GROUP BY 1 ORDER BY 1""",tenant_id,agente)}}

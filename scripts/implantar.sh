@@ -59,6 +59,9 @@ SAUDE=$(docker compose exec -T gateway python -c "import urllib.request;print(ur
 [ "$SAUDE" = "200" ] || parar "a imagem antiga não respondeu saúde 200 depois da migração (ficou: $SAUDE). Os serviços NÃO foram trocados"
 
 echo "== 7/8 troca dos serviços"
+# Imagem esperada pelo vigia (scripts/vigia.sh): contêiner do gateway em outra imagem = implantação por fora, com alerta.
+ESPERADA=/home/twadmin/backups/gateway/estado/imagem_implantada
+printf '%s gateway:%s\n' "$NOVA" "$COMMIT" > "$ESPERADA"
 docker compose up -d --no-deps gateway worker agendador 2>&1 | tail -n 2
 
 echo "== 8/8 conferência"
@@ -70,7 +73,7 @@ while :; do
         [ "$(docker inspect "$c" --format '{{.State.Health.Status}} {{.Image}}')" = "healthy $NOVA" ] || RUINS=$((RUINS+1))
     done
     [ "$RUINS" -eq 0 ] && break
-    [ "$n" -lt 24 ] || parar "depois de 2 minutos há $RUINS contêiner(es) fora do ar ou na imagem errada. Para voltar: docker tag $VOLTA gateway-gateway:latest && docker compose up -d --no-deps gateway worker agendador"
+    [ "$n" -lt 24 ] || parar "depois de 2 minutos há $RUINS contêiner(es) fora do ar ou na imagem errada. Para voltar: docker tag $VOLTA gateway-gateway:latest && docker compose up -d --no-deps gateway worker agendador && echo \"$EM_USO $VOLTA\" > $ESPERADA"
 done
 echo "IMPLANTADO: gateway:$COMMIT nos $(docker compose ps -q gateway worker agendador | wc -l) contêineres, todos saudáveis"
 echo "   volta: $VOLTA | backup: $DESTINO/gateway.dump"

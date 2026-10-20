@@ -122,3 +122,53 @@ async def _aviso_ao_cliente(pipeline,a):
 ENVIO_DE_AVISO={'pedido_cliente':_aviso_ao_cliente}
 AVISOS_SEM_REENVIO=('pedido_cliente',)
 
+
+
+# ENC1-a (E3): pedido fechado neste atendimento e nenhuma mensagem do cliente depois, por este tempo → encerra (pedido_sem_retorno).
+SEM_RETORNO_MIN=30
+# Desfecho do atendimento encerrado por pedido, quando o agente não deu outro.
+DESFECHO_DO_PEDIDO='pedido_feito'
+
+
+async def encerra_no_turno(conn,tenant,conversa,atendimento_id):
+    """E3: o lote do cliente foi só agradecimento/fechamento. Encerra se há pedido fechado (não cancelado) neste atendimento
+    e nenhum carrinho aberto com itens. Devolve (motivo, desfecho padrão) ou None."""
+    if not atendimento_id: return None
+    pedido=await conn.fetchval("""SELECT EXISTS(SELECT 1 FROM pedidos WHERE tenant_id=$1 AND conversation_id=$2 AND atendimento_id=$3
+        AND status<>'cancelado')""",tenant,conversa,atendimento_id)
+    if not pedido: return None
+    carrinho=await conn.fetchval("""SELECT EXISTS(SELECT 1 FROM carrinhos k JOIN carrinho_itens l ON l.tenant_id=k.tenant_id AND l.carrinho_id=k.id
+        WHERE k.tenant_id=$1 AND k.conversation_id=$2 AND k.status='aberto')""",tenant,conversa)
+    return None if carrinho else ('pedido_concluido',DESFECHO_DO_PEDIDO)
+
+
+async def sem_retorno(db,tenant=None,conversa=None,limite=200):
+    """E3: atendimentos abertos cujo último pedido foi fechado há mais de SEM_RETORNO_MIN e sem nenhuma mensagem do cliente
+    depois do fechamento. [(tenant, conversa, desfecho)]; com tenant/conversa, confere só aquela (de novo, sob a trava da conversa)."""
+    rows=await db.fetch("""SELECT a.tenant_id,a.conversation_id FROM atendimentos a
+        JOIN LATERAL (SELECT p.criado_em FROM pedidos p WHERE p.tenant_id=a.tenant_id AND p.atendimento_id=a.id AND p.status<>'cancelado'
+                      ORDER BY p.id DESC LIMIT 1) p ON true
+        WHERE a.estado='aberto' AND ($1::text IS NULL OR (a.tenant_id=$1 AND a.conversation_id=$2))
+          AND p.criado_em<now()-make_interval(mins=>$3)
+          AND NOT EXISTS(SELECT 1 FROM mensagens m WHERE m.tenant_id=a.tenant_id AND m.conversation_id=a.conversation_id
+                         AND m.origem='cliente' AND m.criado_em>p.criado_em)
+        ORDER BY p.criado_em LIMIT $4""",tenant,conversa,SEM_RETORNO_MIN,limite)
+    return [(r['tenant_id'],r['conversation_id'],DESFECHO_DO_PEDIDO) for r in rows]
+
+
+async def resumo_do_atendimento(conn,tenant,atendimento_id):
+    """Pedidos do atendimento para o resumo factual: número, modalidade, unidade, total e status atual. Sem endereço nem nome."""
+    rows=await conn.fetch("""SELECT p.numero,p.modalidade,coalesce(u.nome,p.unidade) unidade,p.total,p.status FROM pedidos p
+        LEFT JOIN tenant_unidades u ON u.tenant_id=p.tenant_id AND u.codigo=p.unidade
+        WHERE p.tenant_id=$1 AND p.atendimento_id=$2 ORDER BY p.id LIMIT 3""",tenant,atendimento_id)
+    real=lambda v: 'R$ '+f'{v:,.2f}'.replace(',','X').replace('.',',').replace('X','.')
+    return [f"Pedido {r['numero']} ({r['modalidade']}, {r['unidade']}, {real(r['total'])}): {servico.DESCRICAO.get(r['status'],r['status']).lower()}." for r in rows]
+
+
+async def resumo_dos_atendimentos(db,tenant,ids):
+    """Painel, histórico de atendimentos: {atendimento_id: {"pedidos": [...]}} (todos os da página ganham a lista, vazia ou não)."""
+    saida={i:{'pedidos':[]} for i in ids}
+    for p in await db.fetch("""SELECT atendimento_id,numero,status,modalidade,total FROM pedidos WHERE tenant_id=$1 AND atendimento_id=ANY($2::text[])
+            ORDER BY id""",tenant,list(ids)):
+        saida[p['atendimento_id']]['pedidos'].append({'numero':p['numero'],'status':p['status'],'modalidade':p['modalidade'],'total':servico.dinheiro(p['total'])})
+    return saida

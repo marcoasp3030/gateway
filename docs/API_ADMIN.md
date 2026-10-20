@@ -358,6 +358,11 @@ Campos novos no `PATCH`/`POST` da unidade: `delivery_ativo` (bool), `taxa_modo` 
 | POST | `/tenants/{tenant}/conversas/{conv}/mensagens` | ✅ Mensagem humana |
 | GET | `/tenants/{tenant}/eventos?desde=` | ✅ Polling |
 | GET | `/tenants/{tenant}/eventos/cursor` | ✅ Último ID de evento confirmado do tenant, sem listar histórico |
+| GET | `/tenants/{tenant}/conversas/{conv}/atendimentos?limite=20&cursor=` | ✅ ENC1-a: histórico de atendimentos |
+| POST | `/tenants/{tenant}/conversas/{conv}/encerrar` | ✅ ENC1-a: `{"motivo":"manual"}` (opcional); admin e membro |
+| POST | `/tenants/{tenant}/conversas/{conv}/reabrir` | ✅ ENC1-a: só o último atendimento; admin e membro |
+
+**Atendimentos (ENC1-a) ✅** (`docs/ESPEC_ENC1A.md`, seção 7): cada item da lista de conversas ganha `atendimento` (o atual: `{"id","numero","estado","aberto_em","encerrado_em","motivo_encerramento"}`, nulo em conversa sem atendimento). `estado`: `aberto`, `em_atendimento_humano` (aguardando atendente ou pausada) ou `encerrado`. O histórico paginado aceita `?atendimento=at_…` e cada mensagem traz `atendimento_id`. Encerrar sem atendimento aberto e reabrir sem nada a reabrir → 409. O registro de Skills (`GET …/skills/registro`) aceita `?turno_id=` e traz `turno_id`, `fora_do_turno`, `atendimento_id`; as métricas ganham `por_versao_do_prompt`.
 
 **Lista:** filtros opcionais `agente`, `canal`, `status=ativa|pausada`, `busca` (substring literal de nome/telefone), `desde` (ISO com fuso; filtra `atualizado_em`). `limite` 1–100, `cursor=<conversation_id>`, ordem crescente por ID; resposta `itens`/`proximo_cursor`. Agente/canal de outro tenant → 404. `ativa` = bot sem pausa vigente; encerramento/desfecho na Fase 3. Itens trazem agente/canal, nome/telefone, última mensagem/horário, `bot_pausado_ate`, **`aguardando_atendente_desde`** e **`aguardando_motivo`**. Filtro opcional **`aguardando=true|false`** (outro valor → 400 `VALIDATION_ERROR` com `campo: aguardando`).
 
@@ -402,6 +407,8 @@ Contatos são vinculados às conversas na recepção; a migração 011 vinculou 
 POST exige `url`; aceita `eventos` (lista) e `ativo` (padrão false). Devolve `segredo` uma vez; leituras nunca devolvem credencial/ciphertext. PATCH altera URL/eventos/ativo. `/testar` exige webhook ativo e devolve 202 `{ "entrega_id":123, "status":"pendente" }`; `/entregas` sem corpo nem segredo.
 
 **Assinatura:** corpo `{ "evento":"conversa.transferida", "tenant_id":"bykoji", "dados":{...} }`; headers `X-Gateway-Event`, `X-Gateway-Delivery` (ID estável para deduplicar), `X-Gateway-Timestamp` (Unix em segundos) e `X-Gateway-Signature: sha256=<HMAC-SHA256(segredo, timestamp + "." + corpo_bruto)>`. O receptor compara em tempo constante, recusa timestamp distante (>5 min) e deduplica pelo delivery ID. Até três tentativas, intervalos de 2 e 4 s (dependem do agendador); URL/DNS revalidados a cada tentativa, sem redirects, timeout total de 12 s. Entrega pelo menos uma vez. Eventos de transferência/encerramento do agente são enfileirados na transação do turno; capacidades usam `emitir`. Nenhum webhook externo cadastrado.
+
+Eventos ENC1-a: `atendimento.aberto` (`{conversation_id, atendimento_id, numero, motivo_inicio}`) e `atendimento.encerrado` (`{conversation_id, atendimento_id, numero, motivo_encerramento, desfecho}`), sem texto da conversa.
 
 ## 14. Consumo, métricas e auditoria
 
