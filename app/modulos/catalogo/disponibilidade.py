@@ -13,7 +13,8 @@ log=logging.getLogger('gateway.catalogo')
 DIAS=H.DIAS
 NOMES={'seg':'segunda','ter':'terça','qua':'quarta','qui':'quinta','sex':'sexta','sab':'sábado','dom':'domingo'}
 CHAVES=('dias_semana','exceto_feriado','horario')
-MOTIVOS=('dia_da_semana','feriado','horario')
+# CAT3-a: 'esgotado' = item esgotado na hora do pedido (volta sozinho em esgotado_ate).
+MOTIVOS=('dia_da_semana','feriado','horario','esgotado')
 
 
 def ler(valor):
@@ -100,6 +101,13 @@ def avaliar(d,quando,feriado=None):
     return False,motivos[0]
 
 
+def resumo_do_esgotado(local,volta):
+    """Em palavras, para o agente: "esgotado hoje", "esgotado; volta hoje às 18h", "esgotado; volta em 22/10 às 11h"."""
+    if volta.hour==23 and volta.minute==59: return 'esgotado hoje' if volta.date()==local.date() else f'esgotado até {volta:%d/%m}'
+    hora=_hora(volta.strftime('%H:%M'))
+    return f'esgotado; volta hoje às {hora}' if volta.date()==local.date() else f'esgotado; volta em {volta:%d/%m} às {hora}'
+
+
 class Conferencia:
     """Confere itens de uma conversa contra o dia do pedido. Guarda o que já consultou (unidade, feriado do dia)."""
     def __init__(self,db,tenant,quando_utc,fuso_empresa):
@@ -121,17 +129,23 @@ class Conferencia:
         return self._feriados[chave]
 
     async def item(self,item):
-        """{'disponivel','motivo','feriado','data_referencia','disponibilidade'} de uma linha de catalogo_itens."""
+        """{'disponivel','motivo','feriado','data_referencia','disponibilidade','resumo'} de uma linha de catalogo_itens.
+        CAT3-a: item esgotado até depois da hora do pedido vem com motivo 'esgotado' e 'disponivel_a_partir' (a hora em que volta)."""
         d=ler(item['disponibilidade']);u=await self._unidade(item['unidade'])
         fuso=(u['fuso'] if u and u['fuso'] else None) or self.fuso_empresa
         local=self.quando.astimezone(ZoneInfo(fuso));referencia=local.isoformat(timespec='minutes')
-        if not d: return {'disponivel':True,'motivo':None,'feriado':None,'data_referencia':referencia,'disponibilidade':None}
+        esgotado=item.get('esgotado_ate')
+        if esgotado is not None and esgotado>self.quando:
+            volta=esgotado.astimezone(ZoneInfo(fuso))
+            return {'disponivel':False,'motivo':'esgotado','feriado':None,'data_referencia':referencia,'disponibilidade':publica(d),
+                    'disponivel_a_partir':volta.isoformat(timespec='minutes'),'resumo':resumo_do_esgotado(local,volta)}
+        if not d: return {'disponivel':True,'motivo':None,'feriado':None,'data_referencia':referencia,'disponibilidade':None,'resumo':None}
         nomes={}
         if d.get('exceto_feriado'):
             for dia in (local.date(),local.date()-timedelta(days=1)): nomes[dia]=await self._feriado(item['unidade'],dia)
         ok,motivo=avaliar(d,local,nomes.get)
         return {'disponivel':ok,'motivo':motivo,'feriado':nomes.get(local.date()) if motivo=='feriado' else None,
-                'data_referencia':referencia,'disponibilidade':publica(d)}
+                'data_referencia':referencia,'disponibilidade':publica(d),'resumo':resumo(d)}
 
 
 async def da_conversa(db,tenant,conversa):

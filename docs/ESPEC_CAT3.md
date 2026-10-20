@@ -1,6 +1,6 @@
 # CAT3 — Gestão completa do cardápio pelo painel
 
-**Situação: proposta para decisão do Marco, 20/10/2026. Nada implementado.** Módulo `catalogo` (opções do item tocam também o `pedidos`). Foto do item fica para o ARQ1. Decisões em aberto na seção 10.
+**Situação: aprovada em 20/10/2026 (seção 12). CAT3-a implementado (seção 13, contrato para o [PAINEL]); CAT3-b e CAT3-c a seguir.** Módulo `catalogo` (opções do item tocam também o `pedidos`). Foto do item fica para o ARQ1. Decisões em aberto na seção 10.
 
 ---
 
@@ -166,3 +166,120 @@ Resposta por item: `{"resultados":[{"item_id":101,"ok":true,"antes":{"preco":30.
 | **CAT3-c** | Exportação CSV/xlsx, importação com prévia, conflitos e aplicação confirmada | Médio |
 
 O CAT3-b muda o contrato das Skills: o prompt e as Skills no Skyone precisam do ajuste da seção 6.2 **antes** de o By Koji cadastrar grupos (sem grupos, nada muda para o agente).
+
+## 12. Decisões do Marco (20/10/2026)
+
+As 10 da seção 10, como propostas, com estes destaques:
+
+- **3 (prato):** cadastro de prato com código comum; a ligação é sempre confirmada pelo admin. Para as combinações que já existem, o painel ganha uma tela de **sugestões de ligação**, por nome, com confirmar ou ignorar em lote. A rota que lista as sugestões está na seção 13.
+- **6 (esgotado):** volta automática pela hora, sem tarefa no agendador.
+- **9 (permissão):** membro pode esgotar e repor. Criar, arquivar, preço, lote e importação continuam só com admin e plataforma.
+- **CAT3-a:** o retrato do By Koji continua idêntico para o agente. Nada muda na busca nem nas Skills enquanto ninguém criar prato, esgotar item ou mudar a ordem.
+
+## 13. CAT3-a implementado — contrato para o [PAINEL]
+
+Migração 046. Base: `/admin/v1/tenants/{t}/catalogo`. Os erros vêm no envelope de sempre, com `detalhes.campo` e, quando há, `detalhes.motivo`. Item, categoria e prato de outra empresa dão 404.
+
+**Permissões:**
+- **Admin e plataforma:** todas as escritas.
+- **Membro:** lê tudo e pode **esgotar e repor**. Nas outras escritas recebe 403.
+
+### 13.1 Item no painel
+
+O `GET …/itens`, o `GET …/itens/{id}`, o PATCH e as rotas abaixo devolvem o item do CAT2 com os campos novos:
+
+```json
+{"…CAT2…": "…", "categoria_id": 12, "posicao": null, "prato": {"id": 3, "codigo": "P-0003", "nome": "Edamame"},
+ "esgotado_ate": "2026-10-20T21:00:00+00:00", "esgotado_motivo": "acabou", "arquivado_em": null, "arquivado": false}
+```
+
+- `disponivel_agora` e `indisponivel_motivo` passam a considerar `esgotado` e o item arquivado (`item_inativo`).
+- `posicao` nula: o item segue a ordem pelo nome.
+
+**Filtros do `GET …/itens`:**
+- **`arquivados`:** sem ele, os arquivados ficam fora; `arquivados=true` traz só os arquivados.
+- **`esgotados`:** `esgotados=true` traz os esgotados agora; `false`, os não esgotados.
+- **`categoria_id`** e **`prato_id`**: filtram por categoria e por prato.
+
+### 13.2 Itens
+
+| Rota | Corpo | Resposta |
+|---|---|---|
+| `POST …/itens` | `{"unidade","categoria_id","nome", "preco"?, "descricao"?, "observacao"?, "tipo"?="item", "alcoolico"?=false, "delivery"?="sim", "ativo"?=true, "disponibilidade"?, "codigo"?, "posicao"?}` | 201, o item. Código gerado: prefixo da unidade + próximo número (`GUE-0224`). 409 `codigo_em_uso` |
+| `POST …/itens/{id}/duplicar` | `{"unidade"?, "categoria_id"?, "nome"?}` | 201, a cópia: **inativa**, código novo. Em outra unidade, entra na categoria de mesmo nome, criada se faltar |
+| `PATCH …/itens/{id}` | O do CAT2 + `tipo`, `alcoolico`, `delivery`, `observacao`, `codigo`, `categoria_id`, `posicao`, `aplicar_em` | O item, com `aplicado_em` quando houve alcance: `[{"unidade","item_id","ok","alterados":[…]} \| {…,"ok":false,"motivo"}]` |
+| `POST …/itens/{id}/arquivar` · `…/desarquivar` | — | O item |
+| `PUT …/categorias/{id}/ordem` | `{"itens":[id,…]}` (o que faltar vai para o fim) | `{"categoria_id","itens":[{"item_id","posicao","posicao_anterior"}]}` |
+| `POST …/itens/{id}/esgotar` (membro pode) | `{"ate"?: "fim_do_dia" (padrão) \| "AAAA-MM-DDTHH:MM", "motivo"?, "aplicar_em"?}` | O item (+ `aplicado_em`). `ate` no fuso da unidade, no futuro e até 30 dias; senão 400 `passado`/`longe_demais` |
+| `POST …/itens/{id}/repor` (membro pode) | `{"aplicar_em"?}` | O item |
+
+**`aplicar_em`** aceita `"este"` (padrão), `"todas"` ou uma lista de unidades, e vale para os itens do mesmo prato.
+- **Leva:** nome, descrição, preço, tipo, alcoólico, delivery, ativo e disponibilidade, além do esgotado nas rotas de esgotar e repor.
+- **Nunca leva:** código, categoria e posição.
+- **400 `sem_prato`:** o item não está ligado a um prato.
+- **400 `unidade_sem_item_do_prato`:** a lista traz unidade sem item do prato, com `unidades` nos detalhes.
+- **Concorrência:** o 409 por `atualizado_em` do CAT2 continua valendo.
+
+### 13.3 Categorias
+
+| Rota | Corpo | Resposta |
+|---|---|---|
+| `GET …/categorias?unidade=&arquivadas=` | — | `{"unidade","categorias":[{"id","unidade","nome","categoria","posicao","ordem","nomes_anteriores","arquivada","arquivada_em","qtd_itens","itens_ativos","itens_no_cardapio","itens_arquivados"}]}`. Primeiro as categorias com posição; as demais na ordem do cardápio importado. Categoria vazia continua na lista |
+| `POST …/categorias` | `{"unidade","nome","posicao"?}` | 201. 409 `nome_em_uso`, com nomes comparados sem acento nem maiúsculas |
+| `PATCH …/categorias/{id}` | `{"nome"}` | A categoria. Os itens recebem o nome novo; `nomes_anteriores` guarda até 3, que a busca do agente ainda reconhece |
+| `PUT …/categorias/ordem` | `{"unidade","categorias":[id,…]}` | `{"unidade","categorias":[{"id","posicao"}]}`. Vale para o painel e para o agente |
+| `POST …/categorias/{id}/arquivar` | `{"itens"?: "arquivar" \| "mover", "destino"?}` | A categoria + `itens_movidos` e `itens_arquivados`. Com itens e sem `itens`: 409 `categoria_com_itens` (`qtd_itens`) |
+| `POST …/categorias/{id}/desarquivar` | — | A categoria. Os itens arquivados com ela continuam arquivados |
+
+### 13.4 Pratos e sugestões de ligação
+
+| Rota | Corpo | Resposta |
+|---|---|---|
+| **`GET …/pratos/sugestoes?ignoradas=&limite=100&cursor=`** | — | `{"total","grupos":[{"chave","nome","unidades":[…],"prato":null\|{"id","codigo","nome"},"conflito":null\|"varios_na_unidade","itens":[{"item_id","codigo","unidade","nome","categoria","preco","ativo","prato_id"}]}],"proximo_cursor"}` |
+| `POST …/pratos/sugestoes/confirmar` | `{"grupos":[{"chave","itens"?:[id,…]}]}` (até 400) | `{"resultados":[{"chave","ok":true,"prato":{…},"itens_ligados":[…]} \| {"chave","ok":false,"motivo"}]}` |
+| `POST …/pratos/sugestoes/ignorar` | `{"chaves":[…]}` | `{"resultados":[{"chave","ok"}]}` |
+| `POST …/pratos/sugestoes/restaurar` | `{"chaves":[…]}` | `{"restauradas":[…]}` |
+| `GET …/pratos?q=&limite=&cursor=` · `GET …/pratos/{id}` | — | `{"id","codigo","nome","criado_em","itens":[{"item_id","codigo","unidade","nome","preco","ativo","arquivado","esgotado_ate"}]}` |
+| `POST …/pratos` | `{"itens":[id,…],"nome"?}` | 201, o prato (`P-0001`…) |
+| `PATCH …/pratos/{id}` | `{"nome"}` | O prato |
+| `POST …/pratos/{id}/itens` | `{"itens":[…]}` | O prato |
+| `DELETE …/pratos/{id}/itens/{item_id}` | — | O prato |
+| `DELETE …/pratos/{id}` | — | `{"ok":true}`. 409 `prato_com_itens` |
+
+**Sugestões:**
+- **Como são montadas:** itens não arquivados de **unidades diferentes** com o mesmo nome. A comparação ignora acento, maiúsculas e pontuação. Entram só grupos com algum item sem prato e no máximo um prato no grupo.
+- **Chave:** o nome normalizado. As sugestões vêm em ordem de chave; o `cursor` é a última chave da página.
+- **`varios_na_unidade`:** a unidade aparece duas vezes no grupo. O admin escolhe os `itens`; sem a escolha, o resultado vem `ok:false` com esse motivo.
+- **Ignorada:** a sugestão volta sozinha se aparecer item novo com o mesmo nome.
+
+**Motivos de recusa ao ligar itens:**
+- **`item_ja_ligado`:** o item já está em outro prato.
+- **`unidade_repetida`:** cada unidade entra uma vez no prato.
+- **`sugestao_inexistente`** e **`item_fora_do_grupo`**.
+
+### 13.5 Copiar e lote
+
+| Rota | Corpo | Resposta |
+|---|---|---|
+| `POST …/copiar` | `{"itens":[…]` ou `"categoria_id"`, `"destino": "morumbi" \| […]`, `"ligar"?: true}` | `{"resultados":[{"item_id","destino","ok","novo_item_id","codigo"} \| {…,"ok":false,"motivo":"ja_existe"\|"mesma_unidade"}]}`. Cópias inativas, com o código do destino e a categoria de mesmo nome. Com `ligar`, ficam no prato da origem, criado se faltar |
+| `POST …/lote` | `{"itens":[…≤500],"acao","simulacao"?}` | `{"simulacao","resultados":[{"item_id","ok","antes","depois"} \| {"item_id","ok":false,"motivo"}]}` |
+
+**Ações do lote:**
+- **`reajustar`:** com `percentual` (−90 a 500) ou `valor` (soma, pode ser negativo). Arredonda em centavos, mínimo 0,01; item sem preço dá `sem_preco`.
+- **`mover`:** com `categoria_id`; item de outra unidade dá `unidade_diferente`.
+- **`pausar`, `ativar`, `arquivar`, `desarquivar`.**
+- **`esgotar`:** com `ate` e `motivo`.
+- **`repor`.**
+
+Cada item roda numa transação própria, e o lote grava um único registro no histórico.
+
+### 13.6 Histórico e agente
+
+- **Histórico:** tudo vai para `GET /tenants/{t}/gestao/alteracoes`, com as entidades `catalogo_item`, `catalogo_categoria`, `catalogo_prato` e `catalogo_lote`, e também para a auditoria.
+- **Prefixo de código da unidade:** `prefixo_codigo` aparece na lista de unidades do painel. Foi a única diferença no retrato do By Koji e não é vista pelo agente.
+- **Agente:**
+  - item arquivado não aparece;
+  - esgotado vem como no `docs/SKILLS.md`;
+  - categorias e itens seguem a ordem definida no painel e, sem ela, a de antes;
+  - categoria renomeada é achada pelo nome antigo.
+- **Testes:** `tests/test_cat3a.py` (6).

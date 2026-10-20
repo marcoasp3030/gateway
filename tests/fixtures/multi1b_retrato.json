@@ -5672,6 +5672,7 @@
      "pausa_indefinida": false,
      "pausa_motivo": null,
      "pedido_minimo": null,
+     "prefixo_codigo": null,
      "regras": null,
      "situacao": {
       "aberta_agora": true,

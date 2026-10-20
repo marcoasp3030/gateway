@@ -4,7 +4,7 @@
 async def itens_no_cardapio(db,tenant):
     """{código da unidade: quantos itens podem ser pedidos} — ativo, com preço e que não seja só do salão (a conta do modo `categorias` da busca)."""
     rows=await db.fetch("""SELECT unidade,count(*) n FROM catalogo_itens WHERE tenant_id=$1 AND ativo AND preco IS NOT NULL AND delivery<>'nao'
-        AND tipo IN ('item','adicional') GROUP BY 1""",tenant)
+        AND tipo IN ('item','adicional') AND arquivado_em IS NULL GROUP BY 1""",tenant)
     return {r['unidade']:r['n'] for r in rows}
 
 

@@ -1305,3 +1305,12 @@ PY
   - rotas de atendimentos no painel e eventos `atendimento.aberto`/`atendimento.encerrado`;
   - Skill ligada ao turno e `prompt_versao` no retorno do agente.
 - Retrato do By Koji regravado só com acréscimos. Testes em `tests/test_enc1a.py` (7).
+
+## CAT3-a — gestão do cardápio pelo painel — 2026-10-20
+
+- Decisões do Marco na seção 12 de `docs/ESPEC_CAT3.md`; o contrato para o [PAINEL] está na seção 13. Migração 046.
+- **Cadastro:** categorias como cadastro (com ordem, nomes anteriores e arquivamento), pratos e sugestões de ligação.
+- **Operações:** cópia entre unidades, esgotado com volta pela hora (o membro pode esgotar), lote, código gerado pelo prefixo da unidade e arquivamento do item.
+- Para o agente, nada muda sem ação no painel. O retrato do By Koji só ganhou `prefixo_codigo` na lista de unidades do painel.
+- Testes: `tests/test_cat3a.py` (6); `tests/test_cat2.py` foi adaptado aos campos novos.
+

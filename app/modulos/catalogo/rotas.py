@@ -28,7 +28,9 @@ POR_PAGINA=10
 CATEGORIAS_POR_PAGINA=9
 # adicionar_item só aceita item que apareceu numa busca desta conversa nos últimos N minutos (DISP1).
 ITEM_BUSCADO_MIN=max(1,int(os.getenv('ITEM_BUSCADO_MIN','30') or 30))
-COLUNAS_DO_ITEM='id,codigo,unidade,categoria,nome,descricao,preco,alcoolico,delivery,tipo,observacao,disponibilidade'
+COLUNAS_DO_ITEM='id,codigo,unidade,categoria,nome,descricao,preco,alcoolico,delivery,tipo,observacao,disponibilidade,esgotado_ate,posicao'
+# Posição nula (nunca ordenada pelo painel) vai depois das ordenadas e segue a regra de antes.
+SEM_POSICAO=10**9
 MAX_SUGESTOES=5
 
 
@@ -37,15 +39,20 @@ def vendavel(r):
     return r['preco'] is not None and r['delivery']!='nao' and r['tipo'] in ('item','adicional')
 
 
-def contar_categorias(rows):
-    """[{categoria, qtd_itens}] dos itens que podem ser pedidos, na ordem do cardápio importado
-    (a categoria aparece na posição do seu primeiro item no arquivo)."""
-    contagem={};primeiro={}
+def contar_categorias(rows,posicoes=None):
+    """[{categoria, qtd_itens}] dos itens que podem ser pedidos. CAT3-a: primeiro as categorias ordenadas pelo painel (`posicoes`,
+    nome → posição); as demais na ordem do cardápio importado (a categoria aparece na posição do seu primeiro item no arquivo)."""
+    contagem={};primeiro={};posicoes=posicoes or {}
     for r in rows:
         if vendavel(r):
             contagem[r['categoria']]=contagem.get(r['categoria'],0)+1
             primeiro[r['categoria']]=min(primeiro.get(r['categoria'],r['id']),r['id'])
-    return [{'categoria':c,'qtd_itens':contagem[c]} for c in sorted(contagem,key=lambda c:(primeiro[c],mod_busca.normalizar(c)))]
+    return [{'categoria':c,'qtd_itens':contagem[c]} for c in sorted(contagem,key=lambda c:(posicoes.get(c) or SEM_POSICAO,primeiro[c],mod_busca.normalizar(c)))]
+
+
+def ordem_na_categoria(r):
+    """Itens dentro da categoria: os ordenados pelo painel (posição) primeiro; os demais pelo nome, como antes."""
+    return (mod_busca.normalizar(r['categoria']),r.get('posicao') or SEM_POSICAO,mod_busca.normalizar(r['nome']),r['id'])
 
 
 async def marcar_vistos(db,tenant,conversa,ids):
@@ -64,17 +71,21 @@ async def com_disponibilidade(db,tenant,conversa,itens):
     conf=await disp.da_conversa(db,tenant,conversa);saida=[];referencia=None
     for r in itens:
         a=await conf.item(r);referencia=referencia or a['data_referencia']
-        saida.append({**publico(r),'disponivel':a['disponivel'],'indisponivel_motivo':a['motivo'],'disponibilidade':a['disponibilidade']})
+        saida.append({**publico(r),'disponivel':a['disponivel'],'indisponivel_motivo':a['motivo'],'disponibilidade':a['disponibilidade'],
+                      # CAT3-a: só no item esgotado: quando volta (hora do fuso da unidade).
+                      **({'disponivel_a_partir':a['disponivel_a_partir'],'esgotado_resumo':a['resumo']} if a['motivo']=='esgotado' else {})})
     saida.sort(key=lambda i: not i['disponivel'])
     return saida,referencia
 
 
-def da_categoria(rows,categoria):
+def da_categoria(rows,categoria,anteriores=None):
     """(itens vendáveis da categoria pedida, nomes das categorias achadas). Compara sem acento e sem maiúsculas;
-    sem nome igual, vale o que contém o texto ("temaki" acha "Temakis — cone" e "Temakis — hand roll")."""
+    sem nome igual, vale o que contém o texto ("temaki" acha "Temakis — cone" e "Temakis — hand roll").
+    CAT3-a: `anteriores` (nome antigo normalizado → nome atual) faz um nome antigo de categoria renomeada ainda achar a atual."""
     alvo=mod_busca.normalizar(categoria);bons=[r for r in rows if vendavel(r)]
     nomes={r['categoria']:mod_busca.normalizar(r['categoria']) for r in bons}
-    achadas=[c for c,n in nomes.items() if n==alvo] or ([c for c,n in nomes.items() if alvo and (alvo in n or n in alvo)])
+    achadas=[c for c,n in nomes.items() if n==alvo] or [c for c in [(anteriores or {}).get(alvo)] if c in nomes] or \
+            ([c for c,n in nomes.items() if alvo and (alvo in n or n in alvo)])
     return [r for r in bons if r['categoria'] in achadas],sorted(achadas,key=mod_busca.normalizar)
 
 
@@ -98,7 +109,7 @@ async def busca(request:Request,conversation_id:str,q:str=Query('',max_length=20
         if not unidade: raise HTTPException(400,{'campo':'unidade'})
     # Só itens ativos. A ordenação por relevância é feita aqui (sem acento e tolerante), não no banco.
     rows=[dict(r) for r in await repo.db.fetch(f'''SELECT {COLUNAS_DO_ITEM}
-        FROM catalogo_itens WHERE tenant_id=$1 AND ativo AND ($2::text IS NULL OR unidade=$2) ORDER BY id LIMIT 5000''',t,unidade)]
+        FROM catalogo_itens WHERE tenant_id=$1 AND ativo AND arquivado_em IS NULL AND ($2::text IS NULL OR unidade=$2) ORDER BY id LIMIT 5000''',t,unidade)]
     # Para o registro das Skills (DISP1): só o que não é dado de cliente. O texto buscado (q) fica de fora.
     ref={'unidade':unidade,'categorias':bool(categorias),'categoria':(categoria or '').strip()[:120] or None,'pagina':pagina};request.state.skill_ref=ref
     async def responder(achados,**campos):
@@ -109,7 +120,8 @@ async def busca(request:Request,conversation_id:str,q:str=Query('',max_length=20
     if not por_categoria: return await responder(mod_busca.buscar(rows,q))
     if not rows and not await repo.db.fetchval('SELECT EXISTS(SELECT 1 FROM tenant_unidades WHERE tenant_id=$1 AND codigo=$2 AND ativo)',t,unidade):
         raise HTTPException(404,'NOT_FOUND')
-    lista=contar_categorias(rows)
+    cadastro=await repo.db.fetch('SELECT nome,posicao,nomes_anteriores FROM catalogo_categorias WHERE tenant_id=$1 AND unidade=$2 AND arquivada_em IS NULL',t,unidade)
+    lista=contar_categorias(rows,{c['nome']:c['posicao'] for c in cadastro if c['posicao']})
     if categorias:
         # Sem `pagina`, todas (como sempre); com `pagina`, 9 por vez e `tem_mais` (DISP1).
         inicio=(pagina-1)*CATEGORIAS_POR_PAGINA if pagina else 0
@@ -119,9 +131,9 @@ async def busca(request:Request,conversation_id:str,q:str=Query('',max_length=20
                 'pagina':pagina,'por_pagina':CATEGORIAS_POR_PAGINA if pagina else None,
                 'tem_mais':bool(pagina) and inicio+CATEGORIAS_POR_PAGINA<len(lista),'categorias':parte}
     pagina=pagina or 1
-    achados,nomes=da_categoria(rows,categoria)
+    achados,nomes=da_categoria(rows,categoria,{mod_busca.normalizar(a):c['nome'] for c in cadastro for a in c['nomes_anteriores']})
     if q.strip(): achados=mod_busca.buscar(achados,q,limite=5000)
-    else: achados.sort(key=lambda r:(mod_busca.normalizar(r['categoria']),mod_busca.normalizar(r['nome']),r['id']))
+    else: achados.sort(key=ordem_na_categoria)
     # Os indisponíveis vão para o fim ANTES de paginar: a primeira página traz o que pode ser pedido.
     conf=await disp.da_conversa(repo.db,t,conversation_id)
     marcados=[(r,(await conf.item(r))['disponivel']) for r in achados]
@@ -164,16 +176,24 @@ async def importar_csv(request:Request,tenant_id:str,simulacao:bool=True,actor=D
 
 @admin.get('/tenants/{tenant_id}/catalogo/itens')
 async def itens(request:Request,tenant_id:str,unidade:str|None=None,tipo:str|None=None,ativo:bool|None=None,
-                q:str=Query('',max_length=200),limite:int=50,cursor:int=0):
+                q:str=Query('',max_length=200),limite:int=50,cursor:int=0,arquivados:bool=False,esgotados:bool|None=None,
+                categoria_id:int|None=None,prato_id:int|None=None):
+    """CAT3-a: arquivados ficam fora da lista padrão (`arquivados=true` lista só eles); `esgotados=true` só os esgotados agora;
+    filtros por categoria e prato."""
+    from .gestao import COLUNAS,para_o_painel
+    from modulos.pedidos import agendamento
     await _empresa(request.app.state.db,tenant_id)
     if not 1<=limite<=200 or cursor<0 or (tipo and tipo not in TIPOS): raise HTTPException(400,'VALIDATION_ERROR')
-    rows=await request.app.state.db.fetch('''SELECT id,codigo,unidade,categoria,nome,descricao,preco,alcoolico,delivery,tipo,observacao,ativo,atualizado_em,disponibilidade
+    rows=await request.app.state.db.fetch(f'''SELECT {COLUNAS}
         FROM catalogo_itens WHERE tenant_id=$1 AND ($2::text IS NULL OR unidade=$2) AND ($3::text IS NULL OR tipo=$3)
-        AND ($4::boolean IS NULL OR ativo=$4) AND id>$5 ORDER BY id LIMIT 5000''',tenant_id,unidade,tipo,ativo,cursor)
+        AND ($4::boolean IS NULL OR ativo=$4) AND id>$5 AND (arquivado_em IS NOT NULL)=$6
+        AND ($7::boolean IS NULL OR (coalesce(esgotado_ate>$8,false))=$7) AND ($9::bigint IS NULL OR categoria_id=$9)
+        AND ($10::bigint IS NULL OR prato_id=$10) ORDER BY id LIMIT 5000''',tenant_id,unidade,tipo,ativo,cursor,arquivados,esgotados,
+        agendamento.agora_utc(),categoria_id,prato_id)
     achados=[dict(r) for r in rows]
     if q.strip(): achados=mod_busca.buscar(achados,q,limite=5000);achados.sort(key=lambda r:r['id'])
     pagina=achados[:limite]
-    return {'itens':await com_agora(request.app.state.db,tenant_id,pagina),
+    return {'itens':await para_o_painel(request.app.state.db,tenant_id,pagina),
             'proximo_cursor':pagina[-1]['id'] if len(achados)>limite else None}
 
 
@@ -211,6 +231,15 @@ class ItemDoCatalogo(BaseModel):
     ativo:Any=None
     categoria:Any=None
     disponibilidade:Any=None
+    # CAT3-a
+    tipo:Any=None
+    alcoolico:Any=None
+    delivery:Any=None
+    observacao:Any=None
+    codigo:Any=None
+    categoria_id:Any=None
+    posicao:Any=None
+    aplicar_em:Any=None
     atualizado_em:AwareDatetime|None=None
 
 
@@ -230,8 +259,13 @@ def _preco_do_painel(valor):
 
 async def _validar_edicao(conn,tenant,atual,dados):
     """{coluna: valor novo} só do que veio no corpo. 400 com `detalhes.campo` no primeiro campo que não serve."""
-    enviados=dados.model_fields_set-{'atualizado_em'};novos={}
+    enviados=dados.model_fields_set-{'atualizado_em','aplicar_em'};novos={}
     if not enviados: raise _campo('corpo')
+    # CAT3-a: tipo, alcoólico, delivery, observação e código (validados como na criação); categoria pelo id; posição.
+    from . import gestao as G
+    novos.update(G.campos_do_item({k:getattr(dados,k) for k in ('tipo','alcoolico','delivery','observacao','codigo') if k in enviados}))
+    if 'categoria_id' in enviados: novos['categoria_id']=(await G.categoria_da_empresa(conn,tenant,dados.categoria_id,atual['unidade']))['id']
+    if 'posicao' in enviados and (isinstance(dados.posicao,bool) or not isinstance(dados.posicao,int) or dados.posicao<1): raise _campo('posicao')
     if 'nome' in enviados:
         if not isinstance(dados.nome,str) or not dados.nome.strip() or len(dados.nome.strip())>MAX_NOME: raise _campo('nome')
         novos['nome']=dados.nome.strip()
@@ -267,56 +301,63 @@ def _para_o_historico(coluna,valor):
 @admin.get('/tenants/{tenant_id}/catalogo/itens/{item_id}')
 async def item_do_catalogo(request:Request,tenant_id:str,item_id:int):
     """Um item, com a situação agora. Qualquer papel lê."""
+    from .gestao import COLUNAS,para_o_painel
     await _empresa(request.app.state.db,tenant_id)
-    row=await request.app.state.db.fetchrow(f'SELECT {COLUNAS_DO_PAINEL} FROM catalogo_itens WHERE tenant_id=$1 AND id=$2',tenant_id,item_id)
+    row=await request.app.state.db.fetchrow(f'SELECT {COLUNAS} FROM catalogo_itens WHERE tenant_id=$1 AND id=$2',tenant_id,item_id)
     if row is None: raise HTTPException(404,'NOT_FOUND')
-    return (await com_agora(request.app.state.db,tenant_id,[row]))[0]
+    return (await para_o_painel(request.app.state.db,tenant_id,[row]))[0]
 
 
 @admin.patch('/tenants/{tenant_id}/catalogo/itens/{item_id}',dependencies=[Depends(exigir_admin)])
 async def editar_item(request:Request,tenant_id:str,item_id:int,dados:ItemDoCatalogo,actor=Depends(painel)):
-    """Edita nome, descrição, preço, ativo, categoria e disponibilidade (CAT2). Só admin ou plataforma. Unidade e id não mudam.
+    """Edita nome, descrição, preço, ativo, categoria e disponibilidade (CAT2) e, no CAT3-a, tipo, alcoólico, delivery, observação,
+    código, categoria_id, posição e `aplicar_em` ("este" | "todas" | [unidades]: leva nome, descrição, preço, tipo, alcoólico, delivery,
+    ativo e disponibilidade aos itens do mesmo prato; nunca código, categoria e posição). Só admin ou plataforma. Unidade e id não mudam.
     Com `atualizado_em`, item que mudou desde a leitura do painel devolve 409 com o item atual. Carrinhos abertos não são tocados:
     o fechar_pedido já confere preço e item ativo."""
-    import json
-    from admin.alteracoes import registrar
+    from . import gestao as G
     db=request.app.state.db
     await _empresa(db,tenant_id)
-    async with db.acquire() as conn,conn.transaction():
-        atual=await conn.fetchrow(f'SELECT {COLUNAS_DO_PAINEL} FROM catalogo_itens WHERE tenant_id=$1 AND id=$2 FOR UPDATE',tenant_id,item_id)
-        if atual is None: raise HTTPException(404,'NOT_FOUND')
-        if dados.atualizado_em is not None and dados.atualizado_em!=atual['atualizado_em']:
-            corpo={'erro':{'codigo':'CONFLICT','mensagem':'O item foi alterado por outra pessoa. Confira os dados atuais e salve de novo.',
-                           'detalhes':{'campo':'atualizado_em','motivo':'item_alterado'}},'item':(await com_agora(conn,tenant_id,[atual]))[0]}
-            return JSONResponse(jsonable_encoder(corpo),status_code=409,headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
-        novos=await _validar_edicao(conn,tenant_id,atual,dados)
-        mudou={c:v for c,v in novos.items() if _para_o_historico(c,v)!=_para_o_historico(c,atual[c])}
-        row=atual
-        if mudou:
-            colunas=list(mudou)
-            valores=[json.dumps(mudou[c]) if c=='disponibilidade' and mudou[c] is not None else mudou[c] for c in colunas]
-            atribuicoes=','.join(f'{c}=${n}'+('::jsonb' if c=='disponibilidade' else '') for n,c in enumerate(colunas,3))
-            row=await conn.fetchrow(f'UPDATE catalogo_itens SET {atribuicoes},atualizado_em=clock_timestamp() WHERE tenant_id=$1 AND id=$2 RETURNING {COLUNAS_DO_PAINEL}',
-                                    tenant_id,item_id,*valores)
+    try:
+        async with db.acquire() as conn,conn.transaction():
+            atual=await conn.fetchrow(f'SELECT {G.COLUNAS} FROM catalogo_itens WHERE tenant_id=$1 AND id=$2 FOR UPDATE',tenant_id,item_id)
+            if atual is None: raise HTTPException(404,'NOT_FOUND')
+            if dados.atualizado_em is not None and dados.atualizado_em!=atual['atualizado_em']:
+                corpo={'erro':{'codigo':'CONFLICT','mensagem':'O item foi alterado por outra pessoa. Confira os dados atuais e salve de novo.',
+                               'detalhes':{'campo':'atualizado_em','motivo':'item_alterado'}},'item':(await G.para_o_painel(conn,tenant_id,[atual]))[0]}
+                return JSONResponse(jsonable_encoder(corpo),status_code=409,headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
+            novos=await _validar_edicao(conn,tenant_id,atual,dados)
+            lista=await G.alvos(conn,tenant_id,atual,dados.aplicar_em) if 'aplicar_em' in dados.model_fields_set else []
             # Histórico com antes e depois só do que mudou, e quem mudou (X-Actor).
-            await registrar(conn,tenant_id,actor,'catalogo_item',item_id,'alterado',{c:_para_o_historico(c,atual[c]) for c in colunas},
-                            {c:_para_o_historico(c,mudou[c]) for c in colunas})
-            await auditar(conn,tenant_id,actor,'catalogo.item_alterado',str(item_id))
-        return (await com_agora(conn,tenant_id,[row]))[0]
+            row,mudou=await G.gravar_item(conn,tenant_id,atual,novos,actor)
+            if mudou: await auditar(conn,tenant_id,actor,'catalogo.item_alterado',str(item_id))
+            if 'posicao' in dados.model_fields_set or 'categoria_id' in mudou or 'categoria' in mudou:
+                await G.colocar(conn,tenant_id,row['categoria_id'],item_id,dados.posicao if 'posicao' in dados.model_fields_set else None)
+                row=await G.item_da_empresa(conn,tenant_id,item_id)
+            aplicados=await G.aplicar_aos_alvos(conn,tenant_id,lista,{k:v for k,v in novos.items() if k in G.APLICAVEIS},actor)
+            saida=(await G.para_o_painel(conn,tenant_id,[row]))[0]
+            if dados.aplicar_em not in (None,'este'): saida['aplicado_em']=aplicados
+            return saida
+    except G.Recusa as r: return G.resposta_da_recusa(r)
 
 
 @admin.get('/tenants/{tenant_id}/catalogo/categorias')
-async def categorias_da_unidade(request:Request,tenant_id:str,unidade:str=Query(...,max_length=40)):
-    """Categorias de uma unidade na ordem do cardápio importado, com as contagens. Só leitura; qualquer papel."""
+async def categorias_da_unidade(request:Request,tenant_id:str,unidade:str=Query(...,max_length=40),arquivadas:bool=False):
+    """Categorias de uma unidade na ordem do cardápio (CAT3-a: do cadastro, com id e posição; a ordenada pelo painel primeiro, as demais
+    pela ordem do cardápio importado), com as contagens. Categoria sem item continua na lista. `arquivadas=true` inclui as arquivadas.
+    Só leitura; qualquer papel."""
+    from .gestao import categoria_do_painel
     db=request.app.state.db
     await _empresa(db,tenant_id)
-    rows=await db.fetch("""SELECT categoria,min(id) AS primeiro,count(*) AS qtd_itens,count(*) FILTER (WHERE ativo) AS itens_ativos,
-        count(*) FILTER (WHERE ativo AND preco IS NOT NULL AND delivery<>'nao' AND tipo IN ('item','adicional')) AS itens_no_cardapio
-        FROM catalogo_itens WHERE tenant_id=$1 AND unidade=$2 GROUP BY 1 ORDER BY 2""",tenant_id,unidade)
+    rows=await db.fetch("""SELECT c.*,min(i.id) AS primeiro,count(i.id) AS qtd_itens,count(i.id) FILTER (WHERE i.ativo AND i.arquivado_em IS NULL) AS itens_ativos,
+        count(i.id) FILTER (WHERE i.ativo AND i.arquivado_em IS NULL AND i.preco IS NOT NULL AND i.delivery<>'nao' AND i.tipo IN ('item','adicional')) AS itens_no_cardapio,
+        count(i.id) FILTER (WHERE i.arquivado_em IS NOT NULL) AS itens_arquivados
+        FROM catalogo_categorias c LEFT JOIN catalogo_itens i ON i.tenant_id=c.tenant_id AND i.categoria_id=c.id
+        WHERE c.tenant_id=$1 AND c.unidade=$2 AND ($3 OR c.arquivada_em IS NULL) GROUP BY c.id""",tenant_id,unidade,arquivadas)
     if not rows and not await db.fetchval('SELECT EXISTS(SELECT 1 FROM tenant_unidades WHERE tenant_id=$1 AND codigo=$2)',tenant_id,unidade):
         raise HTTPException(404,'NOT_FOUND')
-    return {'unidade':unidade,'categorias':[{'categoria':r['categoria'],'ordem':n,'qtd_itens':r['qtd_itens'],'itens_ativos':r['itens_ativos'],
-                                             'itens_no_cardapio':r['itens_no_cardapio']} for n,r in enumerate(rows,1)]}
+    rows=sorted(rows,key=lambda r:(r['posicao'] or 10**9,r['primeiro'] or 10**12,r['id']))
+    return {'unidade':unidade,'categorias':[categoria_do_painel(r,r,n) for n,r in enumerate(rows,1)]}
 
 
 class PreviaDeDisponibilidade(BaseModel):
@@ -353,3 +394,8 @@ async def resumo(request:Request,tenant_id:str):
         count(*) FILTER (WHERE alcoolico) alcoolicos
         FROM catalogo_itens WHERE tenant_id=$1 GROUP BY 1,2 ORDER BY 1,2''',tenant_id)
     return {'itens':[dict(r) for r in rows]}
+
+
+# CAT3-a: itens, categorias, pratos, cópia, esgotado e lote (docs/ESPEC_CAT3.md).
+from .gestao import gestao as _gestao
+admin.include_router(_gestao)

@@ -17,7 +17,9 @@ ADMIN={'X-Actor':'ana','X-Role':'admin'}
 ALMOCO={'dias_semana':['seg','ter','qua','qui','sex'],'exceto_feriado':True,'horario':[['11:30','15:00']]}
 RESUMO='segunda a sexta, 11h30–15h, exceto feriados'
 CAMPOS={'item_id','codigo','unidade','categoria','nome','descricao','preco','alcoolico','delivery','tipo','observacao','ativo','atualizado_em',
-        'disponibilidade','disponivel_agora','indisponivel_motivo','data_referencia'}
+        'disponibilidade','disponivel_agora','indisponivel_motivo','data_referencia',
+        # CAT3-a
+        'categoria_id','posicao','prato','esgotado_ate','esgotado_motivo','arquivado_em','arquivado'}
 def campo(r): return r.json()['erro']['detalhes']['campo']
 
 
@@ -50,7 +52,8 @@ def test_edicao_do_item_concorrencia_historico_e_carrinho_aberto(monkeypatch):
                                ({'disponibilidade':{'dias_semana':['segunda']}},'disponibilidade'),({'disponibilidade':'seg-sex'},'disponibilidade'),
                                ({},'corpo'),({'atualizado_em':g['atualizado_em']},'corpo'),({'nome':'Ok','preco':0},'preco')):
                 r=await patch(corpo);assert (r.status_code,campo(r))==(400,qual),corpo
-            for extra in ({'nome':'Ok','unidade':'morumbi'},{'id':5},{'codigo':'X-1'},{'tipo':'item'},{'observacao':'x'}):
+            # CAT3-a passou a aceitar código, tipo e observação (tests/test_cat3a.py); unidade e id continuam fora.
+            for extra in ({'nome':'Ok','unidade':'morumbi'},{'id':5},{'tipo':'outro'},{'observacao':5}):
                 assert (await patch(extra)).status_code==400,extra
             assert (await patch({'atualizado_em':'2026-10-13T12:00:00','nome':'Ok'})).status_code==400        # data sem fuso
             assert {k:v for k,v in (await client.get(url)).json().items()}==g
@@ -144,7 +147,9 @@ def test_disponivel_agora_na_lista_categorias_e_previa(monkeypatch):
 
             # Categorias da unidade: ordem do cardápio, com as contagens. Qualquer papel lê.
             r=await client.get(f'/admin/v1/tenants/{T}/catalogo/categorias',params={'unidade':'patio_guedala'});assert r.status_code==200
-            assert r.json()=={'unidade':'patio_guedala','categorias':[
+            # CAT3-a: cada categoria ganhou id, posição e mais contagens; aqui confere o que já existia.
+            antigos=('categoria','ordem','qtd_itens','itens_ativos','itens_no_cardapio')
+            assert {'unidade':r.json()['unidade'],'categorias':[{k:c[k] for k in antigos} for c in r.json()['categorias']]}=={'unidade':'patio_guedala','categorias':[
                 {'categoria':'Entradas quentes','ordem':1,'qtd_itens':1,'itens_ativos':1,'itens_no_cardapio':1},{'categoria':'Pratos quentes','ordem':2,'qtd_itens':1,'itens_ativos':1,'itens_no_cardapio':1},
                 {'categoria':'Temakis','ordem':3,'qtd_itens':1,'itens_ativos':1,'itens_no_cardapio':0},{'categoria':'Cervejas','ordem':4,'qtd_itens':1,'itens_ativos':1,'itens_no_cardapio':1},
                 {'categoria':'Carpaccios','ordem':5,'qtd_itens':1,'itens_ativos':1,'itens_no_cardapio':1},{'categoria':'Almoço executivo — opções','ordem':6,'qtd_itens':1,'itens_ativos':0,'itens_no_cardapio':0},

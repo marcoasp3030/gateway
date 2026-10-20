@@ -66,7 +66,7 @@ async def aberto(conn,tenant,conversa,criar=False):
 
 async def linhas(conn,tenant,carrinho_id):
     return await conn.fetch('''SELECT l.id,l.item_id,l.quantidade,l.preco_unitario,l.observacao,
-        i.codigo,i.nome,i.categoria,i.unidade,i.alcoolico,i.ativo,i.preco AS preco_atual,i.delivery,i.tipo,i.disponibilidade
+        i.codigo,i.nome,i.categoria,i.unidade,i.alcoolico,i.ativo,i.preco AS preco_atual,i.delivery,i.tipo,i.disponibilidade,i.esgotado_ate,i.arquivado_em
         FROM carrinho_itens l JOIN catalogo_itens i ON i.tenant_id=l.tenant_id AND i.id=l.item_id
         WHERE l.tenant_id=$1 AND l.carrinho_id=$2 ORDER BY l.id''',tenant,carrinho_id)
 
@@ -130,15 +130,16 @@ async def aviso_do_horario(conn,tenant,u,fuso,quando):
 
 async def indisponiveis(conn,tenant,conversa,ls):
     """Linhas do carrinho cujo item não é servido no dia e horário do pedido (DISP1). Lista vazia = todos servem."""
-    if not any(l['disponibilidade'] for l in ls): return []
+    if not any(l['disponibilidade'] or l['esgotado_ate'] for l in ls): return []
     from modulos.catalogo import disponibilidade as disp
     conf=await disp.da_conversa(conn,tenant,conversa);fora=[]
     for l in ls:
-        if not l['disponibilidade']: continue
+        if not l['disponibilidade'] and not l['esgotado_ate']: continue
         a=await conf.item(l)
         if not a['disponivel']:
             fora.append({'id':l['id'],'item_id':l['item_id'],'nome':l['nome'],'motivo':a['motivo'],'feriado':a['feriado'],
-                         'resumo':a['disponibilidade']['resumo'],'data_referencia':a['data_referencia']})
+                         'resumo':a['resumo'],'data_referencia':a['data_referencia'],
+                         **({'disponivel_a_partir':a['disponivel_a_partir']} if a.get('disponivel_a_partir') else {})})
     return fora
 
 
@@ -154,7 +155,8 @@ async def foi_buscado(conn,tenant,conversa,item_id,carrinho):
 def vendavel(item):
     """Regra 1: só entra em carrinho item ativo, com preço e com delivery diferente de "nao"."""
     if item is None: return 'item_inexistente'
-    if not item['ativo'] or item['tipo'] not in ('item','adicional'): return 'item_inativo'
+    # CAT3-a: arquivado não pode ser pedido (mesma recusa do inativo).
+    if not item['ativo'] or item['tipo'] not in ('item','adicional') or item.get('arquivado_em'): return 'item_inativo'
     if item['preco'] is None: return 'sem_preco'
     if item['delivery']=='nao': return 'sem_delivery'
     return None
@@ -234,8 +236,9 @@ async def adicionar(conn,tenant,conversa,item_id,quantidade,observacao):
     from modulos.catalogo import disponibilidade as disp
     a=await (await disp.da_conversa(conn,tenant,conversa)).item(item)
     if not a['disponivel']:
-        raise Recusa('item_indisponivel',detalhes={'motivo_indisponivel':a['motivo'],'feriado':a['feriado'],'resumo':a['disponibilidade']['resumo'],
-                                                    'disponibilidade':a['disponibilidade'],'data_referencia':a['data_referencia']})
+        raise Recusa('item_indisponivel',detalhes={'motivo_indisponivel':a['motivo'],'feriado':a['feriado'],'resumo':a['resumo'],
+                                                    'disponibilidade':a['disponibilidade'],'data_referencia':a['data_referencia'],
+                                                    **({'disponivel_a_partir':a['disponivel_a_partir']} if a.get('disponivel_a_partir') else {})})
     c=c or await aberto(conn,tenant,conversa,criar=True)
     if not c['unidade']: await conn.execute('UPDATE carrinhos SET unidade=$3 WHERE tenant_id=$1 AND id=$2',tenant,c['id'],item['unidade'])
     obs=(observacao or '').strip() or None
@@ -512,7 +515,7 @@ async def fechar(conn,tenant,conversa):
     if not ls: raise Recusa('carrinho_vazio')
     mudou=False
     for l in ls:
-        motivo=vendavel({'ativo':l['ativo'],'tipo':l['tipo'],'preco':l['preco_atual'],'delivery':l['delivery']})
+        motivo=vendavel({'ativo':l['ativo'],'tipo':l['tipo'],'preco':l['preco_atual'],'delivery':l['delivery'],'arquivado_em':l['arquivado_em']})
         if motivo: raise Recusa(motivo)
         if l['unidade']!=c['unidade']: raise Recusa('unidade_diferente')
         if l['preco_atual']!=l['preco_unitario']:

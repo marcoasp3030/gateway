@@ -48,7 +48,7 @@ async def vazio(repo, tenant, conversa):
 
 async def catalogo_contexto(repo, tenant, conversa):
     escopo(tenant)
-    n=await repo.db.fetchval('SELECT count(*) FROM catalogo_itens WHERE tenant_id=$1 AND ativo',tenant)
+    n=await repo.db.fetchval('SELECT count(*) FROM catalogo_itens WHERE tenant_id=$1 AND ativo AND arquivado_em IS NULL',tenant)
     return {'itens_ativos':n}
 
 async def pedidos_contexto(repo, tenant, conversa):

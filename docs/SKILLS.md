@@ -153,6 +153,10 @@ Com `categorias` ou `categoria`, a `unidade` é necessária; sem ela vale a do c
 
 **Disponibilidade (DISP1).** Todo item traz `disponivel` (bool), `indisponivel_motivo` (`dia_da_semana`, `feriado`, `horario` ou nulo) e `disponibilidade` (nulo, ou `{"dias_semana", "exceto_feriado", "horario", "resumo"}`); a resposta traz `data_referencia`, o dia e a hora do pedido usados na conferência (o horário agendado do carrinho; sem ele, agora). Item com `disponivel: false` não entra no carrinho: diga ao cliente quando ele é servido (`disponibilidade.resumo`) e ofereça outro. As categorias vêm na ordem do cardápio, com `total_categorias`, `pagina`, `por_pagina`, `tem_mais` e `tem_cardapio`. Só vale usar em `adicionar_item` um `item_id` devolvido por esta busca nesta conversa nos últimos 30 minutos. Contrato completo: `docs/ESPEC_DISP1.md`, seção 8.
 
+**Esgotado (CAT3-a).** Item esgotado na hora do pedido vem com `disponivel: false`, `indisponivel_motivo: "esgotado"`, `disponivel_a_partir` (ISO, fuso da unidade: quando volta) e `esgotado_resumo` ("esgotado; volta hoje às 18h", "esgotado hoje"). Esses dois campos só aparecem no item esgotado. `adicionar_item` e `fechar_pedido` recusam com o mesmo `item_indisponivel` de sempre, com `motivo_indisponivel: "esgotado"` e `disponivel_a_partir`. O item já no carrinho entra em `itens_indisponiveis`, com `motivo: "esgotado"`. Pedido agendado para depois da volta: disponível. O agente diz ao cliente quando volta e oferece outro item ou outro horário.
+
+**Ordem e categorias (CAT3-a).** A lista de categorias e os itens de uma categoria seguem a ordem que a empresa definir no painel; sem ordem definida, é a de antes. Categoria renomeada continua sendo achada pelo nome antigo (até 3 nomes). Item arquivado não aparece em nenhuma busca.
+
 Categoria que não existe: `itens` vazio e `sugestoes` com as parecidas. Para "o cardápio completo", chame com `categorias=true` e ofereça as categorias; não liste itens de cabeça.
 
 Retorno (até 20 itens, só ativos, do mais relevante para o menos):
