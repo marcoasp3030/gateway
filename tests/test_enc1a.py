@@ -275,7 +275,7 @@ def test_migracao_das_conversas_existentes_e_anonimizacao(tmp_path):
                 VALUES ($1,'api','bykoji','can_x','bykoji_atendimento',CASE WHEN $2 THEN now() END,CASE WHEN $2 THEN 'duvida_respondida' END)""",conv,fechada)
             await conn.execute("INSERT INTO mensagens(tenant_id,conversation_id,direcao,origem,conteudo) VALUES ('bykoji',$1,'entrada','cliente','oi')",conv)
             await conn.execute("INSERT INTO turnos(tenant_id,conversation_id,agente_id,canal_id,request_id,n_mensagens,status) VALUES ('bykoji',$1,'bykoji_atendimento','can_x',gen_random_uuid(),1,'ok')",conv)
-        assert (await migrar.aplicar(conn))==['045_enc1a_atendimentos.sql']
+        assert (await migrar.aplicar(conn))[0]=='045_enc1a_atendimentos.sql'   # e as seguintes
         rows=await conn.fetch("SELECT conversation_id,numero,estado,motivo_inicio,motivo_encerramento,desfecho,id FROM atendimentos ORDER BY conversation_id")
         assert [tuple(r)[:6] for r in rows]==[('bykoji:can_x:1',1,'aberto','migracao',None,None),('bykoji:can_x:2',1,'encerrado','migracao','concluido','duvida_respondida')]
         for r in rows:
