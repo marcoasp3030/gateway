@@ -1,5 +1,11 @@
 # Progresso do gateway
 
+## B1 — clique Apple (`ButtonsResponseMessage`) — 2026-10-20
+
+- Motivo: em 16/10 uma cliente real do By Koji tocou Entrega/Retirada 4 vezes; o uazapi mandou `ButtonsResponseMessage` (típico de iPhone) e o gateway só lia `TemplateButtonReplyMessage` → mensagem `[não foi possível ler ButtonsResponseMessage…]` e o agente pediu texto de novo.
+- Correção: `CLIQUES_DE_BOTAO` inclui `ButtonsResponseMessage`; título também em `content.Response.SelectedDisplayText`; id também em `selectedButtonID`. Fixture `clique_botao_apple.json`; teste em `tests/test_botoes.py`.
+- Publicação: tag de volta `gateway:volta-buttons-apple-1e7c6b6` (`9f31b408fd7d`); imagem nova `gateway:buttons-apple-20261020`. `docker compose up -d --build gateway worker agendador`. Health OK; `CLIQUES_DE_BOTAO` no container inclui `ButtonsResponseMessage`. Dados preservados (mesmo volume do Postgres).
+
 ## Fase 0 — Implantação em modo simulado — 2026-10-08
 
 - Status: concluída.

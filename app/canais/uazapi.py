@@ -11,9 +11,15 @@ MIDIAS={'AudioMessage':('audio','áudio'),'ImageMessage':('imagem','imagem'),'Vi
     'DocumentMessage':('documento','documento'),'StickerMessage':('figurinha','figurinha'),
     'ContactMessage':('contato','contato'),'ContactsArrayMessage':('contato','contatos')}
 TEXTOS={'Conversation','ExtendedTextMessage'}
-# Clique em botão de resposta (payload real de 10/10/2026: tests/fixtures/uazapi/clique_botao.json).
-# Clique em botão de resposta e escolha em lista (B3): viram texto com o título da opção.
-CLIQUES_DE_BOTAO={'TemplateButtonReplyMessage':'botao','ListResponseMessage':'lista'}
+# Clique em botão de resposta (payload Android/piloto: TemplateButtonReplyMessage —
+# tests/fixtures/uazapi/clique_botao.json). Em aparelhos Apple o uazapi costuma mandar
+# ButtonsResponseMessage (payload real 16/10/2026: clique_botao_apple.json).
+# Escolha em lista (B3): ListResponseMessage. Todos viram texto com o título da opção.
+CLIQUES_DE_BOTAO={
+    'TemplateButtonReplyMessage':'botao',
+    'ButtonsResponseMessage':'botao',
+    'ListResponseMessage':'lista',
+}
 ID_DE_BOTAO=re.compile(r'[a-z0-9_]{1,40}')
 LOCALIZACOES={'LocationMessage','LiveLocationMessage'}
 
@@ -71,7 +77,15 @@ def _midia(tipo_provedor,conteudo,legenda):
 
 def _titulo_do_botao(msg,conteudo):
     """Título do botão clicado, como o cliente viu (uma linha, até 200 caracteres)."""
-    for valor in (conteudo.get('selectedDisplayText'),msg.get('vote'),msg.get('text'),conteudo.get('title')):
+    # Apple/ButtonsResponseMessage: título em content.Response.SelectedDisplayText (além de vote).
+    resposta=conteudo.get('Response') if isinstance(conteudo.get('Response'),dict) else {}
+    for valor in (
+        conteudo.get('selectedDisplayText'),
+        resposta.get('SelectedDisplayText'),
+        msg.get('vote'),
+        msg.get('text'),
+        conteudo.get('title'),
+    ):
         if isinstance(valor,str) and valor.strip(): return ' '.join(valor.split())[:200]
     return None
 
@@ -119,7 +133,14 @@ def normalizar(payload: dict, agora=None) -> dict | None:
         # Toque feito no aparelho da própria instância (não é o cliente escolhendo, nem atendente escrevendo): ignora.
         if msg.get('fromMe'): return None
         escolha = conteudo.get('singleSelectReply') if isinstance(conteudo.get('singleSelectReply'),dict) else {}
-        ident = str(conteudo.get('selectedID') or msg.get('buttonOrListid') or escolha.get('selectedRowID') or '')
+        # Apple manda selectedButtonID; Android/piloto, selectedID; lista, selectedRowID.
+        ident = str(
+            conteudo.get('selectedID')
+            or conteudo.get('selectedButtonID')
+            or msg.get('buttonOrListid')
+            or escolha.get('selectedRowID')
+            or ''
+        )
         origem = str(msg.get('quoted') or (conteudo.get('contextInfo') or {}).get('stanzaID') or '')[:200]
         # Sem id válido ou sem a mensagem de origem, fica só o texto.
         if ID_DE_BOTAO.fullmatch(ident) and origem: meta = {'interacao': {'tipo': CLIQUES_DE_BOTAO[tipo_provedor], 'id': ident, 'mensagem': origem}}

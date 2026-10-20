@@ -1,0 +1,83 @@
+{
+ "BaseUrl": "https://instancia.exemplo.invalid",
+ "EventType": "messages",
+ "chat": {
+  "id": "r00000000000002",
+  "name": "Cliente Teste",
+  "owner": "5511900000002",
+  "phone": "+55 11 90000-0001",
+  "wa_chatid": "5511900000001@s.whatsapp.net",
+  "wa_chatlid": "100000000000001@lid",
+  "wa_contactName": "Cliente Teste",
+  "wa_name": "Cliente Teste",
+  "wa_isGroup": false
+ },
+ "chatSource": "updated",
+ "instanceName": "teste01",
+ "message": {
+  "id": "5511900000002:2A445D772CCFD1676F54",
+  "text": "",
+  "type": "media",
+  "vote": "Entrega",
+  "owner": "5511900000002",
+  "chatid": "5511900000001@s.whatsapp.net",
+  "edited": "",
+  "fromMe": false,
+  "pinned": false,
+  "quoted": "3EB07A66F2D9A6D01BCE0F",
+  "sender": "100000000000001@lid",
+  "source": "unknown",
+  "status": "",
+  "chatlid": "100000000000001@lid",
+  "content": {
+   "type": 1,
+   "Response": {
+    "SelectedDisplayText": "Entrega"
+   },
+   "contextInfo": {
+    "stanzaID": "3EB07A66F2D9A6D01BCE0F",
+    "participant": "100000000000002@lid",
+    "quotedMessage": {
+     "interactiveMessage": {
+      "body": {
+       "text": "Você prefere entrega ou retirada?"
+      },
+      "InteractiveMessage": {
+       "NativeFlowMessage": {
+        "buttons": [
+         {
+          "name": "quick_reply",
+          "buttonParamsJSON": "{\"id\": \"entrega\", \"display_text\": \"Entrega\", \"disabled\": false}"
+         },
+         {
+          "name": "quick_reply",
+          "buttonParamsJSON": "{\"id\": \"retirada\", \"display_text\": \"Retirada\", \"disabled\": false}"
+         }
+        ],
+        "messageVersion": 1
+       }
+      }
+     }
+    }
+   },
+   "selectedButtonID": "entrega"
+  },
+  "isGroup": false,
+  "reaction": "",
+  "track_id": "",
+  "groupName": "",
+  "mediaType": "buttons_response",
+  "messageid": "2A445D772CCFD1676F54",
+  "sender_pn": "5511900000001@s.whatsapp.net",
+  "senderName": "Cliente Teste",
+  "sender_lid": "100000000000001@lid",
+  "messageType": "ButtonsResponseMessage",
+  "track_source": "",
+  "wasSentByApi": false,
+  "buttonOrListid": "entrega",
+  "convertOptions": "",
+  "messageTimestamp": 1792182393000
+ },
+ "owner": "5511900000002",
+ "token": "token-falso-de-teste"
+}

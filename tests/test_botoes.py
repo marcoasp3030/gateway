@@ -18,6 +18,24 @@ def test_clique_real_vira_texto_com_o_titulo_do_botao():
     assert (n['telefone'],n['tipo'],n['texto'],n['from_me'],n['via_api'],n['nome'])==(CLIENTE,'texto','Sim, funcionou',False,False,'Cliente Teste')
     assert n['meta']=={'interacao':{'tipo':'botao','id':'teste_sim','mensagem':ORIGEM},'resposta_a':ORIGEM}
     assert n['message_id']=='A5C9BB44D679061FAF9C90DCE206ADF6'
+
+
+def test_clique_apple_buttons_response_vira_texto_com_interacao():
+    """iPhone: uazapi manda ButtonsResponseMessage (payload real 16/10/2026, mascarado)."""
+    origem_apple='3EB07A66F2D9A6D01BCE0F'
+    n=uazapi.normalizar(fx('clique_botao_apple'),AGORA)
+    assert (n['telefone'],n['tipo'],n['texto'],n['from_me'],n['via_api'])==(CLIENTE,'texto','Entrega',False,False)
+    assert n['meta']=={'interacao':{'tipo':'botao','id':'entrega','mensagem':origem_apple},'resposta_a':origem_apple}
+    assert n['message_id']=='2A445D772CCFD1676F54'
+    def com(mudar):
+        p=copy.deepcopy(fx('clique_botao_apple'));mudar(p['message']);return uazapi.normalizar(p,AGORA)
+    # Sem vote: ainda lê Response.SelectedDisplayText.
+    assert com(lambda m: m.update(vote=''))['texto']=='Entrega'
+    # Id só em selectedButtonID (sem buttonOrListid).
+    assert com(lambda m: (m.update(buttonOrListid=''),))['meta']['interacao']['id']=='entrega'
+    # Sem título nenhum: continua não suportado (agente pede texto).
+    r=com(lambda m: (m.update(vote='',text=''),m['content'].get('Response',{}).clear() if False else m['content'].pop('Response',None)))
+    assert r['tipo']=='desconhecido' and r['texto'].startswith('[não foi possível ler ButtonsResponseMessage')
     def com(mudar):
         p=copy.deepcopy(fx('clique_botao'));mudar(p['message']);return uazapi.normalizar(p,AGORA)
     # Título pelo campo "vote" quando o conteúdo não traz o texto exibido.

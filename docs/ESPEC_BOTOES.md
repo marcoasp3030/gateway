@@ -78,6 +78,7 @@ O que o payload mostra:
 - A mensagem original inteira volta em `quotedMessage`, mas o gateway **não confia nela**: as opções válidas são as que ele mesmo gravou ao enviar.
 - Antes do B1, este clique entrou como `[não foi possível ler TemplateButtonReplyMessage: tipo de mensagem não suportado]` e o agente respondeu pedindo texto (ocorrido no teste).
 - O formato do clique em **lista** não foi observado; fica para o teste real do B3.
+- **Apple / iPhone (16/10/2026):** o mesmo toque em botão de resposta pode chegar como `messageType: "ButtonsResponseMessage"` (`mediaType: "buttons_response"`), com título em `vote` e em `content.Response.SelectedDisplayText`, id em `buttonOrListid` e `content.selectedButtonID` (sem `selectedID`/`selectedDisplayText`). Antes do reconhecimento, a mensagem entrava como `[não foi possível ler ButtonsResponseMessage: tipo de mensagem não suportado]` (ex.: cliente real do By Koji em 16/10). Fixture: `tests/fixtures/uazapi/clique_botao_apple.json`.
 
 ### 1.4 Onde o contrato com o Skyone é validado
 
@@ -278,7 +279,7 @@ Ordem sugerida: B1 → B2 → B4 → B3 → B5. O B1 vem primeiro porque sem ler
 
 | Bloco | Situação |
 |---|---|
-| B1 — Ler o clique | Implementado em 10/10/2026: `uazapi.normalizar()` reconhece `TemplateButtonReplyMessage`; `mensagens.meta.interacao`; `ultima_interacao` no pacote (`skyone.interacao()`); testes em `tests/test_botoes.py` |
+| B1 — Ler o clique | Implementado em 10/10/2026: `uazapi.normalizar()` reconhece `TemplateButtonReplyMessage`; `mensagens.meta.interacao`; `ultima_interacao` no pacote (`skyone.interacao()`); testes em `tests/test_botoes.py`. Em 20/10/2026: também `ButtonsResponseMessage` (clique típico de aparelhos Apple; fixture `clique_botao_apple.json`, id em `selectedButtonID`/`buttonOrListid`, título em `vote`/`Response.SelectedDisplayText`) |
 | B2 — Botões de resposta do agente | Implementado em 10/10/2026: `nucleo/botoes.py` (leitura do Retorno e tabela 3.1), `uazapi.enviar_menu()`, plano B em texto, `meta.botoes`, configuração `botoes_interativos` (migração 026, padrão `off`), bloco `botoes` em `GET /metricas`; testes em `tests/test_botoes_b2.py`. **Desligado em todos os agentes** até o Marco pedir |
 | B4 | Aguarda liberação |
 | B3 — Lista | Implementado em 11/10/2026 (seção 11): `botoes.planejar()` devolve `lista`; `uazapi.enviar_lista()`; descrição das unidades por `horarios.resumo()`; clique `ListResponseMessage` → `interacao.tipo = "lista"`; testes em `tests/test_botoes_b3.py` |
