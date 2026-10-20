@@ -20,15 +20,25 @@ class Estrito(BaseModel):
     model_config=ConfigDict(extra='forbid')
 
 
+class Escolha(Estrito):
+    """CAT3-b: uma escolha num grupo de opções do item (ids devolvidos por buscar_catalogo)."""
+    grupo_id:int=Field(gt=0)
+    opcao_id:int=Field(gt=0)
+    quantidade:int=Field(1,ge=1,le=20)
+
+
 class NovoItem(Estrito):
     item_id:int=Field(gt=0)
     quantidade:int=Field(1,ge=1,le=servico.MAX_QUANTIDADE)
     observacao:str|None=Field(None,max_length=300)
+    opcoes:list[Escolha]|None=Field(None,max_length=50)
 
 
 class MudarItem(Estrito):
     quantidade:int|None=Field(None,ge=0,le=servico.MAX_QUANTIDADE)
     observacao:str|None=Field(None,max_length=300)
+    # Substitui todas as escolhas da linha ([] = nenhuma).
+    opcoes:list[Escolha]|None=Field(None,max_length=50)
 
 
 class Entrega(Estrito):
@@ -107,7 +117,8 @@ async def ver(request:Request,conversation_id:str,ctx=Depends(chave)):
 async def adicionar(request:Request,conversation_id:str,dados:NovoItem,ctx=Depends(chave)):
     t=await conversa_da_chave(request,ctx,conversation_id)
     nome=await ref_do_item(request,t,item_id=dados.item_id,quantidade=dados.quantidade)
-    return await escrever(request,t,conversation_id,lambda c: servico.adicionar(c,t,conversation_id,dados.item_id,dados.quantidade,dados.observacao),
+    opcoes=[o.model_dump() for o in dados.opcoes or []]
+    return await escrever(request,t,conversation_id,lambda c: servico.adicionar(c,t,conversation_id,dados.item_id,dados.quantidade,dados.observacao,opcoes),
         'adicionar_item',{'item':nome,'quantidade':dados.quantidade,'item_id':dados.item_id})
 
 
@@ -115,7 +126,9 @@ async def adicionar(request:Request,conversation_id:str,dados:NovoItem,ctx=Depen
 async def alterar(request:Request,conversation_id:str,linha_id:int,dados:MudarItem,ctx=Depends(chave)):
     t=await conversa_da_chave(request,ctx,conversation_id)
     nome=await ref_do_item(request,t,linha_id=linha_id,quantidade=dados.quantidade)
-    return await escrever(request,t,conversation_id,lambda c: servico.alterar(c,t,conversation_id,linha_id,dados.quantidade,dados.observacao,'observacao' in dados.model_fields_set),
+    opcoes=[o.model_dump() for o in dados.opcoes or []]
+    return await escrever(request,t,conversation_id,lambda c: servico.alterar(c,t,conversation_id,linha_id,dados.quantidade,dados.observacao,'observacao' in dados.model_fields_set,
+                                                                           opcoes,'opcoes' in dados.model_fields_set),
         'alterar_item',{'item':nome,'quantidade':dados.quantidade,'item_id':request.state.skill_ref['item_id']})
 
 

@@ -50,7 +50,7 @@ def test_migracao_categorias_prefixos_e_gatilho(tmp_path):
         for codigo,unidade,cat,nome in (('GUE-0001','patio_guedala','Entradas','Edamame'),('GUE-0002','patio_guedala','Pratos','Ebi'),
                                         ('GUE-0003','patio_guedala','Entradas','Gyoza')):
             await conn.execute("INSERT INTO catalogo_itens(tenant_id,codigo,unidade,categoria,nome,preco) VALUES ('bykoji',$1,$2,$3,$4,10)",codigo,unidade,cat,nome)
-        assert await migrar.aplicar(conn)==['046_cat3a_cardapio.sql']
+        assert (await migrar.aplicar(conn))[0]=='046_cat3a_cardapio.sql'   # e as seguintes
         cats=await conn.fetch("SELECT id,unidade,nome,posicao FROM catalogo_categorias ORDER BY id")
         assert [(c['unidade'],c['nome'],c['posicao']) for c in cats]==[('patio_guedala','Entradas',None),('patio_guedala','Pratos',None)]
         assert {r['nome']:r['categoria_id'] for r in await conn.fetch('SELECT nome,categoria_id FROM catalogo_itens')}=={'Edamame':cats[0]['id'],'Ebi':cats[1]['id'],'Gyoza':cats[0]['id']}

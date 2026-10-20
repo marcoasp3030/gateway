@@ -1314,3 +1314,11 @@ PY
 - Para o agente, nada muda sem ação no painel. O retrato do By Koji só ganhou `prefixo_codigo` na lista de unidades do painel.
 - Testes: `tests/test_cat3a.py` (6); `tests/test_cat2.py` foi adaptado aos campos novos.
 
+## CAT3-b — opções do item — 2026-10-20
+
+- Migração 047: grupos e opções do item; a linha do carrinho guarda as escolhas copiadas e o preço base.
+- **Skills:** `buscar_catalogo` traz `grupos`; `adicionar_item` e `alterar_item` aceitam `opcoes`, só com ids; há cinco recusas novas, com o grupo completo nos detalhes.
+- **Carrinho, pedido e unidade:** o preço final é a base mais os extras; o fechamento revalida as escolhas; o texto para a unidade lista as escolhas.
+- **Painel:** `GET/PUT …/itens/{id}/opcoes`, com `aplicar_em`.
+- Contrato final na seção 14 de `docs/ESPEC_CAT3.md`. O retrato do By Koji mudou só nos campos novos. Testes em `tests/test_cat3b.py` (4).
+

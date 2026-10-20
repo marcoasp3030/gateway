@@ -69,9 +69,13 @@ async def com_disponibilidade(db,tenant,conversa,itens):
     """Itens como o agente vê, com `disponivel`, o motivo e a disponibilidade em palavras; os indisponíveis vão para o fim.
     Devolve (itens, data de referência usada na conferência)."""
     conf=await disp.da_conversa(db,tenant,conversa);saida=[];referencia=None
+    # CAT3-b: grupos de opções de cada item (sempre presente; lista vazia quando o item não tem).
+    from .opcoes import do_agente
+    grupos=await do_agente(db,tenant,[r['id'] for r in itens])
     for r in itens:
         a=await conf.item(r);referencia=referencia or a['data_referencia']
         saida.append({**publico(r),'disponivel':a['disponivel'],'indisponivel_motivo':a['motivo'],'disponibilidade':a['disponibilidade'],
+                      'grupos':grupos.get(r['id'],[]),
                       # CAT3-a: só no item esgotado: quando volta (hora do fuso da unidade).
                       **({'disponivel_a_partir':a['disponivel_a_partir'],'esgotado_resumo':a['resumo']} if a['motivo']=='esgotado' else {})})
     saida.sort(key=lambda i: not i['disponivel'])
@@ -399,3 +403,6 @@ async def resumo(request:Request,tenant_id:str):
 # CAT3-a: itens, categorias, pratos, cópia, esgotado e lote (docs/ESPEC_CAT3.md).
 from .gestao import gestao as _gestao
 admin.include_router(_gestao)
+# CAT3-b: grupos e opções do item.
+from .opcoes import opcoes_admin as _opcoes
+admin.include_router(_opcoes)

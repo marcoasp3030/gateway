@@ -154,7 +154,7 @@ def test_busca_do_agente_por_unidade_so_ativos_e_preco_nulo():
             itens=r.json()['itens']
             # Sem acento acha "Tempurá" nas duas unidades; cada item traz os campos do contrato.
             assert {i['codigo'] for i in itens}=={'GUE-0002','MOR-0001'}
-            assert set(itens[0])=={'item_id','codigo','unidade','categoria','nome','descricao','preco','alcoolico','delivery','tipo','observacao','disponivel','indisponivel_motivo','disponibilidade'}
+            assert set(itens[0])=={'item_id','codigo','unidade','categoria','nome','descricao','preco','alcoolico','delivery','tipo','observacao','disponivel','indisponivel_motivo','disponibilidade','grupos'}
             por={i['codigo']:i for i in itens}
             assert por['GUE-0002']['preco']==150.0 and por['MOR-0001']['preco'] is None and por['MOR-0001']['delivery']=='a_confirmar'
             # Filtro de unidade.

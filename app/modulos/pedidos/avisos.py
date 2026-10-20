@@ -20,6 +20,9 @@ def texto_pedido_unidade(p,itens,nome_unidade):
             f'Telefone: {p["cliente_telefone"] or "(não informado)"}','']
     for i in itens:
         linhas.append(f'{i["quantidade"]}× {i["nome"]} ({reais(i["preco_unitario"])}) = {reais(i["subtotal"])}')
+        # CAT3-b: escolhas do cliente, uma por linha, com o extra quando há.
+        for o in i.get('opcoes') or []:
+            linhas.append(f'   + {(str(o["quantidade"])+"× ") if o["quantidade"]>1 else ""}{o["opcao"]} ({o["grupo"]})'+(f' +{reais(o["preco_extra"])}' if o['preco_extra'] else ''))
         if i.get('observacao'): linhas.append(f'   obs.: {i["observacao"]}')
     linhas+=['─────────────────',f'Subtotal: {reais(p["subtotal"])}',f'Taxa de entrega: {reais(p["taxa_entrega"]) if p["modalidade"]=="delivery" else "não se aplica"}',
              f'Total: {reais(p["total"])}','']

@@ -34,6 +34,12 @@ RECUSAS={
  'horario_fora_funcionamento':('horario','A unidade não funciona nesse dia e horário. Ofereça um horário dentro do funcionamento (veja proxima_abertura).'),
  'horario_invalido':('horario','Não deu para entender o horário. Envie agendado_para (AAAA-MM-DDTHH:MM) ou um texto com a hora ("hoje às 19h", "19:30", "o quanto antes").'),
  'horario_muito_distante':('horario','O horário marcado está longe demais. O pedido pode ser agendado para até 7 dias à frente.'),
+ # CAT3-b: opções do item. Os detalhes trazem grupo_id e o grupo completo (como na busca) para o agente perguntar ao cliente.
+ 'opcao_obrigatoria':('opcoes','Este item pede uma escolha no grupo indicado. Pergunte ao cliente (pode oferecer as opções como botões ou lista) e chame de novo com opcoes [{grupo_id, opcao_id}].'),
+ 'opcoes_acima_do_maximo':('opcoes','Escolhas demais no grupo indicado (veja grupo.maximo). Pergunte ao cliente quais manter e chame de novo.'),
+ 'opcoes_abaixo_do_minimo':('opcoes','Faltam escolhas no grupo indicado (veja grupo.minimo). Pergunte ao cliente o que falta e chame de novo.'),
+ 'opcao_inexistente':('opcoes','Esta opção não existe neste item (ou saiu do cardápio). Use só grupo_id e opcao_id devolvidos por buscar_catalogo.'),
+ 'opcao_repetida':('opcoes','Esta opção não pode ser escolhida mais de uma vez neste grupo.'),
 }
 
 
@@ -66,7 +72,8 @@ async def aberto(conn,tenant,conversa,criar=False):
 
 async def linhas(conn,tenant,carrinho_id):
     return await conn.fetch('''SELECT l.id,l.item_id,l.quantidade,l.preco_unitario,l.observacao,
-        i.codigo,i.nome,i.categoria,i.unidade,i.alcoolico,i.ativo,i.preco AS preco_atual,i.delivery,i.tipo,i.disponibilidade,i.esgotado_ate,i.arquivado_em
+        i.codigo,i.nome,i.categoria,i.unidade,i.alcoolico,i.ativo,i.preco AS preco_atual,i.delivery,i.tipo,i.disponibilidade,i.esgotado_ate,i.arquivado_em,
+        l.preco_base,l.opcoes,l.assinatura
         FROM carrinho_itens l JOIN catalogo_itens i ON i.tenant_id=l.tenant_id AND i.id=l.item_id
         WHERE l.tenant_id=$1 AND l.carrinho_id=$2 ORDER BY l.id''',tenant,carrinho_id)
 
@@ -88,6 +95,8 @@ async def retrato(conn,tenant,conversa):
     fora=await indisponiveis(conn,tenant,conversa,ls);fora_por_linha={f['id']:f for f in fora}
     itens=[{'id':l['id'],'item_id':l['item_id'],'codigo':l['codigo'],'nome':l['nome'],'categoria':l['categoria'],
             'quantidade':l['quantidade'],'preco_unitario':dinheiro(l['preco_unitario']),
+            # CAT3-b: preço base do item e as escolhas (preco_unitario = base + extras); sem opções, opcoes [] e base = unitário.
+            'preco_base':dinheiro(l['preco_base'] or l['preco_unitario']),'opcoes':_opcoes_da_linha(l),
             'subtotal':dinheiro(l['preco_unitario']*l['quantidade']),'observacao':l['observacao'],'alcoolico':l['alcoolico'],
             # DISP1: o item é servido no dia e horário do pedido (agendado; sem agendamento, agora)?
             'disponivel':l['id'] not in fora_por_linha} for l in ls]
@@ -119,6 +128,22 @@ async def retrato(conn,tenant,conversa):
             'faltando':faltando,'pode_fechar':not faltando,
             # Última alteração do carrinho (item ou entrega): diz se ele é desta conversa ou antigo.
             'atualizado_em':c['atualizado_em'].isoformat(timespec='seconds')}
+
+
+def _opcoes_da_linha(l):
+    """Escolhas copiadas na linha, como o agente e a unidade veem: grupo, opção, quantidade e preço extra (com os ids)."""
+    from modulos.catalogo.opcoes import ler
+    return [{'grupo_id':o['grupo_id'],'grupo':o['grupo'],'opcao_id':o['opcao_id'],'opcao':o['opcao'],'quantidade':o['quantidade'],'preco_extra':o['preco_extra']}
+            for o in ler(l['opcoes'])]
+
+
+async def _escolhas(conn,tenant,item,opcoes,linha_id=None):
+    """CAT3-b: confere as escolhas do agente contra os grupos do item. (escolhas copiadas, extras, assinatura) ou Recusa."""
+    from modulos.catalogo.opcoes import escolher,OpcaoRecusada
+    try: return await escolher(conn,tenant,item['id'],opcoes)
+    except OpcaoRecusada as r:
+        raise Recusa(r.motivo,detalhes={**({'linha_id':linha_id} if linha_id else {}),'item_id':item['id'],
+                                         **({'grupo_id':r.grupo['grupo_id'],'grupo':r.grupo} if r.grupo else {})})
 
 
 async def aviso_do_horario(conn,tenant,u,fuso,quando):
@@ -217,7 +242,7 @@ async def acoes_recentes(db,tenant,conversa,minutos):
     return [{**_acao(r),'ha_segundos':r['ha']} for r in reversed(rows)]
 
 
-async def adicionar(conn,tenant,conversa,item_id,quantidade,observacao):
+async def adicionar(conn,tenant,conversa,item_id,quantidade,observacao,opcoes=None):
     await travar(conn,tenant,conversa)
     item=await conn.fetchrow('SELECT * FROM catalogo_itens WHERE tenant_id=$1 AND id=$2',tenant,item_id)
     # Ordem das conferências (DISP1): existe → foi buscado nesta conversa → é da unidade do carrinho → pode ser vendido → é servido no dia do pedido.
@@ -239,21 +264,24 @@ async def adicionar(conn,tenant,conversa,item_id,quantidade,observacao):
         raise Recusa('item_indisponivel',detalhes={'motivo_indisponivel':a['motivo'],'feriado':a['feriado'],'resumo':a['resumo'],
                                                     'disponibilidade':a['disponibilidade'],'data_referencia':a['data_referencia'],
                                                     **({'disponivel_a_partir':a['disponivel_a_partir']} if a.get('disponivel_a_partir') else {})})
+    # CAT3-b: escolhas conferidas com os grupos do item (obrigatório, máximo, mínimo, repetição) antes de mexer no carrinho.
+    escolhas,extras,assinatura=await _escolhas(conn,tenant,item,opcoes)
+    preco=item['preco']+extras
     c=c or await aberto(conn,tenant,conversa,criar=True)
     if not c['unidade']: await conn.execute('UPDATE carrinhos SET unidade=$3 WHERE tenant_id=$1 AND id=$2',tenant,c['id'],item['unidade'])
     obs=(observacao or '').strip() or None
     igual=await conn.fetchrow('''SELECT id,quantidade FROM carrinho_itens WHERE tenant_id=$1 AND carrinho_id=$2 AND item_id=$3
-        AND observacao IS NOT DISTINCT FROM $4''',tenant,c['id'],item_id,obs)
+        AND observacao IS NOT DISTINCT FROM $4 AND assinatura=$5''',tenant,c['id'],item_id,obs,assinatura)
     if igual:
-        # Mesmo item com a mesma observação soma; o preço volta a ser o do catálogo de agora.
-        await conn.execute('UPDATE carrinho_itens SET quantidade=$3,preco_unitario=$4 WHERE tenant_id=$1 AND id=$2',
-                           tenant,igual['id'],min(MAX_QUANTIDADE,igual['quantidade']+quantidade),item['preco'])
+        # Mesmo item com a mesma observação e as mesmas escolhas soma; o preço volta a ser o do catálogo de agora.
+        await conn.execute('UPDATE carrinho_itens SET quantidade=$3,preco_unitario=$4,preco_base=$5,opcoes=$6::jsonb WHERE tenant_id=$1 AND id=$2',
+                           tenant,igual['id'],min(MAX_QUANTIDADE,igual['quantidade']+quantidade),preco,item['preco'],json.dumps(escolhas,ensure_ascii=False))
     else:
         if await conn.fetchval('SELECT count(*) FROM carrinho_itens WHERE tenant_id=$1 AND carrinho_id=$2',tenant,c['id'])>=MAX_LINHAS:
             raise Recusa('carrinho_cheio')
-        # Preço copiado do catálogo: o que o agente disser não entra.
-        await conn.execute('INSERT INTO carrinho_itens(tenant_id,carrinho_id,item_id,quantidade,preco_unitario,observacao) VALUES ($1,$2,$3,$4,$5,$6)',
-                           tenant,c['id'],item_id,quantidade,item['preco'],obs)
+        # Preço copiado do catálogo (base + extras das opções): o que o agente disser não entra.
+        await conn.execute('''INSERT INTO carrinho_itens(tenant_id,carrinho_id,item_id,quantidade,preco_unitario,observacao,preco_base,opcoes,assinatura)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)''',tenant,c['id'],item_id,quantidade,preco,obs,item['preco'],json.dumps(escolhas,ensure_ascii=False),assinatura)
     await tocar(conn,tenant,c['id'])
 
 
@@ -271,12 +299,18 @@ async def _unidade_se_vazio(conn,tenant,c):
     await tocar(conn,tenant,c['id'])
 
 
-async def alterar(conn,tenant,conversa,linha_id,quantidade=None,observacao=None,mudar_observacao=False):
+async def alterar(conn,tenant,conversa,linha_id,quantidade=None,observacao=None,mudar_observacao=False,opcoes=None,mudar_opcoes=False):
     await travar(conn,tenant,conversa)
     c,l=await _linha(conn,tenant,conversa,linha_id)
     if quantidade==0:
         await conn.execute('DELETE FROM carrinho_itens WHERE tenant_id=$1 AND id=$2',tenant,l['id'])
     else:
+        if mudar_opcoes:
+            # CAT3-b: `opcoes` substitui todas as escolhas da linha; preço refeito com o catálogo de agora.
+            item=await conn.fetchrow('SELECT * FROM catalogo_itens WHERE tenant_id=$1 AND id=$2',tenant,l['item_id'])
+            escolhas,extras,assinatura=await _escolhas(conn,tenant,item,opcoes,l['id'])
+            await conn.execute('UPDATE carrinho_itens SET opcoes=$3::jsonb,assinatura=$4,preco_base=$5,preco_unitario=$6 WHERE tenant_id=$1 AND id=$2',
+                               tenant,l['id'],json.dumps(escolhas,ensure_ascii=False),assinatura,item['preco'],item['preco']+extras)
         await conn.execute('UPDATE carrinho_itens SET quantidade=coalesce($3,quantidade),observacao=CASE WHEN $5 THEN $4 ELSE observacao END WHERE tenant_id=$1 AND id=$2',
                            tenant,l['id'],quantidade,(observacao or '').strip() or None,mudar_observacao)
     await _unidade_se_vazio(conn,tenant,c)
@@ -518,9 +552,14 @@ async def fechar(conn,tenant,conversa):
         motivo=vendavel({'ativo':l['ativo'],'tipo':l['tipo'],'preco':l['preco_atual'],'delivery':l['delivery'],'arquivado_em':l['arquivado_em']})
         if motivo: raise Recusa(motivo)
         if l['unidade']!=c['unidade']: raise Recusa('unidade_diferente')
-        if l['preco_atual']!=l['preco_unitario']:
+        # CAT3-b: as escolhas são conferidas de novo com os grupos de agora (grupo novo obrigatório, opção que saiu) e o preço refeito.
+        from modulos.catalogo.opcoes import ler
+        guardadas=[{'grupo_id':o['grupo_id'],'opcao_id':o['opcao_id'],'quantidade':o['quantidade']} for o in ler(l['opcoes'])]
+        escolhas,extras,_=await _escolhas(conn,tenant,{'id':l['item_id']},guardadas,l['id'])
+        if l['preco_atual']+extras!=l['preco_unitario']:
             # Preço sempre do banco: atualiza o carrinho e devolve para o agente confirmar o novo total.
-            await conn.execute('UPDATE carrinho_itens SET preco_unitario=$3 WHERE tenant_id=$1 AND id=$2',tenant,l['id'],l['preco_atual']);mudou=True
+            await conn.execute('UPDATE carrinho_itens SET preco_unitario=$3,preco_base=$4,opcoes=$5::jsonb WHERE tenant_id=$1 AND id=$2',
+                               tenant,l['id'],l['preco_atual']+extras,l['preco_atual'],json.dumps(escolhas,ensure_ascii=False));mudou=True
     if mudou: return None
     if not c['modalidade']: raise Recusa('falta_modalidade')
     if c['modalidade']=='delivery' and not (c['endereco'] or '').strip(): raise Recusa('falta_endereco')
@@ -538,7 +577,9 @@ async def fechar(conn,tenant,conversa):
     taxa=u['taxa_entrega'] if u and c['modalidade']=='delivery' else None
     itens=[{'item_id':l['item_id'],'codigo':l['codigo'],'nome':l['nome'],'categoria':l['categoria'],'quantidade':l['quantidade'],
             'preco_unitario':dinheiro(l['preco_unitario']),'subtotal':dinheiro(l['preco_unitario']*l['quantidade']),
-            'observacao':l['observacao'],'alcoolico':l['alcoolico']} for l in ls]
+            'observacao':l['observacao'],'alcoolico':l['alcoolico'],
+            # CAT3-b: o pedido guarda a cópia (o pedido não muda se a opção mudar depois).
+            'preco_base':dinheiro(l['preco_base'] or l['preco_unitario']),'opcoes':_opcoes_da_linha(l)} for l in ls]
     conv=await conn.fetchrow('SELECT telefone FROM conversas WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa)
     nome,_=await nome_da_conversa(conn,tenant,conversa)
     origem,canal=await origem_e_canal(conn,tenant,conversa)

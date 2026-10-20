@@ -1,6 +1,6 @@
 # CAT3 — Gestão completa do cardápio pelo painel
 
-**Situação: aprovada em 20/10/2026 (seção 12). CAT3-a implementado (seção 13, contrato para o [PAINEL]); CAT3-b e CAT3-c a seguir.** Módulo `catalogo` (opções do item tocam também o `pedidos`). Foto do item fica para o ARQ1. Decisões em aberto na seção 10.
+**Situação: aprovada em 20/10/2026 (seção 12). CAT3-a implementado (seção 13); CAT3-b implementado (seção 14: contrato final das Skills e do painel). CAT3-c a seguir.** Módulo `catalogo` (opções do item tocam também o `pedidos`). Foto do item fica para o ARQ1. Decisões em aberto na seção 10.
 
 ---
 
@@ -283,3 +283,110 @@ Cada item roda numa transação própria, e o lote grava um único registro no h
   - categorias e itens seguem a ordem definida no painel e, sem ela, a de antes;
   - categoria renomeada é achada pelo nome antigo.
 - **Testes:** `tests/test_cat3a.py` (6).
+
+## 14. CAT3-b implementado (migração 047)
+
+### 14.1 Contrato final para o prompt e as Skills (substitui o rascunho da seção 6.2)
+
+Enquanto nenhum grupo for cadastrado, nada muda para o agente além dos campos novos: `grupos: []` na busca, `opcoes: []` e `preco_base` nas linhas.
+
+**Diferenças em relação ao rascunho da 6.2:**
+- As escolhas no carrinho e no pedido trazem também `grupo_id` e `opcao_id`, que o `alterar_item` usa.
+- O `resumo` do item não ganhou "(escolher: …)": o agente usa `grupos[].obrigatorio`.
+- `disponivel` da opção é sempre `true` por enquanto (não há esgotado de opção).
+
+**1. `buscar_catalogo`:** cada item traz sempre `grupos`, com lista vazia quando o item não tem grupos. Só vêm grupos e opções ativos.
+```json
+"grupos": [
+  {"grupo_id": 12, "nome": "Escolha o molho", "obrigatorio": true, "minimo": 1, "maximo": 1, "repetir": false,
+   "opcoes": [{"opcao_id": 301, "nome": "Tarê", "preco_extra": 0.0, "disponivel": true},
+              {"opcao_id": 302, "nome": "Trufado", "preco_extra": 6.0, "disponivel": true}]},
+  {"grupo_id": 15, "nome": "Adicionais", "obrigatorio": false, "minimo": 0, "maximo": 3, "repetir": true,
+   "opcoes": [{"opcao_id": 410, "nome": "Cream cheese", "preco_extra": 4.0, "disponivel": true}]}
+]
+```
+- **`obrigatorio`:** vale `true` quando `minimo` ≥ 1.
+- **`maximo`:** total de escolhas no grupo, somando as quantidades.
+- **`repetir: true`:** a mesma opção pode vir com `quantidade` > 1 ("2× cream cheese").
+- **`preco`:** continua sendo o preço base do item.
+
+**2. `adicionar_item`:** campo opcional `opcoes`, só com ids. Nunca mande nomes.
+```json
+{"item_id": 123, "quantidade": 2, "observacao": "sem cebolinha",
+ "opcoes": [{"grupo_id": 12, "opcao_id": 302}, {"grupo_id": 15, "opcao_id": 410, "quantidade": 2}]}
+```
+- **Formato:** `quantidade` da opção vai de 1 a 20 (padrão 1); no máximo 50 escolhas por chamada.
+- **Grupos sem escolha:**
+  - grupo obrigatório sem escolha é recusado;
+  - grupo opcional pode ficar sem escolha.
+- **Linhas do carrinho:**
+  - mesmo item com a mesma observação e as **mesmas escolhas** soma a quantidade;
+  - escolhas diferentes viram **outra linha**.
+
+**3. `alterar_item`:** `PATCH /api/v1/carrinho/{conversation_id}/itens/{id}`
+- `{"opcoes": [...]}` **substitui todas** as escolhas da linha, e o preço é refeito.
+- `{"opcoes": []}` tira todas; num grupo obrigatório isso dá recusa.
+- Pode vir junto com `quantidade` e `observacao`.
+
+**4. Recusas novas:** HTTP 422, com `erro.detalhes.motivo`, `campo: "opcoes"`, `item_id`, `grupo_id` e o **`grupo` completo**, no mesmo formato da busca. No `alterar_item` e no `fechar_pedido` vem também `linha_id`.
+
+| Motivo | Quando | O que o agente faz |
+|---|---|---|
+| `opcao_obrigatoria` | Grupo obrigatório sem escolha. No `fechar_pedido`, quando o grupo foi criado depois de o item entrar no carrinho | Pergunta ao cliente (pode mandar as opções do `grupo` como botões ou lista) e chama de novo (`alterar_item` com `linha_id` no fechamento) |
+| `opcoes_acima_do_maximo` | Mais escolhas que o `maximo` do grupo | Pergunta quais manter |
+| `opcoes_abaixo_do_minimo` | Escolheu algo, mas menos que o `minimo` (grupo com mínimo ≥ 2) | Pergunta o que falta |
+| `opcao_inexistente` | `grupo_id` ou `opcao_id` não é deste item ou está inativo (sem `grupo` quando o próprio grupo não existe) | Busca de novo e usa só os ids devolvidos |
+| `opcao_repetida` | A mesma opção com quantidade > 1 num grupo sem `repetir` | Pergunta de novo |
+
+O carrinho atual vem junto, como em toda recusa.
+
+**5. Carrinho, pedido e preço final:** cada linha ou item traz `preco_base` e `opcoes`.
+```json
+{"id": 88, "item_id": 123, "nome": "Edamame", "quantidade": 2, "preco_base": 34.0, "preco_unitario": 48.0, "subtotal": 96.0,
+ "opcoes": [{"grupo_id": 12, "grupo": "Escolha o molho", "opcao_id": 302, "opcao": "Trufado", "quantidade": 1, "preco_extra": 6.0},
+            {"grupo_id": 15, "grupo": "Adicionais", "opcao_id": 410, "opcao": "Cream cheese", "quantidade": 2, "preco_extra": 4.0}]}
+```
+- **Preço da linha:** `preco_unitario` = `preco_base` + soma de (`preco_extra` × `quantidade`). É o que o cliente paga por unidade. `subtotal` = `preco_unitario` × `quantidade`.
+- **Item sem opções:** vem com `opcoes: []` e `preco_base` = `preco_unitario`.
+- **Cópia:** nome e preço das opções ficam copiados no momento da escolha. O pedido fechado não muda se a opção mudar depois.
+- **`fechar_pedido` revalida:**
+  - extra mudou: `preco_alterado` (409), com o carrinho já refeito;
+  - opção saiu do cardápio: `opcao_inexistente`;
+  - grupo obrigatório novo: `opcao_obrigatoria`.
+- **Texto do pedido para a unidade:** as escolhas aparecem abaixo de cada item. Exemplo:
+  ```
+  3× Edamame (R$ 49,00) = R$ 147,00
+     + Trufado (Escolha o molho) +R$ 7,00
+     + 2× Cream cheese (Adicionais) +R$ 4,00
+  ```
+
+**6. O que o prompt precisa saber:**
+1. Antes de `adicionar_item`, olhe os `grupos` do item. Se houver grupo obrigatório, pergunte a escolha ao cliente; pode mostrar as opções como botões ou lista.
+2. Repasse `grupo_id` e `opcao_id` devolvidos pela busca, nunca nomes.
+3. Diante de uma recusa de opção, use o `grupo` dos detalhes para perguntar de novo.
+4. Ao confirmar o pedido, cite as escolhas e o `preco_unitario` / `subtotal` do carrinho. Não some preços por conta própria.
+
+### 14.2 Painel
+
+| Rota | Corpo | Resposta |
+|---|---|---|
+| `GET …/catalogo/itens/{id}/opcoes` | — | `{"item_id","atualizado_em","grupos":[{"id","nome","obrigatorio","minimo","maximo","repetir","posicao","ativo","opcoes":[{"id","nome","preco_extra","codigo","posicao","ativo"}]}]}`. Qualquer papel lê |
+| `PUT …/catalogo/itens/{id}/opcoes` (admin e plataforma) | `{"grupos":[{"id"?, "nome", "minimo"=0, "maximo"=1, "repetir"?=false, "ativo"?=true, "opcoes":[{"id"?, "nome", "preco_extra"=0, "codigo"?, "ativo"?=true}]}], "atualizado_em"?, "aplicar_em"?}` | O conjunto novo |
+
+O `PUT` funciona assim:
+- **Conjunto inteiro:** a ordem da lista é a posição. Com `id`, atualiza mantendo o id; sem `id`, cria; o que não vier é apagado. Carrinhos e pedidos têm a cópia, e o fechamento confere de novo.
+- **Limites:** até 10 grupos; de 1 a 30 opções por grupo; 0 ≤ `minimo` ≤ `maximo` ≤ 20, com `maximo` ≥ 1; `preco_extra` ≥ 0.
+- **Erros:** 400 com `campo` no formato `grupos[n].opcoes[m].preco_extra`. Grupo de outro item dá 400 `grupo_de_outro_item`.
+- **Concorrência:** `atualizado_em` diferente do atual dá 409 `opcoes_alteradas`, com o conjunto atual em `opcoes`.
+- **`aplicar_em`:** aceita `"todas"` ou uma lista de unidades. Copia o conjunto para os itens do mesmo prato, substituindo o deles, e devolve `aplicado_em`.
+- **Histórico:** fica em `gestao_alteracoes`, com a entidade `catalogo_opcoes`.
+
+### 14.3 Retrato do By Koji
+
+Só os campos novos, todos acrescentados (35 linhas, nenhuma alterada):
+- `grupos: []` em cada item da busca (7);
+- `opcoes: []` e `preco_base` nas linhas de carrinho do pacote e das respostas das Skills;
+- `opcoes: []` e `preco_base` nos itens do pedido.
+
+Testes: `tests/test_cat3b.py` (4).
+

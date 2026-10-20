@@ -347,7 +347,7 @@ Contrato completo: `docs/ESPEC_GESTAO.md` 11.2, 11.3 e 11.10. Escrita só com `X
 
 Campos novos no `PATCH`/`POST` da unidade: `delivery_ativo` (bool), `taxa_modo` (`fixa`/`bairro`/`cep`), `frete_gratis_acima` (> 0), `tempo_entrega_min` e `tempo_retirada_min` (1–600). Mudar `taxa_entrega`, `taxa_modo`, `frete_gratis_acima`, `delivery_ativo` ou `formas_pagamento` exige admin/plataforma; reenviar o mesmo valor passa. Toda escrita entra em `gestao/alteracoes` (entidades `taxa` e `pagamento`) e na auditoria.
 
-**Cardápio — gestão completa (CAT3-a) ✅:** itens (criar, duplicar, arquivar, código, ordem), categorias como cadastro, pratos com sugestões de ligação (confirmar ou ignorar em lote), cópia entre unidades, esgotado e lote. Contrato na seção 13 de `docs/ESPEC_CAT3.md`.
+**Cardápio — gestão completa (CAT3-a) ✅:** itens (criar, duplicar, arquivar, código, ordem), categorias como cadastro, pratos com sugestões de ligação (confirmar ou ignorar em lote), cópia entre unidades, esgotado e lote. Contrato na seção 13 de `docs/ESPEC_CAT3.md`. Opções do item (CAT3-b ✅): `GET/PUT …/catalogo/itens/{id}/opcoes`, seção 14.2.
 
 ## 11. Conversas, histórico e atendimento humano
 

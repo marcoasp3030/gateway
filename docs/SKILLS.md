@@ -153,6 +153,8 @@ Com `categorias` ou `categoria`, a `unidade` é necessária; sem ela vale a do c
 
 **Disponibilidade (DISP1).** Todo item traz `disponivel` (bool), `indisponivel_motivo` (`dia_da_semana`, `feriado`, `horario` ou nulo) e `disponibilidade` (nulo, ou `{"dias_semana", "exceto_feriado", "horario", "resumo"}`); a resposta traz `data_referencia`, o dia e a hora do pedido usados na conferência (o horário agendado do carrinho; sem ele, agora). Item com `disponivel: false` não entra no carrinho: diga ao cliente quando ele é servido (`disponibilidade.resumo`) e ofereça outro. As categorias vêm na ordem do cardápio, com `total_categorias`, `pagina`, `por_pagina`, `tem_mais` e `tem_cardapio`. Só vale usar em `adicionar_item` um `item_id` devolvido por esta busca nesta conversa nos últimos 30 minutos. Contrato completo: `docs/ESPEC_DISP1.md`, seção 8.
 
+**Opções do item (CAT3-b).** Todo item traz `grupos` (lista vazia quando não tem): `[{"grupo_id", "nome", "obrigatorio", "minimo", "maximo", "repetir", "opcoes": [{"opcao_id", "nome", "preco_extra", "disponivel"}]}]`. Com grupo obrigatório, pergunte a escolha antes de `adicionar_item`. Contrato completo na seção 14.1 de `docs/ESPEC_CAT3.md`.
+
 **Esgotado (CAT3-a).** Item esgotado na hora do pedido vem com `disponivel: false`, `indisponivel_motivo: "esgotado"`, `disponivel_a_partir` (ISO, fuso da unidade: quando volta) e `esgotado_resumo` ("esgotado; volta hoje às 18h", "esgotado hoje"). Esses dois campos só aparecem no item esgotado. `adicionar_item` e `fechar_pedido` recusam com o mesmo `item_indisponivel` de sempre, com `motivo_indisponivel: "esgotado"` e `disponivel_a_partir`. O item já no carrinho entra em `itens_indisponiveis`, com `motivo: "esgotado"`. Pedido agendado para depois da volta: disponível. O agente diz ao cliente quando volta e oferece outro item ou outro horário.
 
 **Ordem e categorias (CAT3-a).** A lista de categorias e os itens de uma categoria seguem a ordem que a empresa definir no painel; sem ordem definida, é a de antes. Categoria renomeada continua sendo achada pelo nome antigo (até 3 nomes). Item arquivado não aparece em nenhuma busca.
@@ -188,13 +190,15 @@ Retorno (até 20 itens, só ativos, do mais relevante para o menos):
 | `quantidade` | não | 1 a 99 (padrão 1) |
 | `observacao` | não | Pedido do cliente para o item ("sem cebola"), até 300 caracteres |
 
-Exemplo: `{"item_id": 1027, "quantidade": 2, "observacao": "sem cebola"}`. O mesmo item com a mesma observação soma a quantidade; com observação diferente vira outra linha.
+| `opcoes` | não | CAT3-b: escolhas nos grupos do item, só ids da busca: `[{"grupo_id", "opcao_id", "quantidade"?}]`. Obrigatório quando o item tem grupo obrigatório |
+
+Exemplo: `{"item_id": 1027, "quantidade": 2, "observacao": "sem cebola", "opcoes": [{"grupo_id": 12, "opcao_id": 302}]}`. O mesmo item com a mesma observação e as mesmas escolhas soma a quantidade; com observação ou escolhas diferentes vira outra linha. Opções do item: formato, recusas e preço final na seção 14.1 de `docs/ESPEC_CAT3.md`.
 
 ### 4. `alterar_item`
 
 **Descrição para o agente:** Muda a quantidade ou a observação de uma linha do carrinho. Use o `id` da linha (campo `id` em `carrinho.itens`). Quantidade 0 remove a linha.
 
-`PATCH /api/v1/carrinho/{conversation_id}/itens/{id}` — corpo: `{"quantidade": 3}` e/ou `{"observacao": "bem passado"}`.
+`PATCH /api/v1/carrinho/{conversation_id}/itens/{id}` — corpo: `{"quantidade": 3}` e/ou `{"observacao": "bem passado"}` e/ou `{"opcoes": [...]}` (CAT3-b: substitui todas as escolhas da linha; o preço é refeito).
 
 ### 5. `remover_item`
 
