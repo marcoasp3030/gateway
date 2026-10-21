@@ -1346,3 +1346,10 @@ PY
 - **Medição:** `scripts/medir_documentos.py`, que roda na imagem do leitor e sem rede; o corpus fica em `backups/gateway/corpus-arq1/`.
 - Testes em `tests/test_arq1a3.py` (16).
 - Teste do Marco: na empresa `bench_passo5`, o agente "Teste Documentos" (`ag_92b3853d724f146f03ecfdb9`, modelo `teste_documentos` v1 com documentos ligados) e o canal api `can_ddefc934b2a21dcca872234c`. O agente está em mock/dry e com o piloto ligado.
+
+## INV14 — trava da conversa com o Redis oscilando — 2026-10-21
+
+- **Causa** (instrumentada, 4 de 4 rodadas): com a vaga ocupada, a conversa voltava do `sem_vaga` e caía na oscilação do Redis ao pegar a trava. O item ficava pendente até a retomada (90 s em produção). O Redis real não caiu (11 dias no ar, 0 reinícios, sem OOM). A falha ficou mais frequente com a VPS usando swap: processo de editor com 1,5 GB e um OOM do kernel às 20:33.
+- **Correção:** a trava é tentada de novo com espera crescente (~10 s). Se o Redis não voltar, a fila devolve a conversa ao agendamento (`sem_trava`) e o worker segue. Nada fica pendente nem preso. Teste determinístico em `tests/test_fila_troca.py`, que falha no código antigo.
+- **Piloto:** a lista aceita também identificador do canal api, com letras (ex.: `teste-marco-01`); o telefone de alerta continua só telefone.
+- **Registro:** aviso do Redis às 19:39 de 21/10, "Asynchronous AOF fsync is taking too long (disk is busy?)". Acompanhar se repete.

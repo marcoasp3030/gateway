@@ -338,6 +338,15 @@ class FilaDuravel:
                 await self.redis.zadd(self.k_due, {chave: time.time() + 0.3})
                 await self.confirmar(stream, item_id, chave)
                 return 'sem_vaga'
+            if resultado == 'sem_trava':
+                # INV14: o Redis não deu a trava em ~10 s. A conversa volta para o agendamento (como sem vaga) e o worker segue.
+                # Se nem isso o Redis aceitar, o item fica para a retomada (não há onde guardar sem ele).
+                try:
+                    await self.redis.zadd(self.k_due, {chave: time.time() + 1})
+                    await self.confirmar(stream, item_id, chave)
+                except Exception:
+                    log.warning('Conversa sem trava não reagendada (Redis fora); fica para a retomada')
+                return 'sem_trava'
             # 'ocupado': quem tem a trava reagenda o que sobrar ao terminar; este item sai.
             await insistir(lambda: self.confirmar(stream, item_id, chave), self.p.insistir_s)
             return resultado

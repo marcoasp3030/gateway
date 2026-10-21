@@ -60,6 +60,61 @@ def test_INV14_queda_do_redis_no_fim_do_lote_devolve_vaga_e_nao_duplica(tmp_path
     banco_real(cenario)
 
 
+class TravaFalhando:
+    """Redis real em que só o SET da trava da conversa falha, numa quantidade contada de vezes (sem depender do relógio)."""
+    def __init__(self,real,falhas=0): self.real=real;self.falhas=falhas;self.tentativas=0
+    def __getattr__(self,nome): return getattr(self.real,nome)
+    async def set(self,chave,*a,**k):
+        if ':lock:' in chave:
+            self.tentativas+=1
+            if self.falhas>0:
+                self.falhas-=1;raise redis.ConnectionError('Redis fora')
+        return await self.real.set(chave,*a,**k)
+
+
+def test_INV14_trava_com_redis_oscilando_tenta_de_novo_e_sem_redis_volta_para_a_fila(tmp_path):
+    """Corrida do INV14, de forma determinística: a segunda conversa volta do "sem vaga" e encontra o Redis falhando ao pegar a trava.
+    Antes: o item ficava pendente até a retomada (90 s em produção). Agora: tenta de novo com espera crescente (~10 s; aqui zero);
+    se o Redis não voltar, a conversa volta para o agendamento e o worker segue — nada fica pendente nem preso."""
+    async def cenario(conn):
+        app,c,r,p,pref=await montar(conn,True,tmp_path,ocioso_ms=600000)
+        fila=app.state.fila;falha=TravaFalhando(r)
+        p.redis=fila.redis=falha;p.esperas_trava=(0,0,0,0,0,0)
+        chamadas=[]
+        async def agente(http,repo,cofre,tenant,cfg,payload):
+            chamadas.append(payload['conversation_id']);return {'resposta':['Resposta simulada.'],'acao':'nenhuma'}
+        p.chamar=agente
+        try:
+            async with c:
+                a,can=await criar(c,'alpha')
+                await ativo(c,'alpha',a,can,debounce_s=1,max_wait_s=1,max_lotes_simultaneos=1)
+                conv=(await c.post(f'/admin/v1/tenants/alpha/agentes/{a}/simular',json={'canal_id':can,'identificador':'5511900001','texto':'oi'})).json()['conversation_id']
+                # 1) Oscilação curta: 3 falhas seguidas e o Redis volta → mesma execução pega a trava e responde.
+                falha.falhas=3
+                assert await p.processar_duravel('alpha',conv)=='concluido' and falha.tentativas==4
+                # 2) Redis fora durante todas as tentativas (1 + 6) → 'sem_trava'; nada do turno começou.
+                await c.post(f'/admin/v1/tenants/alpha/agentes/{a}/simular',json={'canal_id':can,'identificador':'5511900001','texto':'de novo'})
+                falha.falhas=7;falha.tentativas=0
+                assert await p.processar_duravel('alpha',conv)=='sem_trava' and falha.tentativas==7
+                assert await conn.fetchval("SELECT count(*) FROM turnos WHERE conversation_id=$1",conv)==1
+                # 3) Pela fila: o item sem trava é confirmado (sai do pendente) e a conversa volta para o agendamento; depois é atendida.
+                chave=p.chave('alpha',conv)
+                await r.delete(p.prefixo+':first:'+chave);await r.zrem(fila.k_due,chave)
+                await fila.garantir_grupo('alpha')
+                item=await r.xadd(fila.stream('alpha'),{'chave':chave})
+                await r.xreadgroup('workers',fila.id,{fila.stream('alpha'):'>'},count=1)
+                falha.falhas=7
+                assert await fila.tratar(fila.stream('alpha'),item,chave)=='sem_trava'
+                assert (await r.xpending(fila.stream('alpha'),'workers'))['pending']==0
+                assert await r.zscore(fila.k_due,chave) is not None
+                assert await p.processar_duravel('alpha',conv)=='concluido'
+                assert await conn.fetchval("SELECT count(*) FROM turnos WHERE conversation_id=$1 AND etapa='concluido' AND status='ok'",conv)==2
+                assert not await r.exists(fila.k_lotes('alpha'))
+        finally:
+            await limpar(r,pref)
+    banco_real(cenario)
+
+
 def test_insistir_desiste_no_limite_e_devolve_o_resultado():
     async def cenario():
         n=[]

@@ -125,8 +125,11 @@ class Administracao:
     async def checar_agente(self,repo,tenant,agente):
         cfg = await Configuracoes(repo).efetiva(tenant['id'],agente['id'])
         if cfg['max_wait_s'] < cfg['debounce_s']: raise HTTPException(400,'max_wait_s menor que debounce_s')
-        for telefone in (cfg['contatos_permitidos'] or []) + ([cfg['alerta_telefone']] if cfg.get('alerta_telefone') else []):
-            if not re.fullmatch(r'\d{8,16}',telefone): raise HTTPException(400,'Telefone inválido')
+        # Piloto: telefone (8 a 16 dígitos) ou, para o canal api (ARQ1), um identificador com letras ("teste-marco-01").
+        for contato in cfg['contatos_permitidos'] or []:
+            if not (re.fullmatch(r'\d{8,16}',contato) or (re.fullmatch(r'[A-Za-z0-9_@+.-]{3,100}',contato) and not contato.isdigit())):
+                raise HTTPException(400,'Telefone inválido')
+        if cfg.get('alerta_telefone') and not re.fullmatch(r'\d{8,16}',cfg['alerta_telefone']): raise HTTPException(400,'Telefone inválido')
         if cfg['agente_mode']=='live':
             if agente['provedor']!='skyone' or not agente['skyone_webhook_url']:
                 raise HTTPException(400,'Provedor/URL live inválidos')

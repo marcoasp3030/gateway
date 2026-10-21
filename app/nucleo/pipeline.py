@@ -40,6 +40,8 @@ def campos_do_retorno(resultado):
 
 
 ESPERA_ANEXOS_S=20
+# INV14: tentativas de pegar a trava da conversa com o Redis falhando — espera crescente, ~10 s no total; depois a conversa volta à fila.
+ESPERAS_TRAVA=(0.25,0.5,1,2,3,3.25)
 
 
 def anexos_do_lote(itens):
@@ -232,6 +234,8 @@ class Pipeline:
         self.fila_duravel=fila_duravel
         # Por quanto tempo as liberações no Redis insistem durante uma queda.
         self.insistir_s=60
+        # INV14: esperas entre as tentativas de pegar a trava da conversa quando o Redis falha (soma ~10 s).
+        self.esperas_trava=ESPERAS_TRAVA
 
     def chave(self,tenant,conversa):
         return json.dumps([tenant,conversa],separators=(',',':'))
@@ -581,7 +585,10 @@ return 1
         if not conv: return 'vazio'
         cfg=await self.cfg.efetiva(tenant,conv['agente_id'])
         lock=self._trava(tenant,conversa);token=uuid.uuid4().hex
-        if not await self.redis.set(lock,token,nx=True,ex=cfg['timeout_s']+90): return 'ocupado'
+        obtida=await self._pegar_trava(lock,token,cfg)
+        # INV14: Redis fora por mais de ~10 s → a fila devolve a conversa para o agendamento (nada fica pendente esperando a retomada).
+        if obtida is None: return 'sem_trava'
+        if not obtida: return 'ocupado'
         reservada=False;sem_vaga=False
         try:
             if vaga is not None:
@@ -641,6 +648,16 @@ return 1
             # Sem vaga: quem chamou reagenda para logo (não passa pelo debounce de novo).
             if not sem_vaga and await self.db.fetchval("SELECT EXISTS(SELECT 1 FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND processada_em IS NULL AND direcao='entrada' AND origem IN ('cliente','sistema'))",tenant,conversa):
                 await insistir(lambda: self.enfileirar(tenant,conversa,cfg),self.insistir_s)
+
+    async def _pegar_trava(self,lock,token,cfg):
+        """Trava da conversa no Redis. True = pegou; False = outra execução tem a trava; None = o Redis não respondeu em nenhuma das
+        tentativas (espera crescente, ~10 s no total). Uma oscilação curta do Redis não deixa mais o item pendente por 90 s."""
+        for espera in (0,)+tuple(self.esperas_trava):
+            if espera: await asyncio.sleep(espera)
+            try: return bool(await self.redis.set(lock,token,nx=True,ex=cfg['timeout_s']+90))
+            except Exception: continue
+        log.warning('Trava da conversa não obtida: Redis indisponível; a conversa volta para a fila')
+        return None
 
     async def _antes_do_turno(self,tenant,conversa,cfg):
         """Antes de montar o pacote, o que os módulos do agente fazem (pedidos: carrinho parado há mais de carrinho_expira_h
