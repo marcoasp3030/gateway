@@ -2,6 +2,8 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    # Falta de memória na VPS: o kernel mata processos de editor/assistente antes do banco (21/10/2026, aprovado pelo Marco).
+    oom_score_adj: -500
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -20,6 +22,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    oom_score_adj: -500
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
     # SEG09: senha mesmo sem porta publicada (defesa em profundidade)
@@ -37,6 +40,7 @@ services:
   gateway:
     build: ./app
     restart: unless-stopped
+    oom_score_adj: -300
     # Parada graciosa: termina os lotes em andamento (PARADA_GRACIOSA_S, padrão 75 s).
     stop_grace_period: 90s
     env_file: .env
@@ -76,6 +80,7 @@ services:
   worker:
     image: gateway-gateway
     pull_policy: never
+    oom_score_adj: -300
     command: ["python", "processos.py", "worker"]
     restart: unless-stopped
     # Parada graciosa: termina os lotes em andamento (PARADA_GRACIOSA_S, padrão 75 s).
@@ -113,6 +118,7 @@ services:
   agendador:
     image: gateway-gateway
     pull_policy: never
+    oom_score_adj: -300
     command: ["python", "processos.py", "agendador"]
     restart: unless-stopped
     # Parada graciosa: termina os lotes em andamento (PARADA_GRACIOSA_S, padrão 75 s).
