@@ -28,9 +28,10 @@ em_processamento() {
     turnos=$(psql_prod "SELECT count(*) FROM turnos WHERE etapa IN ('processando','respondido')")
     echo $((n+turnos))
 }
-# Fotografia da fila no Redis: total de chaves, agendadas, na fila e o tamanho de cada fila por empresa.
+# Fotografia da fila no Redis: agendadas, na fila, empresas e o tamanho de cada fila por empresa. (O total de chaves não entra: chaves de
+# liderança e de limite de taxa expiram sozinhas e mudariam a comparação.)
 fotografia() {
-    f="chaves=$(rcli DBSIZE) agendadas=$(rcli ZCARD $PREFIXO:due) na_fila=$(rcli SCARD $PREFIXO:fila:na_fila)"
+    f="agendadas=$(rcli ZCARD $PREFIXO:due) na_fila=$(rcli SCARD $PREFIXO:fila:na_fila) empresas=$(rcli SCARD $PREFIXO:fila:tenants)"
     for t in $(rcli SMEMBERS "$PREFIXO:fila:tenants" | sort); do f="$f $t=$(rcli XLEN $PREFIXO:fila:$t)"; done
     echo "$f"
 }
@@ -94,7 +95,7 @@ while :; do
     sleep 5
 done
 VOLTA=$(date +%s)
-DEPOIS=$(fotografia); echo "   fila depois: $DEPOIS"
+DEPOIS=$(fotografia); echo "   fila depois: $DEPOIS · chaves no Redis: $(rcli DBSIZE)"
 [ "$ANTES" = "$DEPOIS" ] || parar "a fila do Redis não voltou igual do AOF (antes: $ANTES | depois: $DEPOIS); workers e agendador continuam parados"
 [ "$(psql_prod 'SELECT max(versao) FROM schema_migrations')" -gt 0 ] || parar "o banco não respondeu"
 
