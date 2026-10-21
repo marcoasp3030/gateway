@@ -15,6 +15,9 @@ COMPORTAMENTO = {
     'aviso_espera_modo','aviso_espera_textos','reacoes','reacoes_emojis','reacoes_max_dia','fora_do_horario','fora_do_horario_mensagem','fora_do_horario_aceita_agendado',
     'transbordo_alerta','transbordo_horario_equipe','transbordo_fora_do_horario',
     'notificar_equipe','transbordo_destino_externo',
+    # FUP1-a
+    'follow_up_ativo','follow_up_escopo','follow_up_maximo','follow_up_primeiro_min','follow_up_segundo_min','follow_up_janela',
+    'follow_up_fora_unidade','follow_up_limite_dia',
 }
 # debounce_curto_s vale quando a mensagem parece completa (pontuação final ou mais de
 # debounce_palavras palavras); mensagem curta/picada espera debounce_s.
@@ -40,7 +43,12 @@ PADROES = dict(debounce_s=4,debounce_curto_s=1.5,debounce_palavras=6,max_wait_s=
     transbordo_alerta=None,transbordo_horario_equipe=None,
     transbordo_fora_do_horario='Nossa equipe não está disponível agora.[[ Voltamos {retorno_equipe}.]] Deixei seu recado e, enquanto isso, sigo te ajudando por aqui.',
     # SOL1. notificar_equipe: o agente avisa a equipe (evento, catering, encomenda…) sem pausar o bot.
-    notificar_equipe='off',transbordo_destino_externo=False)
+    notificar_equipe='off',transbordo_destino_externo=False,
+    # FUP1-a (docs/ESPEC_FUP1A.md). Começa desligado em todo agente; ligado, só ensaio (registra o que enviaria, não envia).
+    # Janela 09:00–22:00 todos os dias, sempre cruzada com o horário da unidade; fora dela cancela (adiar_abertura existe, desligado).
+    follow_up_ativo='off',follow_up_escopo='pedido_em_andamento',follow_up_maximo=2,follow_up_primeiro_min=15,follow_up_segundo_min=60,
+    follow_up_janela={d:[['09:00','22:00']] for d in ('seg','ter','qua','qui','sex','sab','dom')},follow_up_fora_unidade='cancelar',
+    follow_up_limite_dia=2)
 # MULTI1-b: comportamentos que um módulo declara (com o padrão) entram aqui; só valem para agente com o módulo.
 from modulos import REGISTRO as _MODULOS
 for _m in _MODULOS.values():

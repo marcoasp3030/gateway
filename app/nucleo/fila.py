@@ -213,6 +213,7 @@ class FilaDuravel:
         proximas_vazias = 0
         proximos_sem_retorno = 0
         proximos_documentos = 0
+        proximos_follow_ups = 0
         proximos_avisos = 0
         proximos_ops = 0
         while not (parar and parar.is_set()):
@@ -257,6 +258,14 @@ class FilaDuravel:
                             proximos_documentos = agora + 10
                             from nucleo import documentos
                             await documentos.varrer(self.p)
+                        if agora >= proximos_follow_ups:
+                            # FUP1-a: follow-ups vencidos (só ensaio) e os de agente desligado, a cada 30 s. Falha não para o agendamento.
+                            proximos_follow_ups = agora + 30
+                            try:
+                                from nucleo import follow_up
+                                await follow_up.ciclo(self.db, self.p.cfg)
+                            except Exception as erro:
+                                log.warning('Follow-ups não conferidos (%s)', type(erro).__name__)
                         await self.despachar_saidas()
                 self.tocar_arquivo()
             except Exception:

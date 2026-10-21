@@ -190,6 +190,9 @@ async def marcar_aguardando(conn,tenant,conversa,motivo,detalhe=None,cfg=None,eq
     novo=await conn.fetchval("""UPDATE conversas SET aguardando_atendente_desde=now(),aguardando_motivo=$3
         WHERE tenant_id=$1 AND conversation_id=$2 AND aguardando_atendente_desde IS NULL RETURNING true""",
         tenant,conversa,motivo)
+    # FUP1-a: conversa com atendente não recebe follow-up.
+    from nucleo import follow_up
+    await follow_up.cancelar(conn,tenant,conversa,'com_atendente',sem_esperar=True)
     if novo:
         await auditar(conn,tenant,'sistema','conversa.aguardando_atendente',conversa)
         # Alerta de transbordo (Fase 4): aviso curto ao número da empresa, se houver um cadastrado.
@@ -301,6 +304,15 @@ return 1
                 json.dumps(m['meta'],ensure_ascii=False) if m.get('meta') else None,reacao,m.get('origem_recebimento'))
             if msgid:
                 await auditar(conn,tenant,'sistema','mensagem.humana' if humano else 'mensagem.recebida',conversa)
+                # FUP1-a: qualquer mensagem do cliente (texto, clique, anexo, áudio, reação) cancela o follow-up; a mensagem que é só
+                # um pedido para parar ("pare", "não quero mais mensagens") é opt-out. Mensagem do atendente = conversa com atendente.
+                from nucleo import follow_up
+                if not humano:
+                    clique=isinstance(m.get('meta'),dict) and m['meta'].get('interacao')
+                    if (m.get('tipo') or 'texto')=='texto' and not clique and follow_up.e_opt_out(m['texto']):
+                        await follow_up.registrar_opt_out(conn,tenant,contato,'frase','cliente')
+                    await follow_up.cancelar(conn,tenant,conversa,'cliente_respondeu')
+                elif not comando_bot and not reacao: await follow_up.cancelar(conn,tenant,conversa,'com_atendente')
             # Reação fica no histórico, mas não abre turno nem pausa o bot (um 👍 do atendente não é assumir a conversa).
             if reacao: return {'ok':True,'reacao':True,'duplicada':msgid is None,'conversation_id':conversa,'mensagem_id':msgid}
             if comando_bot:
@@ -1116,6 +1128,26 @@ return 1
             await conn.execute('UPDATE mensagens SET processada_em=now() WHERE tenant_id=$1 AND conversation_id=$2 AND id=ANY($3::bigint[])',tenant,conversa,turno['mensagem_ids'])
             await auditar(conn,tenant,'sistema','turno.'+status,conversa)
         await atualizar_cache(self.redis,self.prefixo,tenant,mes,total)
+        await self._follow_up_do_turno(tenant,conversa,cfg,turno,resultado,status)
+
+    async def _follow_up_do_turno(self,tenant,conversa,cfg,turno,resultado,status):
+        """FUP1-a, depois do turno concluído e sob a trava da conversa: guarda no turno a pendência declarada (com o resultado:
+        agendado ou por que não), registra o opt-out pedido pelo agente e arma o 1º follow-up se tudo vale. Retorno sem os campos
+        novos (prompt ainda não atualizado) não faz nada. Falha aqui nunca afeta o turno."""
+        if not resultado or not (resultado.get('pendencia') or resultado.get('opt_out_follow_up')): return
+        from nucleo import follow_up
+        try:
+            async with self.db.acquire() as conn,conn.transaction():
+                await conn.execute('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',conversa)
+                if resultado.get('opt_out_follow_up'):
+                    contato=await conn.fetchval('SELECT contato_id FROM conversas WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa)
+                    await follow_up.registrar_opt_out(conn,tenant,contato,'agente','agente')
+                if resultado.get('pendencia'):
+                    tarefa,motivo=await follow_up.armar(conn,tenant,conversa,cfg,turno,resultado,status)
+                    await conn.execute('UPDATE turnos SET pendencia=$3::jsonb WHERE tenant_id=$1 AND id=$2',tenant,turno['id'],
+                                       json.dumps({**resultado['pendencia'],'follow_up':'agendado' if tarefa else motivo},ensure_ascii=False))
+        except Exception as erro:
+            log.warning('Follow-up do turno não avaliado (%s); o turno segue',type(erro).__name__)
 
     async def _encerramento_do_turno(self,conn,tenant,conversa,cfg,mensagem_ids,resultado):
         """ENC1-a (E3, decisão 4): o lote do cliente é só agradecimento/fechamento ("obrigado", "valeu", 👍; a mensagem inteira, como

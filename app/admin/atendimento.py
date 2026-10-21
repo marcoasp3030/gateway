@@ -54,7 +54,7 @@ def erro(status,codigo,mensagem,detalhes):
 def definicao_do_escopo(linha):
     """O que o escopo (linha de tenant_config ou de agentes) define hoje: perfil publicado e comportamentos não nulos."""
     return {'perfil':{k:v for k,v in (_json(linha.get('perfil')) or {}).items() if v is not None},
-            'comportamentos':{c:_json(linha[c]) if c=='transbordo_horario_equipe' else linha[c] for c in COMPORTAMENTOS if linha.get(c) is not None}}
+            'comportamentos':{c:_json(linha[c]) if c in ('transbordo_horario_equipe','follow_up_janela') else linha[c] for c in COMPORTAMENTOS if linha.get(c) is not None}}
 
 
 async def registrar_versao(conn,tenant,agente,conteudo,alteracoes,origem,actor,nota=None,restaurada_de=None):

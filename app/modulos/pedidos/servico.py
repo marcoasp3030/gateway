@@ -464,6 +464,10 @@ async def transicionar(conn,tenant,numero,novo,por,origem,motivo=None,previsao_m
         previsao_min=coalesce($5,previsao_min),
         decidido_em=CASE WHEN $6 THEN now() ELSE decidido_em END,decidido_por=CASE WHEN $6 THEN $7 ELSE decidido_por END
         WHERE tenant_id=$1 AND id=$2 RETURNING *""",tenant,p['id'],novo,motivo,previsao_min,antes=='aguardando_loja',por[:100])
+    if novo in ('recusado','cancelado'):
+        # FUP1-a: pedido recusado ou cancelado pela unidade → o follow-up da conversa sai.
+        from nucleo import follow_up
+        await follow_up.cancelar(conn,tenant,p['conversation_id'],'pedido_fechado',sem_esperar=True)
     if novo=='recusado' and p['carrinho_id']:
         # Recusado: os itens voltam para o carrinho do cliente, se ele ainda não abriu outro.
         if not await aberto(conn,tenant,p['conversation_id']):

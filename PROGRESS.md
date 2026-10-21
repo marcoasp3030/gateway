@@ -1353,3 +1353,26 @@ PY
 - **Correção:** a trava é tentada de novo com espera crescente (~10 s). Se o Redis não voltar, a fila devolve a conversa ao agendamento (`sem_trava`) e o worker segue. Nada fica pendente nem preso. Teste determinístico em `tests/test_fila_troca.py`, que falha no código antigo.
 - **Piloto:** a lista aceita também identificador do canal api, com letras (ex.: `teste-marco-01`); o telefone de alerta continua só telefone.
 - **Registro:** aviso do Redis às 19:39 de 21/10, "Asynchronous AOF fsync is taking too long (disk is busy?)". Acompanhar se repete.
+
+## FUP1-a — follow-up em ensaio: pendência, agendamento, cancelamento e opt-out — 2026-10-21
+
+- Decisões da seção 9 de `docs/ESPEC_FUP1A.md` aprovadas como propostas, com três ajustes no contrato:
+  - **Tipo da pendência:** lista fechada; fora dela, o gateway grava `outro` e registra aviso.
+  - **Pergunta:** até 120 caracteres, sem dado pessoal.
+  - **Retorno sem os campos novos:** não arma nada e não dá erro.
+- **Migração 050:**
+  - 8 comportamentos, com `follow_up_ativo` desligado por padrão;
+  - `turnos.pendencia`;
+  - `follow_up_tarefas`;
+  - `follow_up_opt_out`.
+- **Só ensaio:** a tarefa vencida é conferida de novo sob a trava da conversa e vira `ensaio_enviaria` ou `cancelado` (com o motivo). Nada é enviado e o Skyone não é chamado.
+- **Agendador:** a cada 30 s.
+- **Pacote:** ganha `recursos.follow_up` e `cliente.opt_out_follow_up`. São as únicas diferenças do retrato do By Koji, além de `follow_up: null` na lista de conversas do painel.
+- **Painel:**
+  - follow-ups da conversa, com a opção de cancelar;
+  - opt-out do contato: membro registra, admin ou plataforma reativa;
+  - lista de conversas com `follow_up`.
+- **Eventos:** `follow_up.agendado`, `follow_up.cancelado` e `follow_up.ensaio`, sem texto.
+- **Contrato e texto da instrução do prompt:** seção 10 da especificação.
+- **Testes:** `tests/test_fup1a.py` (9).
+- **By Koji:** não muda enquanto ninguém ligar. Liga só depois do prompt v6.12.

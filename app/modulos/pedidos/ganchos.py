@@ -172,3 +172,17 @@ async def resumo_dos_atendimentos(db,tenant,ids):
             ORDER BY id""",tenant,list(ids)):
         saida[p['atendimento_id']]['pedidos'].append({'numero':p['numero'],'status':p['status'],'modalidade':p['modalidade'],'total':servico.dinheiro(p['total'])})
     return saida
+
+
+# FUP1-a: pendência do escopo "pedido em andamento" vale com carrinho aberto com itens (escolha, quantidade, entrega ou resumo
+# esperando confirmação) e nenhum pedido fechado neste atendimento depois da última mudança no carrinho.
+async def pendencia_valida(conn,tenant,conversa,atendimento_id,tipo):
+    return bool(await conn.fetchval("""SELECT EXISTS(SELECT 1 FROM carrinhos k WHERE k.tenant_id=$1 AND k.conversation_id=$2 AND k.status='aberto'
+        AND EXISTS(SELECT 1 FROM carrinho_itens l WHERE l.tenant_id=k.tenant_id AND l.carrinho_id=k.id)
+        AND NOT EXISTS(SELECT 1 FROM pedidos p WHERE p.tenant_id=k.tenant_id AND p.atendimento_id=$3 AND p.status<>'cancelado'
+                       AND p.criado_em>k.atualizado_em))""",tenant,conversa,atendimento_id))
+
+
+async def unidade_da_conversa(conn,tenant,conversa):
+    """FUP1-a: a unidade do carrinho aberto (a janela do follow-up é cruzada com o horário dela), ou None."""
+    return await conn.fetchval("SELECT unidade FROM carrinhos WHERE tenant_id=$1 AND conversation_id=$2 AND status='aberto'",tenant,conversa)

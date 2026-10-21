@@ -199,6 +199,10 @@ async def conversas(request: Request, tenant: str, agente: str | None = None, ca
             AND conversation_id=ANY($2::text[]) AND status IN ('aberta','em_andamento') ORDER BY id""", tenant, [i['conversation_id'] for i in itens]):
         abertas[s['conversation_id']] = {'id': s['id'], 'numero': s['numero'], 'tipo': s['tipo'], 'status': s['status']}
     for i in itens: i['solicitacao_aberta'] = abertas.get(i['conversation_id'])
+    # FUP1-a: follow-up agendado na conversa (estado e quando vence), ou nulo.
+    from nucleo import follow_up
+    agendados = await follow_up.das_conversas(request.app.state.db, tenant, [i['conversation_id'] for i in itens])
+    for i in itens: i['follow_up'] = agendados.get(i['conversation_id'])
     return {'itens': itens, 'proximo_cursor': proximo}
 
 
@@ -250,6 +254,10 @@ async def pausar(request, tenant, conv, minutos, actor, acao):
             atualizado_em=now() WHERE tenant_id=$1 AND conversation_id=$2
             RETURNING bot_pausado_ate,agente_id''', tenant, conv, minutos)
         if not row: raise HTTPException(404, 'NOT_FOUND')
+        # FUP1-a: atendente assumiu (ou respondeu) → o follow-up agendado sai.
+        if minutos is not None:
+            from nucleo import follow_up
+            await follow_up.cancelar(conn, tenant, conv, 'com_atendente', actor)
         await auditar(conn, tenant, actor, acao, conv)
     return dict(row)
 

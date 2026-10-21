@@ -118,6 +118,9 @@ async def anonimizar(request:Request,tenant_id:str,cid:str,body:Confirmacao,acto
                 await c.execute("UPDATE solicitacoes SET dados='{}'::jsonb,nota=NULL,motivo_informado=NULL WHERE tenant_id=$1 AND conversation_id=$2",t,new)
                 # ENC1-a: os atendimentos acompanham a troca do identificador (ON UPDATE CASCADE); o resumo sai.
                 await c.execute('UPDATE atendimentos SET resumo=NULL WHERE tenant_id=$1 AND conversation_id=$2',t,new)
+                # FUP1-a: nada segue agendado e a pergunta guardada sai (tarefas e turnos).
+                from nucleo import follow_up
+                await follow_up.anonimizar(c,t,new)
                 # ARQ1-a1: documentos da conversa (original, leitura e nome) são apagados.
                 from nucleo.documentos import apagar_da_conversa
                 await apagar_da_conversa(c,t,new)

@@ -57,6 +57,9 @@ async def encerrar(conn,tenant,conversa,motivo,desfecho=None,actor='sistema'):
     a=await conn.fetchrow("""UPDATE atendimentos SET estado='encerrado',encerrado_em=now(),motivo_encerramento=$3,desfecho=$4
         WHERE tenant_id=$1 AND conversation_id=$2 AND estado='aberto' RETURNING *""",tenant,conversa,motivo,desfecho)
     if a is None: return None
+    # FUP1-a: atendimento encerrado não recebe follow-up.
+    from nucleo import follow_up
+    await follow_up.cancelar(conn,tenant,conversa,'encerrado',sem_esperar=True)
     texto=await resumo(conn,tenant,a)
     await conn.execute('UPDATE atendimentos SET resumo=$3 WHERE tenant_id=$1 AND id=$2',tenant,a['id'],texto)
     await auditar(conn,tenant,actor,'atendimento.encerrado',conversa)

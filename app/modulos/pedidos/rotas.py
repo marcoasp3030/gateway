@@ -8,6 +8,7 @@ from starlette.responses import JSONResponse
 from nucleo.autenticacao import contexto_da_chave,painel,exigir_admin
 from nucleo.banco import Repositorio
 from nucleo.webhooks import emitir
+from nucleo import follow_up
 from admin.servico import auditar
 from modulos import habilitado
 from . import servico,avisos
@@ -178,6 +179,8 @@ async def fechar(request:Request,dados:Fechar,ctx=Depends(chave)):
             async with conn.transaction():
                 p=await servico.fechar(conn,t,conversa)
                 if p is not None:
+                    # FUP1-a: pedido fechado → o follow-up da conversa sai.
+                    await follow_up.cancelar(conn,t,conversa,'pedido_fechado',sem_esperar=True)
                     await auditar(conn,t,'agente','pedido.criado',p['numero'])
                     await emitir(conn,t,'pedido.criado',resumo_evento(p))
                     # Unidade com WhatsApp de pedidos recebe o resumo; sem número, o pedido fica só no painel.
@@ -221,6 +224,7 @@ async def cancelar(request:Request,numero:str,dados:Cancelar,ctx=Depends(chave))
                 antes=await servico.da_conversa(conn,t,dados.conversation_id,numero)
                 p=await servico.cancelar(conn,t,dados.conversation_id,numero,dados.motivo)
                 if antes['status']!='cancelado':
+                    await follow_up.cancelar(conn,t,dados.conversation_id,'pedido_fechado',sem_esperar=True)
                     await auditar(conn,t,'cliente','pedido.cancelado',p['numero'])
                     await emitir(conn,t,'pedido.cancelado',resumo_evento(p))
         except servico.Recusa as r:

@@ -142,7 +142,7 @@ def test_R1_reacoes_travas_na_ordem_envio_antes_dos_baloes_e_falha_sem_efeito(mo
             m=(await client.get(f'/admin/v1/tenants/{T}/metricas')).json()['reacoes']
             assert m['aplicadas']['por_emoji']['❤️']==m['aplicadas']['total']>=6 and m['bloqueadas']['por_motivo']=={'desligado':1,'intervalo':1,'limite_diario':1,'emoji_fora_da_lista':1,'acao_ou_motivo':2,'sem_texto':2,'falha_provedor':1}
             # 9) O pacote diz ao agente o que está ligado.
-            assert pacotes[-1]['recursos']['reacoes'] is True and pacotes[-1]['recursos']['emojis_de_reacao']==['❤️','😊','👍','🙏'] and pacotes[0]['recursos']=={'botoes':False,'lista':False,'reacoes':False,'emojis_de_reacao':[],'notificar_equipe':False}
+            assert pacotes[-1]['recursos']['reacoes'] is True and pacotes[-1]['recursos']['emojis_de_reacao']==['❤️','😊','👍','🙏'] and pacotes[0]['recursos']=={'botoes':False,'lista':False,'reacoes':False,'emojis_de_reacao':[],'notificar_equipe':False,'follow_up':{'ativo':False,'escopo':'pedido_em_andamento'}}
     banco(cenario)
 
 
@@ -271,7 +271,7 @@ def test_retorno_sem_campos_novos_continua_igual_e_segmento_v3(monkeypatch):
         assert await retorno(resposta=['ok'],acao='nenhuma')=={'resposta':['ok'],'acao':'nenhuma'}
         assert await retorno(resposta=['ok'],acao='nenhuma',reacao='❤️')=={'resposta':['ok'],'acao':'nenhuma','reacao':'❤️'}
         for ruim in (None,'','obrigado','❤️👍 ok',7,{'emoji':'❤️'}): assert 'reacao' not in await retorno(resposta=['ok'],acao='nenhuma',reacao=ruim)
-        assert {'fora_do_horario','proxima_abertura','equipe_disponivel','retorno_equipe','recursos'}<=set(body) and body['recursos']=={'botoes':False,'lista':False,'reacoes':False,'emojis_de_reacao':[],'notificar_equipe':False}
+        assert {'fora_do_horario','proxima_abertura','equipe_disponivel','retorno_equipe','recursos'}<=set(body) and body['recursos']=={'botoes':False,'lista':False,'reacoes':False,'emojis_de_reacao':[],'notificar_equipe':False,'follow_up':{'ativo':False,'escopo':'pedido_em_andamento'}}
         # Versão 3 do segmento: a 2 com reações ligadas (❤️ 😊 👍 🙏) e fora do horário "atender"; nada mais muda.
         v={r['versao']:json.loads(r['comportamento_padrao']) for r in await conn.fetch("SELECT versao,comportamento_padrao FROM modelos_agente WHERE id='delivery_restaurante' AND tenant_id IS NULL")}
         assert v[3]=={**v[2],'reacoes':'on','reacoes_emojis':['❤️','😊','👍','🙏'],'fora_do_horario':'atender'} and v[2]['fora_do_horario']=='so_avisar'

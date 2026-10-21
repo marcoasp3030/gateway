@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Annotated, Literal
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 
 class Estrito(BaseModel):
@@ -64,7 +64,25 @@ class Comportamento(Estrito):
     # SOL1
     notificar_equipe: Literal['on','off'] | None = None
     transbordo_destino_externo: bool | None = None
+    # FUP1-a
+    follow_up_ativo: Literal['on','off'] | None = None
+    follow_up_escopo: Literal['pedido_em_andamento','pergunta_pendente'] | None = None
+    follow_up_maximo: int | None = Field(None,ge=0,le=2)
+    follow_up_primeiro_min: int | None = Field(None,ge=5,le=1440)
+    follow_up_segundo_min: int | None = Field(None,ge=5,le=1440)
+    follow_up_janela: dict | None = None
+    follow_up_fora_unidade: Literal['cancelar','adiar_abertura'] | None = None
+    follow_up_limite_dia: int | None = Field(None,ge=0,le=5)
     skyone_dominios_permitidos: list[str] | None = None
+
+    @field_validator('follow_up_janela')
+    @classmethod
+    def _janela(cls, valor):
+        # Grade semanal no formato dos horários da unidade, sem turnos sobrepostos.
+        if valor is not None:
+            from nucleo.horarios import validar_sem_sobreposicao
+            validar_sem_sobreposicao(valor)
+        return valor
 
 
 class Agente(Comportamento):

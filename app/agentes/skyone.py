@@ -155,6 +155,9 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
     # ARQ1-a1: documentos — só com a capacidade ligada no modelo do agente; desligada, o pacote não muda (o By Koji não muda).
     from nucleo import documentos as docs
     cap_docs = await docs.capacidade(repo.db,tenant_id,cfg['id'])
+    # FUP1-a: o agente só declara `pendencia` quando o follow-up está ligado; opt-out do contato vale entre atendimentos.
+    from nucleo import follow_up
+    opt_out = await follow_up.em_opt_out(repo.db,tenant_id,conv.get('contato_id'))
     extras = {}
     if cap_docs and cap_docs['ativo']:
         extras['anexos'] = await docs.do_pacote(repo.db,tenant_id,conversa_id,atendimento['id'] if atendimento else None,fuso)
@@ -166,7 +169,7 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
         'fora_do_horario':empresa_agora['fora'],'proxima_abertura':expediente.proxima_abertura(abertura),
         'equipe_disponivel':equipe_agora['disponivel'],'retorno_equipe':expediente.retorno_equipe(equipe_agora),
         'recursos':{'botoes':com_menu,'lista':com_menu,'reacoes':com_reacao,'emojis_de_reacao':list(cfg.get('reacoes_emojis') or []) if com_reacao else [],
-                    'notificar_equipe':cfg.get('notificar_equipe')=='on'},
+                    'notificar_equipe':cfg.get('notificar_equipe')=='on','follow_up':follow_up.do_pacote(cfg)},
         'conversation_id':conversa_id,'request_id':rid,'session_id':rid,'message':message,
         'instrucoes_agente':cfg['instrucoes_agente'],
         # CFG1-a: preferências de estilo da empresa (versão publicada), sempre com todos os campos. São dados, não instruções de sistema.
@@ -198,7 +201,8 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
         'acoes_recentes':[a for _,f in ganchos('acoes_recentes',cfg.get('modulos') or ()) for a in await f(repo.db,tenant_id,conversa_id,cfg)],
         # Nome pela prioridade cadastro > informado > perfil (PED1-c); nunca o telefone. nome_origem diz de onde veio.
         'cliente':{'nome':nome_cliente,'nome_origem':nome_origem,'unidade_preferida':conv.get('unidade_preferida'),
-                   'resumo_anterior':((atendimento or {}).get('anterior') or {}).get('resumo') or (contato or {}).get('resumo')},
+                   'resumo_anterior':((atendimento or {}).get('anterior') or {}).get('resumo') or (contato or {}).get('resumo'),
+                   'opt_out_follow_up':opt_out},
         # ENC1-a: atendimento atual (novo = primeiro turno entregue dele) e o anterior, resumido. Nulo só em conversa sem atendimento.
         'atendimento':atendimento,
     }
@@ -300,6 +304,12 @@ async def _chamar(client,repo,cofre,tenant_id,cfg,payload):
         # ENC1-a: versão do prompt que respondeu ("v6.7"). Fora do formato (v + números e pontos, até 40) vira nulo sem recusar.
         versao=corpo.get('prompt_versao')
         if isinstance(versao,str) and len(versao)<=40 and re.fullmatch(r'v[0-9]+(\.[0-9]+)*',versao): result['prompt_versao']=versao
+        # FUP1-a: pendência declarada (tipo de lista fechada; fora dela vira "outro", com aviso) e pergunta curta sem dado pessoal;
+        # opt-out do follow-up pedido pelo cliente. Opcionais: ausentes ou inválidos não armam nada e não recusam a resposta.
+        from nucleo import follow_up
+        pendencia=follow_up.do_retorno(corpo.get('pendencia'),[(payload.get('cliente') or {}).get('nome')])
+        if pendencia: result['pendencia']=pendencia
+        if corpo.get('opt_out_follow_up') is True: result['opt_out_follow_up']=True
         # "resumo" no encerrar fica previsto no contrato, mas ignorado por enquanto (decisão 3 de 20/10): vale o resumo factual do gateway.
         uso=corpo.get('uso')
         if isinstance(uso,dict) and all(isinstance(k,str) and type(v) is int and v>=0 for k,v in uso.items()): result['uso']=uso

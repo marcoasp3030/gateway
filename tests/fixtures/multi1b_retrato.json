@@ -186,6 +186,7 @@
     "cliente": {
      "nome": null,
      "nome_origem": null,
+     "opt_out_follow_up": false,
      "resumo_anterior": null,
      "unidade_preferida": null
     },
@@ -296,6 +297,10 @@
     "recursos": {
      "botoes": false,
      "emojis_de_reacao": [],
+     "follow_up": {
+      "ativo": false,
+      "escopo": "pedido_em_andamento"
+     },
      "lista": false,
      "notificar_equipe": true,
      "reacoes": false
@@ -714,6 +719,7 @@
     "cliente": {
      "nome": null,
      "nome_origem": null,
+     "opt_out_follow_up": false,
      "resumo_anterior": null,
      "unidade_preferida": null
     },
@@ -803,6 +809,10 @@
     "recursos": {
      "botoes": false,
      "emojis_de_reacao": [],
+     "follow_up": {
+      "ativo": false,
+      "escopo": "pedido_em_andamento"
+     },
      "lista": false,
      "notificar_equipe": true,
      "reacoes": false
@@ -1049,6 +1059,7 @@
     "cliente": {
      "nome": null,
      "nome_origem": null,
+     "opt_out_follow_up": false,
      "resumo_anterior": null,
      "unidade_preferida": null
     },
@@ -1138,6 +1149,10 @@
     "recursos": {
      "botoes": false,
      "emojis_de_reacao": [],
+     "follow_up": {
+      "ativo": false,
+      "escopo": "pedido_em_andamento"
+     },
      "lista": false,
      "notificar_equipe": true,
      "reacoes": false
@@ -1486,6 +1501,7 @@
     "cliente": {
      "nome": null,
      "nome_origem": null,
+     "opt_out_follow_up": false,
      "resumo_anterior": null,
      "unidade_preferida": null
     },
@@ -1622,6 +1638,10 @@
     "recursos": {
      "botoes": false,
      "emojis_de_reacao": [],
+     "follow_up": {
+      "ativo": false,
+      "escopo": "pedido_em_andamento"
+     },
      "lista": false,
      "notificar_equipe": true,
      "reacoes": false
@@ -1929,6 +1949,7 @@
     "cliente": {
      "nome": null,
      "nome_origem": null,
+     "opt_out_follow_up": false,
      "resumo_anterior": null,
      "unidade_preferida": null
     },
@@ -2029,6 +2050,10 @@
     "recursos": {
      "botoes": false,
      "emojis_de_reacao": [],
+     "follow_up": {
+      "ativo": false,
+      "escopo": "pedido_em_andamento"
+     },
      "lista": false,
      "notificar_equipe": true,
      "reacoes": false
@@ -2465,6 +2490,7 @@
     "cliente": {
      "nome": null,
      "nome_origem": null,
+     "opt_out_follow_up": false,
      "resumo_anterior": null,
      "unidade_preferida": null
     },
@@ -2570,6 +2596,10 @@
     "recursos": {
      "botoes": false,
      "emojis_de_reacao": [],
+     "follow_up": {
+      "ativo": false,
+      "escopo": "pedido_em_andamento"
+     },
      "lista": false,
      "notificar_equipe": true,
      "reacoes": false
@@ -2894,6 +2924,7 @@
     "cliente": {
      "nome": null,
      "nome_origem": null,
+     "opt_out_follow_up": false,
      "resumo_anterior": null,
      "unidade_preferida": null
     },
@@ -2983,6 +3014,10 @@
     "recursos": {
      "botoes": false,
      "emojis_de_reacao": [],
+     "follow_up": {
+      "ativo": false,
+      "escopo": "pedido_em_andamento"
+     },
      "lista": false,
      "notificar_equipe": true,
      "reacoes": false
@@ -3346,6 +3381,7 @@
     "cliente": {
      "nome": null,
      "nome_origem": null,
+     "opt_out_follow_up": false,
      "resumo_anterior": null,
      "unidade_preferida": null
     },
@@ -3507,6 +3543,10 @@
     "recursos": {
      "botoes": false,
      "emojis_de_reacao": [],
+     "follow_up": {
+      "ativo": false,
+      "escopo": "pedido_em_andamento"
+     },
      "lista": false,
      "notificar_equipe": true,
      "reacoes": false
@@ -3955,6 +3995,7 @@
     "cliente": {
      "nome": null,
      "nome_origem": null,
+     "opt_out_follow_up": false,
      "resumo_anterior": null,
      "unidade_preferida": null
     },
@@ -4098,6 +4139,10 @@
     "recursos": {
      "botoes": false,
      "emojis_de_reacao": [],
+     "follow_up": {
+      "ativo": false,
+      "escopo": "pedido_em_andamento"
+     },
      "lista": false,
      "notificar_equipe": true,
      "reacoes": false
@@ -4476,6 +4521,7 @@
     "cliente": {
      "nome": null,
      "nome_origem": null,
+     "opt_out_follow_up": false,
      "resumo_anterior": null,
      "unidade_preferida": null
     },
@@ -4571,6 +4617,10 @@
     "recursos": {
      "botoes": false,
      "emojis_de_reacao": [],
+     "follow_up": {
+      "ativo": false,
+      "escopo": "pedido_em_andamento"
+     },
      "lista": false,
      "notificar_equipe": true,
      "reacoes": false
@@ -4913,6 +4963,7 @@
     "desfecho": null,
     "encerrada_em": null,
     "estado": "bot",
+    "follow_up": null,
     "limitado_ate": null,
     "nome": null,
     "nome_exibicao": "+55 11 90000-0001",
@@ -4971,6 +5022,7 @@
     "desfecho": null,
     "encerrada_em": null,
     "estado": "aguardando_atendente",
+    "follow_up": null,
     "limitado_ate": null,
     "nome": null,
     "nome_exibicao": "+55119000000012",
@@ -5026,6 +5078,7 @@
     "desfecho": null,
     "encerrada_em": null,
     "estado": "bot",
+    "follow_up": null,
     "limitado_ate": null,
     "nome": null,
     "nome_exibicao": "+55119000000013",
@@ -5086,6 +5139,7 @@
     "desfecho": null,
     "encerrada_em": null,
     "estado": "bot",
+    "follow_up": null,
     "limitado_ate": null,
     "nome": null,
     "nome_exibicao": "+55119000000014",
@@ -5141,6 +5195,7 @@
     "desfecho": null,
     "encerrada_em": null,
     "estado": "aguardando_atendente",
+    "follow_up": null,
     "limitado_ate": null,
     "nome": null,
     "nome_exibicao": "+55119000000015",
@@ -5196,6 +5251,7 @@
     "desfecho": null,
     "encerrada_em": null,
     "estado": "aguardando_atendente",
+    "follow_up": null,
     "limitado_ate": null,
     "nome": null,
     "nome_exibicao": "+55119000000016",
@@ -5251,6 +5307,7 @@
     "desfecho": null,
     "encerrada_em": null,
     "estado": "bot",
+    "follow_up": null,
     "limitado_ate": null,
     "nome": null,
     "nome_exibicao": "+55119000000017",
@@ -5306,6 +5363,7 @@
     "desfecho": null,
     "encerrada_em": null,
     "estado": "bot",
+    "follow_up": null,
     "limitado_ate": null,
     "nome": null,
     "nome_exibicao": "+55119000000018",
@@ -5361,6 +5419,7 @@
     "desfecho": null,
     "encerrada_em": null,
     "estado": "bot",
+    "follow_up": null,
     "limitado_ate": null,
     "nome": null,
     "nome_exibicao": "+55119000000019",
@@ -5921,6 +5980,7 @@
     "cliente": {
      "nome": null,
      "nome_origem": null,
+     "opt_out_follow_up": false,
      "resumo_anterior": null,
      "unidade_preferida": null
     },
@@ -6056,6 +6116,10 @@
     "recursos": {
      "botoes": false,
      "emojis_de_reacao": [],
+     "follow_up": {
+      "ativo": false,
+      "escopo": "pedido_em_andamento"
+     },
      "lista": false,
      "notificar_equipe": true,
      "reacoes": false
@@ -6598,6 +6662,7 @@
     "cliente": {
      "nome": null,
      "nome_origem": null,
+     "opt_out_follow_up": false,
      "resumo_anterior": null,
      "unidade_preferida": null
     },
@@ -6687,6 +6752,10 @@
     "recursos": {
      "botoes": false,
      "emojis_de_reacao": [],
+     "follow_up": {
+      "ativo": false,
+      "escopo": "pedido_em_andamento"
+     },
      "lista": false,
      "notificar_equipe": true,
      "reacoes": false
@@ -7009,6 +7078,7 @@
     "cliente": {
      "nome": null,
      "nome_origem": null,
+     "opt_out_follow_up": false,
      "resumo_anterior": null,
      "unidade_preferida": null
     },
@@ -7196,6 +7266,10 @@
     "recursos": {
      "botoes": false,
      "emojis_de_reacao": [],
+     "follow_up": {
+      "ativo": false,
+      "escopo": "pedido_em_andamento"
+     },
      "lista": false,
      "notificar_equipe": true,
      "reacoes": false
@@ -7546,6 +7620,7 @@
     "cliente": {
      "nome": null,
      "nome_origem": null,
+     "opt_out_follow_up": false,
      "resumo_anterior": null,
      "unidade_preferida": null
     },
@@ -7635,6 +7710,10 @@
     "recursos": {
      "botoes": false,
      "emojis_de_reacao": [],
+     "follow_up": {
+      "ativo": false,
+      "escopo": "pedido_em_andamento"
+     },
      "lista": false,
      "notificar_equipe": true,
      "reacoes": false
@@ -7959,6 +8038,7 @@
     "cliente": {
      "nome": null,
      "nome_origem": null,
+     "opt_out_follow_up": false,
      "resumo_anterior": null,
      "unidade_preferida": null
     },
@@ -8130,6 +8210,10 @@
     "recursos": {
      "botoes": false,
      "emojis_de_reacao": [],
+     "follow_up": {
+      "ativo": false,
+      "escopo": "pedido_em_andamento"
+     },
      "lista": false,
      "notificar_equipe": true,
      "reacoes": false
@@ -8430,6 +8514,7 @@
     "cliente": {
      "nome": null,
      "nome_origem": null,
+     "opt_out_follow_up": false,
      "resumo_anterior": null,
      "unidade_preferida": null
     },
@@ -8519,6 +8604,10 @@
     "recursos": {
      "botoes": false,
      "emojis_de_reacao": [],
+     "follow_up": {
+      "ativo": false,
+      "escopo": "pedido_em_andamento"
+     },
      "lista": false,
      "notificar_equipe": true,
      "reacoes": false
@@ -8866,6 +8955,7 @@
     "cliente": {
      "nome": null,
      "nome_origem": null,
+     "opt_out_follow_up": false,
      "resumo_anterior": null,
      "unidade_preferida": null
     },
@@ -8955,6 +9045,10 @@
     "recursos": {
      "botoes": false,
      "emojis_de_reacao": [],
+     "follow_up": {
+      "ativo": false,
+      "escopo": "pedido_em_andamento"
+     },
      "lista": false,
      "notificar_equipe": true,
      "reacoes": false
@@ -9201,6 +9295,7 @@
     "cliente": {
      "nome": null,
      "nome_origem": null,
+     "opt_out_follow_up": false,
      "resumo_anterior": null,
      "unidade_preferida": null
     },
@@ -9290,6 +9385,10 @@
     "recursos": {
      "botoes": false,
      "emojis_de_reacao": [],
+     "follow_up": {
+      "ativo": false,
+      "escopo": "pedido_em_andamento"
+     },
      "lista": false,
      "notificar_equipe": true,
      "reacoes": false
@@ -9600,6 +9699,7 @@
     "cliente": {
      "nome": null,
      "nome_origem": null,
+     "opt_out_follow_up": false,
      "resumo_anterior": null,
      "unidade_preferida": null
     },
@@ -9689,6 +9789,10 @@
     "recursos": {
      "botoes": false,
      "emojis_de_reacao": [],
+     "follow_up": {
+      "ativo": false,
+      "escopo": "pedido_em_andamento"
+     },
      "lista": false,
      "notificar_equipe": true,
      "reacoes": false
@@ -9950,6 +10054,7 @@
     "cliente": {
      "nome": null,
      "nome_origem": null,
+     "opt_out_follow_up": false,
      "resumo_anterior": null,
      "unidade_preferida": null
     },
@@ -10060,6 +10165,10 @@
     "recursos": {
      "botoes": false,
      "emojis_de_reacao": [],
+     "follow_up": {
+      "ativo": false,
+      "escopo": "pedido_em_andamento"
+     },
      "lista": false,
      "notificar_equipe": true,
      "reacoes": false

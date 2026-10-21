@@ -1,6 +1,6 @@
 # FUP1-a — Follow-up: pendência, agendamento e cancelamento
 
-**Situação: proposta para revisão do Marco, 21/10/2026. Nada implementado.**
+**Situação: implementado (ensaio, sem envio) em 21/10/2026, com as 7 decisões da seção 9 aprovadas e os três ajustes do contrato (lista fechada de tipos, pergunta de até 120 caracteres sem dado pessoal, retorno sem os campos novos não quebra nada).**
 - **Base:** `docs/ANALISE_COMPORTAMENTO_1.md`, seção 6 (proposta de 13/10), e as decisões F1 a F8 do Marco.
 - **Depende do ENC1-a** (atendimento identificado), que já está implantado.
 - **FUP1-b:** gerar a mensagem pelo Skyone, enviar e métricas. Vem depois, junto com o ENC1-b (inatividade).
@@ -33,9 +33,13 @@ O retorno do agente aceita, num turno normal, um campo opcional:
 "pendencia": {"tipo": "confirmar_pedido", "pergunta": "Confirma este resumo?"}
 ```
 
-- **`tipo`** (fechado): `escolher_item`, `quantidade`, `entrega`, `confirmar_pedido` (escopo pedido em andamento) e `pergunta_geral` (só no escopo "pergunta pendente").
-- **`pergunta`:** texto curto de até 200 caracteres, guardado só para o FUP1-b usar no pacote. Não é instrução executável.
-- **Inválido ou ausente:** não arma nada, e a resposta segue normal (não é recusada).
+- **`tipo`** (lista fechada): `confirmar_pedido`, `escolher_item`, `informar_quantidade`, `informar_horario`, `informar_endereco`, `escolher_unidade`, `informar_modalidade` (entrega ou retirada) e `outro`.
+  - No escopo "pedido em andamento" valem todos menos `outro`; no escopo "pergunta pendente", todos.
+  - Tipo fora da lista: o gateway grava `outro`, registra aviso no log e na auditoria (`follow_up.tipo_fora_da_lista`) e marca `"aviso":"tipo_fora_da_lista"` na pendência do turno.
+- **`pergunta`:** até 120 caracteres, guardada só para o FUP1-b usar no pacote. Não é instrução executável.
+  - Antes de gravar e de emitir eventos, o gateway tira dado pessoal: e-mail, CPF/CNPJ, CEP, telefone e qualquer número com 8 dígitos ou mais, endereço (rua, avenida… com número) e o nome do cliente viram `[email]`, `[documento]`, `[cep]`, `[número]`, `[endereço]`, `[nome]`.
+  - Os eventos de webhook não levam a pergunta. A anonimização do contato apaga a pergunta das tarefas e dos turnos.
+- **Inválido ou ausente:** não arma nada, e a resposta segue normal (não é recusada). Retorno sem os campos novos (Skyone ainda não atualizado) funciona como antes.
 
 O Marco ajusta o prompt e o "Interpretar Resposta" para devolver o campo. Sem ele, nada é agendado.
 
@@ -106,7 +110,7 @@ Vale no segmento ou modelo, na empresa e no agente, como os outros comportamento
 
 - **Pacote:** ganha `follow_up: {"ativo", "escopo"}` em `recursos`, para o agente saber se vale declarar a pendência, e `cliente.opt_out_follow_up` (booleano). No By Koji desligado, `recursos.follow_up.ativo` vem `false`. O campo é novo no pacote e entra no retrato como a única diferença.
 - **Retorno:** dois campos novos opcionais, `pendencia` (2.1) e `opt_out_follow_up` (2.5).
-- **Instrução para o prompt (proposta):** "Quando terminar o turno esperando uma resposta do cliente para continuar o pedido (escolha, quantidade, entrega ou confirmação do resumo), declare `pendencia`. Não declare em saudação, agradecimento, assunto pessoal ou quando o pedido já foi fechado. Se o cliente pedir para não receber mais mensagens, devolva `opt_out_follow_up: true`."
+- **Instrução para o prompt (final):** ver seção 10.
 
 ## 6. API do painel
 
@@ -135,7 +139,7 @@ Vale no segmento ou modelo, na empresa e no agente, como os outros comportamento
 
 **Médio.** Inclui a migração, o pipeline (armar e cancelar), o agendador (vencidos em ensaio), o gancho do módulo de pedidos, a configuração, o opt-out, o pacote e o retorno, as rotas do painel e os testes.
 
-## 9. Decisões em aberto
+## 9. Decisões (aprovadas como propostas em 21/10/2026)
 
 | # | Decisão | Proposta |
 |---|---|---|
@@ -147,4 +151,80 @@ Vale no segmento ou modelo, na empresa e no agente, como os outros comportamento
 | 6 | Janela no By Koji | 09:00–22:00 (F4) ∩ horário da unidade do carrinho |
 | 7 | Onde o By Koji liga | Só depois do ajuste do prompt (campo `pendencia`); começa em ensaio |
 
-**Ponto de parada:** só especificação. Nada implementado.
+**Ponto de parada:** implementado em ensaio (seção 10). O By Koji só liga depois do prompt v6.12.
+
+## 10. Implementado (21/10/2026)
+
+- **Migração 050:**
+  - os 8 comportamentos em `tenant_config` e `agentes`;
+  - `turnos.pendencia`;
+  - `follow_up_tarefas` (uma `agendado` por atendimento);
+  - `follow_up_opt_out`.
+- **Código:**
+  - `app/nucleo/follow_up.py`: leitura do retorno, limpeza da pergunta, frases de opt-out, armar, cancelar, vencer em ensaio, opt-out;
+  - `app/admin/follow_up.py`: rotas do painel;
+  - ganchos `pendencia_valida` e `unidade_da_conversa` no módulo de pedidos.
+- **Agendador:** a cada 30 s, confere as vencidas e cancela as de agente, canal ou empresa desligados.
+- **Testes:** `tests/test_fup1a.py`.
+- **`turnos.pendencia`:** guarda a pendência declarada com o resultado em `follow_up`: `agendado` ou o motivo de não armar (`desligado`, `turno`, `resposta_incompleta`, `tipo_fora_do_escopo`, `com_atendente`, `encerrado`, `cliente_respondeu`, `opt_out`, `pendencia_invalida`, `limite_do_dia`). Com isso dá para ver no ensaio por que cada pendência armou ou não.
+- **Motivos de cancelamento:**
+  - os de 2.3: `cliente_respondeu`, `pedido_fechado`, `com_atendente`, `encerrado`, `desligado`, `opt_out`, `substituido`;
+  - no vencimento: `fora_da_janela`, `pendencia_expirada`, `pendencia_invalida`, `limite_do_dia`, `fora_do_piloto`;
+  - `painel`, quando cancelado pelo painel;
+  - `anonimizado`.
+- **Trava:** cancelar no fim do turno, no encerramento e na transferência não espera tarefa que o agendador está conferindo naquele instante (`SKIP LOCKED`). A ordem das travas não se inverte, e o próprio vencimento revalida e cancela.
+
+### Contrato com o Skyone
+
+**Pacote**
+
+`recursos.follow_up` está sempre presente:
+```json
+"recursos": {"botoes": true, "lista": true, "reacoes": false, "emojis_de_reacao": [], "notificar_equipe": true,
+             "follow_up": {"ativo": false, "escopo": "pedido_em_andamento"}}
+```
+- `ativo` é `true` só com `follow_up_ativo = on` e `follow_up_maximo` ≥ 1.
+- `escopo` é `pedido_em_andamento` ou `pergunta_pendente`.
+
+`cliente.opt_out_follow_up` também está sempre presente (booleano):
+```json
+"cliente": {"nome": "Cliente", "nome_origem": "perfil", "unidade_preferida": null, "resumo_anterior": null, "opt_out_follow_up": false}
+```
+
+**Retorno**
+
+Os dois campos são opcionais e ficam na raiz, ao lado de `resposta` e `acao`:
+```json
+{"status": "success", "tipo": "text", "request_id": "…", "conversation_id": "…", "acao": "nenhuma",
+ "resposta": ["Anotei 2 edamames, retirada no Pátio. Total R$ 68,00. Confirma?"],
+ "pendencia": {"tipo": "confirmar_pedido", "pergunta": "Confirma o pedido de 2 edamames para retirada?"},
+ "prompt_versao": "v6.12"}
+```
+```json
+{"status": "success", "tipo": "text", "request_id": "…", "conversation_id": "…", "acao": "nenhuma",
+ "resposta": ["Combinado, não vou mais te mandar lembretes. Se precisar, é só chamar."],
+ "opt_out_follow_up": true, "prompt_versao": "v6.12"}
+```
+- **`pendencia`:** objeto `{"tipo", "pergunta"}`; `pergunta` é opcional.
+- **`opt_out_follow_up`:** vale só com `true` (booleano). Qualquer outro valor é ignorado.
+
+**Instrução para o prompt (texto final)**
+
+> Quando `recursos.follow_up.ativo` for true e você terminar a resposta esperando o cliente responder para continuar o pedido, devolva `pendencia` com `tipo` e `pergunta`.
+> - **Tipos:**
+>   - `confirmar_pedido`: resumo esperando confirmação;
+>   - `escolher_item`: qual item ou sabor;
+>   - `informar_quantidade`;
+>   - `informar_horario`: horário de retirada ou entrega;
+>   - `informar_endereco`;
+>   - `escolher_unidade`;
+>   - `informar_modalidade`: entrega ou retirada;
+>   - `outro`: só quando `recursos.follow_up.escopo` for `pergunta_pendente`.
+> - **`pergunta`:** a pergunta que ficou em aberto, curta (até 120 caracteres), sem nome, telefone, endereço ou documento do cliente.
+> - **Não declare `pendencia`:**
+>   - em saudação, agradecimento ou assunto pessoal;
+>   - quando transferir, encerrar ou avisar a equipe;
+>   - quando o pedido já foi fechado;
+>   - quando `cliente.opt_out_follow_up` for true.
+> - **Opt-out:** se o cliente pedir para não receber mais mensagens ou lembretes, devolva `opt_out_follow_up: true` e não declare `pendencia`.
+

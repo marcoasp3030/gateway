@@ -198,6 +198,8 @@ def criar_app(infra,db=None,redis=None):
     app.include_router(gestao)
     from admin.atendimentos import router as atendimentos
     app.include_router(atendimentos)
+    from admin.follow_up import router as follow_ups
+    app.include_router(follow_ups)
     # ARQ1-a1: envio de documento (API pública com chave) e o painel dos documentos.
     from canais.documentos import router as documentos_api
     from admin.documentos import router as documentos_admin

@@ -56,6 +56,13 @@ COMPORTAMENTOS={
     'transbordo_fora_do_horario':('transbordo','texto',1,500,None,True),
     # SOL1: avisar a equipe sem parar o atendimento; destino do alerta marcado como grupo externo mascara o telefone.
     'notificar_equipe':('transbordo','escolha',None,None,['on','off'],True),'transbordo_destino_externo':('transbordo','booleano',None,None,None,True),
+    # FUP1-a: follow-up (por enquanto só ensaio: registra o que enviaria).
+    'follow_up_ativo':('follow_up','escolha',None,None,['on','off'],True),
+    'follow_up_escopo':('follow_up','escolha',None,None,['pedido_em_andamento','pergunta_pendente'],True),
+    'follow_up_maximo':('follow_up','inteiro',0,2,None,True),'follow_up_primeiro_min':('follow_up','inteiro',5,1440,None,True),
+    'follow_up_segundo_min':('follow_up','inteiro',5,1440,None,True),'follow_up_janela':('follow_up','horarios',None,None,None,True),
+    'follow_up_fora_unidade':('follow_up','escolha',None,None,['cancelar','adiar_abertura'],True),
+    'follow_up_limite_dia':('follow_up','inteiro',0,5,None,True),
 }
 # MULTI1-b: os comportamentos declarados pelos módulos (carrinho_expira_h, acoes_recentes_min…) entram aqui.
 from modulos import REGISTRO as _MODULOS
