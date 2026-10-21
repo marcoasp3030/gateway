@@ -220,7 +220,7 @@ class Administracao:
             if entidade=='api-keys':
                 if novo and not dados.get('escopos'): raise HTTPException(400,'Escopos obrigatórios')
                 if 'escopos' in dados and (not dados['escopos'] or any(not re.fullmatch(
-                        r'(notificar|conversar|callback|eventos:ler|ferramentas:[a-z_]+)',e) for e in dados['escopos'])):
+                        r'(notificar|conversar|callback|eventos:ler|ferramentas:[a-z_]+|documentos:enviar)',e) for e in dados['escopos'])):
                     raise HTTPException(400,'Escopo inválido')
                 if dados.get('agente_id') and not await repo.obter(tenant_id,'agentes',dados['agente_id']): raise HTTPException(404,'NOT_FOUND')
                 if dados.get('expira_em'):

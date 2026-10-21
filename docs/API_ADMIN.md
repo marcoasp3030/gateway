@@ -349,6 +349,8 @@ Campos novos no `PATCH`/`POST` da unidade: `delivery_ativo` (bool), `taxa_modo` 
 
 **Cardápio — gestão completa (CAT3-a) ✅:** itens (criar, duplicar, arquivar, código, ordem), categorias como cadastro, pratos com sugestões de ligação (confirmar ou ignorar em lote), cópia entre unidades, esgotado e lote. Contrato na seção 13 de `docs/ESPEC_CAT3.md`. Opções do item (CAT3-b ✅): `GET/PUT …/catalogo/itens/{id}/opcoes`, seção 14.2.
 
+**Documentos (ARQ1-a1) ✅:** chaves de formulário, documentos recebidos (lista, detalhe, texto, original, apagar), simulador com arquivo e capacidade de documentos do agente. Contrato na seção 14.5 de `docs/ESPEC_ARQ1.md`; envio pela API pública (`POST /api/v1/documentos`) na seção 14.3.
+
 ## 11. Conversas, histórico e atendimento humano
 
 | Métodos | Rota | Status |

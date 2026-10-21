@@ -92,10 +92,12 @@ class Modelo(Estrito):
     skyone_fluxo_modelo:str|None=Field(None,max_length=200)
     skyone_ref:str|None=Field(None,max_length=200)
     ativo:bool|None=None
+    # ARQ1-a1: capacidades transversais do núcleo ({"documentos": {...}}); ausente = desligada.
+    capacidades:dict|None=None
 
 COLUNAS_DO_MODELO=('id','versao','tenant_id','nome','tipo','modulos','comportamento_padrao','desfechos','followups_padrao','skyone_fluxo_modelo','perfil_padrao',
-                   'segmento','modulos_permitidos','modulos_padrao','motivos_transferencia','tipos_solicitacao','skyone_ref','ativo')
-JSONB_DO_MODELO=('comportamento_padrao','followups_padrao','perfil_padrao','motivos_transferencia','tipos_solicitacao')
+                   'segmento','modulos_permitidos','modulos_padrao','motivos_transferencia','tipos_solicitacao','skyone_ref','ativo','capacidades')
+JSONB_DO_MODELO=('comportamento_padrao','followups_padrao','perfil_padrao','motivos_transferencia','tipos_solicitacao','capacidades')
 
 @router.get('/modelos-agente')
 async def modelos(request:Request,tenant:str|None=None,segmento:str|None=None,ativo:bool|None=None):
@@ -141,6 +143,12 @@ async def gravar_modelo(request,dados,actor,identidade=None,tenant=None):
         # A coluna antiga continua igual aos permitidos (a imagem anterior lê dela).
         final['modulos']=final['modulos_permitidos']
         if final.get('skyone_ref') is None and final.get('skyone_fluxo_modelo'): final['skyone_ref']=final['skyone_fluxo_modelo']
+        if not isinstance(final.get('capacidades') or {},dict) or set(final.get('capacidades') or {})-{'documentos'}: raise HTTPException(400,{'campo':'capacidades'})
+        if (final.get('capacidades') or {}).get('documentos') is not None:
+            from nucleo.documentos import validar_capacidade
+            try: final['capacidades']={**final['capacidades'],'documentos':validar_capacidade(final['capacidades']['documentos'])}
+            except ValueError as erro: raise HTTPException(400,{'campo':str(erro)}) from None
+        final['capacidades']=final.get('capacidades') or {}
         if not isinstance(final['comportamento_padrao'],dict): raise HTTPException(400,'Comportamento inválido')
         validar(Comportamento,final['comportamento_padrao'])
         if final.get('perfil_padrao') is not None:

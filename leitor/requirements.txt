@@ -1,0 +1,6 @@
+# Leitor de documentos (ARQ1-a1): PDF com texto e tabelas, XML da NF-e. Versões fixas.
+pdfplumber==0.11.4
+pdfminer.six==20231228
+pypdfium2==4.30.0
+Pillow==11.0.0
+defusedxml==0.7.1

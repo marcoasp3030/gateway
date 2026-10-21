@@ -1,6 +1,6 @@
 # ARQ1 — Arquivos no núcleo dos agentes
 
-**Situação: proposta de 15/10/2026, revista em 21/10/2026: o ARQ1-a passou a ser "receber e ler" boletos, notas fiscais e comprovantes, em PDF e em foto, com OCR (seção 13, que prevalece sobre as seções 1–12 onde divergir). Nada implementado.** Entra na fila **depois do MULTI1-b**, sem ativar capacidade em modelos existentes. Arquivos são capacidade transversal do núcleo, não módulo de delivery. Delivery permanece desligado; o By Koji preserva pacote e comportamento anteriores.
+**Situação: proposta de 15/10/2026, revista em 21/10 (seção 13) e decidida em 21/10 (seção 14: canal de formulário por API, sem WhatsApp por enquanto; a seção 14 prevalece sobre as anteriores). ARQ1-a1 implementado (seção 14).** Entra na fila **depois do MULTI1-b**, sem ativar capacidade em modelos existentes. Arquivos são capacidade transversal do núcleo, não módulo de delivery. Delivery permanece desligado; o By Koji preserva pacote e comportamento anteriores.
 
 Todos os limites, nomes de campos e rotas abaixo são **propostos**, não contratos disponíveis. As decisões em aberto estão na seção 12, cada uma com recomendação.
 
@@ -498,4 +498,182 @@ Cada bloco implantável sozinho com a capacidade desligada em todos os modelos; 
 **Ponto de parada: só especificação. Nada implementado, nenhuma dependência instalada, nenhuma capacidade ligada.**
 
 Fontes externas consultadas em 21/10: documentação da uazapi (`docs.uazapi.com/llms-full.txt`, rota `POST /message/download`); fator de vencimento a partir de 22/02/2025 (documento de código de barras do Santander, abr/2025, e comunicados de ERPs); Nota Técnica Conjunta 2025.001 (CNPJ alfanumérico nos documentos fiscais) via resumos de TecnoSpeed e TOTVS — **conferir no PDF oficial da NT a regra do DV com letras antes de implementar**; formato do E2E PIX por documentação de PSPs — **conferir no Manual de Padrões do Pix do BCB antes de implementar**.
+
+---
+
+## 14. Decisões de 21/10/2026 e ARQ1-a1 implementado — canal de formulário (API)
+
+### 14.1 Decisões
+
+1. **Canal de entrada:** por enquanto **não há recepção pelo WhatsApp**. Os documentos chegam por uma rota POST da API do gateway (multipart), vinda de formulário, site, sistema ou n8n. Há duas credenciais:
+   - **(a) chave da empresa:** para servidor ou n8n repassar;
+   - **(b) chave de formulário restrita:** presa a uma empresa e a um agente, com limite por minuto, tamanho, tipos, modos e sites; revogável pelo painel.
+   - **A chave da empresa nunca é aceita vinda de navegador.**
+2. **Dois modos por envio:**
+   - **`extrair`:** devolve o JSON do documento, sem passar pelo agente.
+   - **`agente`:** extrai e abre ou continua uma conversa no canal `api`, com o anexo no pacote do Skyone.
+   - **Retorno:** resposta síncrona quando termina em poucos segundos; senão, devolve o `anexo_id` e avisa pelo webhook de retorno (assinado com HMAC), com uma rota GET para consultar.
+3. **WhatsApp:** fica para depois (download pela uazapi, decisão 25). O contrato já prevê o encaixe (14.6).
+4. **Ordem:** ARQ1-a1 → ARQ1-a3 (regras de boleto, NF-e/NFC-e/NFS-e e PIX, guarda de pagamento, medição) → ARQ1-a2 (OCR e códigos). O formulário recebe mais PDF digital que foto.
+5. **Decisões 21 a 37:** aprovadas como propostas (21: ARQ1 antes do FUP1; 23: sem antivírus agora; 24: 30 dias). Antes do ARQ1-a3, conferir o DV da chave com CNPJ alfanumérico (NT 2025.001) e a composição do E2E (Manual do Pix) nas fontes oficiais.
+6. **Cópias antigas do ARQ1 em `docs-fora-do-git`:** apagadas em 21/10, depois de conferidas por hash contra o commit `4113c09`.
+
+### 14.2 Credenciais
+
+| | Chave da empresa | Chave de formulário |
+|---|---|---|
+| Cabeçalho | `X-API-Key` | `X-Form-Key` |
+| Como cria | Painel, `POST /admin/v1/tenants/{t}/api-keys` com `escopos: ["documentos:enviar"]` (opcional `agente_id`, `ips_permitidos`, `expira_em`) | Painel, `POST /admin/v1/tenants/{t}/chaves-formulario` (14.5), só admin e plataforma |
+| Onde usar | Servidor, n8n. **Recusada com `Origin` ou `Sec-Fetch-*`** (403 `chave_da_empresa_no_navegador`) | Navegador (site) ou servidor |
+| Agente | Campo `agente_id` (ou o agente da chave) | Sempre o da chave (outro → 403) |
+| Sites | — | Com `Origin`, ele precisa estar em `origens` da chave (403 `origem_nao_permitida`); a resposta traz `Access-Control-Allow-Origin`. Sem `Origin` (servidor), vale |
+| Limite por minuto | 60 envios (ou o da chave) | O da chave (padrão 10; 1–600) |
+| Tamanho e tipos | Os da capacidade do agente | O menor entre a chave e a capacidade |
+| Modos | `extrair` (padrão) e `agente` | Os da chave (padrão `["agente"]`); o primeiro é o padrão |
+| Consulta (GET) | Conteúdo completo | **Só o estado** (sem o conteúdo) e só dos documentos enviados por ela |
+| Outras rotas da API | As do escopo dela | **Nenhuma** (escopo `documentos:formulario`, que nenhuma outra rota aceita) |
+
+### 14.3 Rota de envio — contrato para o formulário e o n8n
+
+`POST /api/v1/documentos` (pelo proxy do painel: `https://<painel>/gateway/api/v1/documentos`), `multipart/form-data`:
+
+| Campo | Obrigatório | Descrição |
+|---|---|---|
+| `arquivo` | sim | Um arquivo: PDF, XML da NF-e/NFC-e, JPG, PNG ou WEBP. O formato vale pelo **conteúdo** (assinatura dos bytes), não pelo nome. Até 10 MiB (ou o limite do agente/chave) |
+| `modo` | não | `extrair` ou `agente` |
+| `agente_id` | chave da empresa sem agente | Agente cuja capacidade de documentos vale (precisa estar ligada no modelo) |
+| `contato` | no modo `agente` | Identificador do cliente na conversa (telefone, e-mail ou id do sistema; `[A-Za-z0-9_@+.-]`, até 100). Mesmo contato = mesma conversa |
+| `nome_contato` | não | Nome do cliente (até 100) |
+| `mensagem` | não | Texto que vai junto ao agente (até 2.000), ex.: "Segue o boleto de outubro" |
+| `canal_id` | não | Canal `api` do agente; sem ele, o primeiro canal `api` ativo do agente |
+| `referencia` | não | Id no sistema de origem (até 100); volta na resposta e no webhook |
+| `idempotencia` | não | Chave de repetição (até 100): o mesmo envio repetido devolve o mesmo documento (`duplicado: true`), sem ler de novo |
+| `aguardar_s` | não | Quanto esperar a leitura antes de responder (0–20 s; padrão 8) |
+
+**Resposta 200 (leitura terminou):**
+```json
+{"anexo_id": "anx_3f1c…", "estado": "pronto", "motivo": null, "modo": "extrair", "referencia": "pedido-77", "conversation_id": null, "duplicado": false,
+ "nome": "boleto.pdf", "formato": "pdf", "tamanho_bytes": 48211, "paginas": 2, "tipo_documento": null,
+ "recebido_em": "2026-10-21T13:02:11+00:00", "expira_em": "2026-11-20T13:02:11+00:00", "verificacao_pagamento": null,
+ "conteudo": {"paginas": [{"pagina": 1, "origem": "texto", "texto": "Recibo do pagador …", "tabelas": [{"id": "tab_1_1", "linhas": [["Item", "Valor"], ["Mensalidade", "152,30"]]}]},
+                          {"pagina": 2, "origem": "sem_texto", "texto": "", "tabelas": []}],
+              "campos": {}, "avisos": []}}
+```
+
+**Campos da resposta:**
+- **`estado`:**
+  - `pronto`: leu algum texto;
+  - `sem_texto`: nada legível, com `motivo` `ocr_necessario` (PDF escaneado) ou `imagem_sem_ocr` (foto, até o ARQ1-a2);
+  - `rejeitado`: com `motivo` `pdf_conteudo_ativo`, `pdf_protegido`, `pdf_invalido`, `paginas_demais`, `xml_invalido` ou `xml_nao_e_nfe`;
+  - `falhou`: com `motivo` `leitor_indisponivel`, depois de 3 tentativas.
+- **`conteudo`:**
+  - só no modo `extrair`; no modo `agente` vem `null` (o conteúdo é do agente);
+  - documento grande (mais de 256 KiB de texto) vem com `"parcial": true`, só com a estrutura; o texto de cada página sai pela consulta com `?pagina=`.
+- **`campos`:** no ARQ1-a1, só os do XML da NF-e, marcados `lido_do_texto`. Boleto, NF em PDF e PIX vêm no ARQ1-a3.
+- **`verificacao_pagamento`:** sempre `null` ou `{"estado": "nao_verificado"}`. Comprovante lido nunca vira pagamento confirmado.
+
+**Resposta 202 (ainda lendo):** `{"anexo_id", "estado": "processando", "modo", "referencia", "conversation_id", "duplicado", "consultar_em": "/api/v1/documentos/anx_…"}`.
+
+**Modo `agente`:** a resposta traz `conversation_id`. O documento entra na conversa como mensagem do cliente `[anexo: boleto.pdf]` (mais a `mensagem`), e o turno espera a leitura por até 20 s. **A resposta do agente chega pelo webhook `conversa.resposta`** (14.4).
+
+**Erros** (envelope de sempre, `erro.detalhes.campo` e `motivo`):
+
+| Status | Quando |
+|---|---|
+| 400 | Campo inválido: `arquivo` (`vazio`, `tipo_nao_aceito`, com `tipos`), `contato`, `modo`, `agente_id`, `aguardar_s`; `corpo`/`multipart_invalido`; `credencial`/`duas_credenciais` |
+| 401 | Sem credencial, chave inválida, revogada ou vencida |
+| 403 | Chave sem o escopo; chave da empresa no navegador; origem não permitida; agente diferente do da chave; modo não permitido |
+| 404 | Agente ou canal inexistente |
+| 409 | `capacidade_desligada`, `agente_inativo`, `sem_canal_api` |
+| 413 | `arquivo`/`tamanho`, com `max_bytes` |
+| 429 | `limite_por_minuto` (com `limite`), `Retry-After: 60` |
+| 503 | `armazenamento_indisponivel` |
+
+**Consulta:** `GET /api/v1/documentos/{anexo_id}` (mesmas credenciais).
+- A chave da empresa recebe o mesmo JSON da resposta 200 (com conteúdo). Com `?pagina=n`, recebe só aquela página (texto e tabelas).
+- A chave de formulário recebe só o estado, no formato do webhook.
+
+**CORS (formulário no navegador):** `OPTIONS` libera `X-Form-Key` e `Content-Type`; a origem é conferida por chave no POST e no GET.
+
+**Exemplo (n8n ou servidor):**
+```
+curl -X POST https://<painel>/gateway/api/v1/documentos \
+  -H "X-API-Key: <chave da empresa>" \
+  -F agente_id=<agente> -F modo=extrair -F referencia=pedido-77 \
+  -F arquivo=@boleto.pdf
+```
+
+### 14.4 Webhook de retorno
+
+São os **webhooks de saída da empresa** (já existentes, configurados no painel em `…/webhooks-saida`, com os eventos escolhidos). Corpo `{"evento", "tenant_id", "dados"}`, com estes cabeçalhos:
+- `X-Gateway-Event`;
+- `X-Gateway-Delivery`, um id estável, para deduplicar;
+- `X-Gateway-Timestamp`;
+- **`X-Gateway-Signature: sha256=<HMAC-SHA256 do segredo do webhook sobre "<timestamp>.<corpo>">`**.
+
+Até 3 tentativas.
+
+| Evento | `dados` |
+|---|---|
+| `documento.pronto` (estado `pronto` ou `sem_texto`) e `documento.falhou` (`rejeitado` ou `falhou`) | `{"anexo_id", "estado", "motivo", "modo", "referencia", "agente_id", "conversation_id", "formato", "paginas", "tipo_documento"}`: **sem o conteúdo** (buscar pelo GET) |
+| `documento.apagado` | `{"anexo_id", "referencia": null}` |
+| `conversa.resposta` (canal `api`, cada balão do agente) | `{"conversation_id", "agente_id", "canal_id", "contato", "request_id", "parte", "texto", "opcoes": [{"id", "titulo"}]}` |
+
+O sistema que enviou entrega o `texto` ao cliente (formulário, e-mail, WhatsApp próprio). Em `conversa.resposta`, as opções de botão vêm numeradas no `texto` e também em `opcoes`.
+
+### 14.5 Painel
+
+| Rota | Uso |
+|---|---|
+| `POST /tenants/{t}/chaves-formulario` (admin/plataforma) | `{"nome", "agente_id", "limite_por_minuto"?=10, "max_bytes"?, "tipos"?, "modos"?=["agente"], "origens"?=["https://site.com.br"], "expira_em"?}` → 201 com a chave (`gwf_…`) **só nesta resposta** |
+| `GET /tenants/{t}/chaves-formulario` | Lista (sem a chave) |
+| `DELETE /tenants/{t}/chaves-formulario/{id}` (admin/plataforma) | Revoga na hora (`revogada_em`, `revogada_por`) |
+| `GET /tenants/{t}/anexos?conversation_id=&agente_id=&estado=&cursor=` | Lista de documentos |
+| `GET /tenants/{t}/anexos/{id}` | Detalhe com **todos** os campos (inclusive `a_conferir`) e a estrutura |
+| `GET /tenants/{t}/anexos/{id}/texto?pagina=` | Texto e tabelas da página |
+| `GET /tenants/{t}/anexos/{id}/original` | Download (`attachment`, `nosniff`, `no-store`); auditado |
+| `DELETE /tenants/{t}/anexos/{id}` (admin/plataforma) | Apaga original e leitura; auditado |
+| `POST /tenants/{t}/agentes/{a}/simular-documento` (multipart: `arquivo`, `identificador`, `canal_id`?, `mensagem`?) | Simulador com arquivo (como o modo `agente`; só com envio de teste) |
+| `GET /tenants/{t}/agentes/{a}/capacidades` | Capacidade efetiva de documentos (e a do modelo, a do agente e se o armazenamento está pronto) |
+| `PUT /tenants/{t}/agentes/{a}/capacidades/documentos` (admin/plataforma) | Restringir no agente (`ativo: false`, menos `tipos`, `max_bytes`, `max_paginas`, `retencao_dias`); corpo `{}` tira a restrição |
+| Modelo de agente (plataforma) | `POST/PATCH /modelos-agente` aceita `capacidades: {"documentos": {"ativo", "tipos", "max_bytes", "max_paginas", "retencao_dias"}}` (nova versão do modelo, como sempre) |
+
+### 14.6 Pacote do Skyone (modo `agente`)
+
+Só com a capacidade ligada (o By Koji não muda; delivery desligado):
+- `recursos.documentos = {"ler": true, "tipos": [...]}`;
+- `anexos` (formato da seção 13.5: até 5 do atendimento atual e até 3 KiB; campos só `validado`/`lido_do_texto`; CPF mascarado; trecho de até 300 caracteres);
+- `mensagens_do_lote[].anexo_id` na mensagem que trouxe o documento.
+
+**Skill `ler_documento`:** `GET /api/v1/documentos/{anexo_id}/conteudo?conversation_id=…` com a chave do Skyone de escopo **`ferramentas:documentos`** (criar no painel), no formato da seção 13.6.
+
+**Ajuste do Skyone:**
+- O **Normalizar** passa `anexos` e `recursos.documentos` adiante como dados.
+- O **prompt** ganha o texto da seção 13.5.
+- O **retorno** não muda.
+
+**WhatsApp depois, sem retrabalho:** a recepção pela uazapi só cria o anexo com `origem: "whatsapp"` (já prevista na tabela) a partir do `/message/download`, e segue pelo mesmo `processar` e pelo mesmo pacote. Nada do contrato acima muda.
+
+### 14.7 O que foi implementado (migração 048)
+
+- **Tabela `anexos`:** registro por empresa, com estado, motivo, referência, idempotência, posse de processamento e retenção.
+- **Chaves:** `tenant_api_keys` ganhou `tipo`, `limite_por_minuto`, `max_bytes`, `tipos_aceitos`, `modos`, `origens_permitidas` e `revogada_por`.
+- **Capacidade:** `capacidades` no modelo de agente e no agente.
+- **Cifra:** AES-256-GCM com chave de dados por documento, embrulhada pela `ARQUIVOS_CHAVE_MESTRA` (no `.env`). O original fica no volume `arquivos`, num caminho com o hash da empresa e o id, sem nome nem telefone; a leitura fica cifrada no banco; nada vai para log.
+- **Leitor:** contêiner `leitor` (imagem `gateway-leitor`, 247 MB), numa rede interna `internal: true`, sem saída e sem credencial (só o `LEITOR_TOKEN` que o identifica). Sistema de arquivos somente leitura, 512 MB, 1 CPU, 64 processos no máximo, um documento por vez. Cada leitura roda num processo filho com teto de memória e de 60 s.
+  - **PDF:** `pdfplumber`, que lê texto por página e tabelas. PDF com JavaScript, ação de abertura, arquivo embutido ou XFA é recusado; PDF com senha de abertura também.
+  - **XML:** `defusedxml`, sem DTD nem entidades.
+- **Processamento:** começa na hora, na própria requisição. Queda ou leitor fora do ar → o agendador retoma a cada 10 s (posse de 150 s; 3 tentativas, depois `falhou`). Retenção vencida → arquivo e leitura apagados (`expirado`).
+- **LGPD:** a anonimização do contato apaga os documentos das conversas dele.
+- **Pipeline:**
+  - o turno espera os documentos do lote por até 20 s;
+  - conversa só com documento não é encerrada como "vazia";
+  - o canal `api` em envio real não dá mais erro; a resposta vai pelo webhook `conversa.resposta`.
+- **Limite de corpo:** só as rotas de envio de documento aceitam até 16 MiB (o resto continua em 2 MiB).
+- **Implantação e vigia:** `implantar.sh` constrói e sobe o `leitor` junto, com a tag `gateway-leitor:<commit>` e a imagem de volta. O vigia passa a conferir o `leitor` quando ele existir.
+- **Testes:**
+  - `tests/test_arq1a.py` (7), com o leitor simulado;
+  - `leitor/tests/test_leitor.py` (5), na imagem do leitor, rodando antes da suíte principal pelo `scripts/test_suite.sh`.
+
+**Dependência do [PAINEL] (Caddy):** o proxy limita a 2 MiB o corpo em `/gateway/api/*` e espera a resposta por até 30 s. Enquanto isso valer, envio maior que 2 MiB pelo endereço público é recusado pelo proxy, antes do gateway. Pedido ao painel: em `/gateway/api/v1/documentos`, `max_size 11MiB`. Os 30 s bastam (`aguardar_s` vai até 20).
 

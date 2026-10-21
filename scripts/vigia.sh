@@ -10,7 +10,9 @@ A="$RAIZ/scripts/alerta.sh"
 seguidas() { f="$ESTADO/vigia/$1"; if [ "$2" = sim ]; then n=$(( $(cat "$f" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$f"; [ "$n" -ge "$3" ]; else rm -f "$f"; return 1; fi; }
 
 # 1) Contêineres: parado, reiniciando ou não saudável por 2 conferências seguidas (~2 a 4 min).
-for servico in gateway worker agendador postgres redis; do
+# O leitor (ARQ1) só é conferido depois de implantado pela primeira vez.
+LEITOR=""; [ -n "$(compose ps -aq leitor 2>/dev/null)" ] && LEITOR=leitor
+for servico in gateway worker agendador postgres redis $LEITOR; do
     ruim=nao; estado=""
     ids=$(compose ps -aq "$servico" 2>/dev/null)
     [ -n "$ids" ] || { ruim=sim; estado="não existe"; }

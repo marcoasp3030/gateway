@@ -39,6 +39,36 @@ def campos_do_retorno(resultado):
     return acao,(resultado.get('motivo') if acao=='silencio' else None),resultado.get('desfecho'),resultado.get('prompt_versao')
 
 
+ESPERA_ANEXOS_S=20
+
+
+def anexos_do_lote(itens):
+    """ids dos documentos anexados às mensagens do lote (ARQ1-a1)."""
+    ids=[]
+    for i in itens:
+        meta=i.get('meta') if hasattr(i,'get') else i['meta']
+        meta=json.loads(meta) if isinstance(meta,str) else (meta or {})
+        if isinstance(meta,dict) and meta.get('anexo_id'): ids.append(meta['anexo_id'])
+    return ids
+
+
+async def _aguardar_anexos(db,itens):
+    ids=anexos_do_lote([dict(i) for i in itens])
+    if not ids: return
+    from nucleo import documentos
+    try: await documentos.aguardar(db,ids,ESPERA_ANEXOS_S)
+    except Exception: log.warning('Espera dos anexos do lote falhou; segue o turno')
+
+
+async def _resposta_no_webhook(conn,tenant,conversa,conv,canal,cfg,texto,plano,rid,parte):
+    """Canal api (ARQ1-a1, modo agente): cada balão do bot vai ao webhook de saída `conversa.resposta` da empresa (assinado),
+    para o sistema que enviou (formulário, n8n) entregar ao cliente."""
+    from nucleo.webhooks import emitir
+    await emitir(conn,tenant,'conversa.resposta',{'conversation_id':conversa,'agente_id':cfg['id'],'canal_id':canal['id'],'contato':conv['telefone'],
+                 'request_id':str(rid),'parte':parte,'texto':botoes.numerado(texto,plano[2]),
+                 'opcoes':[{'id':o.get('id'),'titulo':o.get('titulo')} for o in plano[2] or [] if isinstance(o,dict)]})
+
+
 # Mensagem do atendente pelo celular que devolve a conversa ao bot na hora (não vai para o agente).
 COMANDO_BOT='#bot'
 # SEG07 por contato: tempo sem chamar o agente depois de estourar o limite por minuto.
@@ -795,6 +825,8 @@ return 1
                 if origem=='cliente':
                     pronta=await self._so_avisar(tenant,conversa,conv,cfg)
                     if pronta is not None: raise RespostaPronta(pronta)
+                # ARQ1-a1: documento do lote ainda em leitura → espera até 20 s (vai como `processando` se não terminar).
+                await _aguardar_anexos(self.db,itens)
                 payload=await skyone.pacote(self.repo,tenant,conversa,min(ids),'\n'.join(i['conteudo'] for i in itens),cfg,str(rid),lote=itens,acoes=acoes,aviso=recado)
                 if origem=='sistema':
                     payload.update(tarefa='notificar',evento=json.loads(itens[0]['evento']) if isinstance(itens[0]['evento'],str) else itens[0]['evento'])
@@ -857,7 +889,8 @@ return 1
         """Envia um balão pelo canal (se o envio for real) na forma planejada. Devolve (marca, plano final).
         Menu recusado pelo provedor → o mesmo balão em texto numerado, com aviso. A conversa não falha por botão."""
         forma,motivo,opcoes=plano;marca=(None,None)
-        if efetiva['send_mode']=='live':
+        # ARQ1-a1: o canal api não tem provedor; a resposta vai pelo webhook de saída `conversa.resposta` (gravada como enviada).
+        if efetiva['send_mode']=='live' and canal['tipo']!='api':
             if canal['tipo']!='uazapi': raise ValueError('Envio live deste canal ainda não implementado')
             if forma in ('botao','lista'):
                 try:
@@ -910,6 +943,7 @@ return 1
                     if escolhas: await self._plano_b(conn,tenant,conversa,plano[1])
                     await conn.execute('UPDATE conversas SET atualizado_em=now() WHERE tenant_id=$1 AND conversation_id=$2',tenant,conversa)
                     await auditar(conn,tenant,'sistema','mensagem.enviada',conversa)
+                    if canal['tipo']=='api': await _resposta_no_webhook(conn,tenant,conversa,conv,canal,cfg,texto,plano,rid,parte)
                 return 'enviada'
             finally:
                 await conn.execute('SELECT pg_advisory_unlock(hashtextextended($1,0))',conversa)
@@ -1115,7 +1149,7 @@ return 1
               AND (c.bot_pausado_ate IS NULL OR c.bot_pausado_ate<now())
               AND EXISTS(SELECT 1 FROM mensagens m WHERE m.tenant_id=c.tenant_id AND m.conversation_id=c.conversation_id AND m.origem='cliente')
               AND NOT EXISTS(SELECT 1 FROM mensagens m WHERE m.tenant_id=c.tenant_id AND m.conversation_id=c.conversation_id
-                    AND (m.origem='humano' OR (m.origem='cliente' AND m.tipo IN ('texto','localizacao'))
+                    AND (m.origem='humano' OR (m.origem='cliente' AND (m.tipo IN ('texto','localizacao') OR m.meta ? 'anexo_id'))
                          OR (m.direcao='entrada' AND m.processada_em IS NULL)))
             ORDER BY c.atualizado_em LIMIT $1""",limite)
         encerradas=0;agora=datetime.now(timezone.utc)

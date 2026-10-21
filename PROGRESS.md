@@ -1322,3 +1322,16 @@ PY
 - **Painel:** `GET/PUT …/itens/{id}/opcoes`, com `aplicar_em`.
 - Contrato final na seção 14 de `docs/ESPEC_CAT3.md`. O retrato do By Koji mudou só nos campos novos. Testes em `tests/test_cat3b.py` (4).
 
+
+## ARQ1-a1 — documentos por API (formulário, n8n): receber e ler — 2026-10-21
+
+- Decisões do Marco na seção 14 de `docs/ESPEC_ARQ1.md`. O WhatsApp fica para depois e o canal é a API. O contrato da rota, do webhook e do painel está nas seções 14.3 a 14.6. Migração 048.
+- **Credenciais:**
+  - chave da empresa (`documentos:enviar`), recusada se vier de navegador;
+  - chave de formulário (`X-Form-Key`) presa a empresa e agente, com limite por minuto, tamanho, tipos, modos e sites; revogável.
+- **Modos:**
+  - `extrair`: devolve o JSON do documento;
+  - `agente`: conversa no canal api, com `anexos` no pacote, a Skill `ler_documento` e a resposta pelo webhook `conversa.resposta`.
+- **Leitura:** o documento fica cifrado (AES-GCM, chave mestra no `.env`), com retenção de 30 dias e apagamento por LGPD. O leitor é um contêiner isolado (`gateway-leitor`, sem rede para fora e sem credenciais) e lê PDF digital e XML da NF-e.
+- Testes em `tests/test_arq1a.py` (7) e `leitor/tests` (5). A capacidade está desligada em todos os modelos, então o By Koji não muda.
+- Pendente no painel (Caddy): aceitar até 11 MiB em `/gateway/api/v1/documentos` (hoje 2 MiB).

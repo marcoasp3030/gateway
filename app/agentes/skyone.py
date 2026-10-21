@@ -100,6 +100,9 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
     do_lote = []; ultima_interacao = None; origens = []
     for i in (dict(x) for x in (lote or [])):
         item = {'enviada_em':iso(i.get('enviada_em') or i.get('criado_em') or agora),'tipo':i.get('tipo') or 'texto','texto':i['conteudo']}
+        # ARQ1-a1: mensagem com documento leva o id dele (o resumo vem em `anexos`).
+        meta_i = i.get('meta'); meta_i = json.loads(meta_i) if isinstance(meta_i,str) else (meta_i or {})
+        if isinstance(meta_i,dict) and meta_i.get('anexo_id'): item['anexo_id'] = meta_i['anexo_id']
         clique = await interacao(repo.db,tenant_id,conversa_id,conv.get('canal_id'),i)
         origem_do_clique = None
         if clique:
@@ -149,7 +152,13 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
     com_menu = cfg.get('botoes_interativos')=='on' and (canal or {}).get('tipo')=='uazapi'
     com_reacao = cfg.get('reacoes')=='on' and (canal or {}).get('tipo')=='uazapi'
     from nucleo import calendario
-    return {
+    # ARQ1-a1: documentos — só com a capacidade ligada no modelo do agente; desligada, o pacote não muda (o By Koji não muda).
+    from nucleo import documentos as docs
+    cap_docs = await docs.capacidade(repo.db,tenant_id,cfg['id'])
+    extras = {}
+    if cap_docs and cap_docs['ativo']:
+        extras['anexos'] = await docs.do_pacote(repo.db,tenant_id,conversa_id,atendimento['id'] if atendimento else None,fuso)
+    pacote_final = {
         # CAL1: hoje + 7 dias com dia da semana, feriado e o que muda nas unidades. O agente não calcula datas.
         'calendario':await calendario.do_pacote(repo.db,tenant_id,tenant['timezone'],agora),
         'unidades':await unidades(repo.db,tenant_id,tenant['timezone'],agora,cfg.get('modulos') or ()),
@@ -193,6 +202,10 @@ async def pacote(repo,tenant_id,conversa_id,antes_id,message,cfg,request_id=None
         # ENC1-a: atendimento atual (novo = primeiro turno entregue dele) e o anterior, resumido. Nulo só em conversa sem atendimento.
         'atendimento':atendimento,
     }
+    if extras:
+        pacote_final.update(extras)
+        pacote_final['recursos']['documentos'] = {'ler':True,'tipos':cap_docs['tipos']}
+    return pacote_final
 
 
 async def _chamar(client,repo,cofre,tenant_id,cfg,payload):

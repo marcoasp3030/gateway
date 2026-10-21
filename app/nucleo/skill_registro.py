@@ -11,7 +11,9 @@ from urllib.parse import parse_qsl
 log=logging.getLogger('gateway.skills')
 MAX_LIDO=65536
 # Skills do núcleo; as dos módulos vêm das declarações deles (modulos.REGISTRO[...].skills).
-SKILLS={('GET','/api/v1/unidades'):'info_unidades'}
+SKILLS={('GET','/api/v1/unidades'):'info_unidades',
+        # ARQ1-a1: leitura de documento da conversa.
+        ('GET','/api/v1/documentos/{anexo_id}/conteudo'):'ler_documento'}
 from modulos import REGISTRO as _MODULOS
 for _m in _MODULOS.values(): SKILLS.update(_m.skills)
 

@@ -49,6 +49,12 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    # ARQ1-a1: documentos cifrados (volume privado) e a rede interna do leitor.
+    volumes:
+      - arquivos:/dados/arquivos
+    networks:
+      - default
+      - leitor
     security_opt:
       - no-new-privileges:true
     mem_limit: 192m
@@ -83,6 +89,11 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    volumes:
+      - arquivos:/dados/arquivos
+    networks:
+      - default
+      - leitor
     security_opt:
       - no-new-privileges:true
     mem_limit: 256m
@@ -113,6 +124,11 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    volumes:
+      - arquivos:/dados/arquivos
+    networks:
+      - default
+      - leitor
     security_opt:
       - no-new-privileges:true
     mem_limit: 128m
@@ -129,6 +145,37 @@ services:
       redis:
         condition: service_healthy
 
+  # ARQ1-a1: leitor de documentos. Rede interna sem saída para a internet, sem credencial nenhuma (só o token que o identifica para
+  # o gateway), sistema de arquivos somente leitura, um documento por vez, teto de memória e CPU. Não alcança banco nem Redis.
+  leitor:
+    build: ./leitor
+    image: gateway-leitor
+    restart: unless-stopped
+    environment:
+      LEITOR_TOKEN: ${LEITOR_TOKEN:-}
+    networks:
+      - leitor
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 64
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8090/saude',timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
 volumes:
   pgdata:
   redisdata:
+  # ARQ1-a1: documentos recebidos, cifrados (a chave mestra fica no .env, fora do volume).
+  arquivos:
+
+networks:
+  leitor:
+    internal: true

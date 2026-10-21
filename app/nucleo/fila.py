@@ -212,6 +212,7 @@ class FilaDuravel:
         proxima_varredura = 0
         proximas_vazias = 0
         proximos_sem_retorno = 0
+        proximos_documentos = 0
         proximos_avisos = 0
         proximos_ops = 0
         while not (parar and parar.is_set()):
@@ -251,6 +252,11 @@ class FilaDuravel:
                         if agora >= proximos_sem_retorno:
                             # ENC1-a: atendimento com pedido fechado e sem retorno do cliente em 30 min, conferido a cada minuto.
                             proximos_sem_retorno = agora + 60; await self.p.encerrar_sem_retorno()
+                        if agora >= proximos_documentos:
+                            # ARQ1-a1: documento cuja leitura parou (queda) volta a ser lido; vencido pela retenção é apagado.
+                            proximos_documentos = agora + 10
+                            from nucleo import documentos
+                            await documentos.varrer(self.p)
                         await self.despachar_saidas()
                 self.tocar_arquivo()
             except Exception:

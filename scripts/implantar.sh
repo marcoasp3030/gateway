@@ -34,6 +34,14 @@ VOLTA=$(docker images --no-trunc --format '{{.Repository}}:{{.Tag}} {{.ID}}' | a
 [ -n "$VOLTA" ] || parar "a imagem em uso não tem tag gateway:<commit>; crie a tag antes de construir"
 echo "   volta: $VOLTA"
 [ "$VOLTA" != "gateway:$COMMIT" ] || parar "o commit $COMMIT já é o que está em produção"
+# ARQ1: leitor de documentos (serviço próprio). Se já existe, a imagem em uso ganha a tag de volta.
+LEITOR_VOLTA=""
+LEITOR_ATUAL=$(docker compose ps -q leitor 2>/dev/null | head -n 1)
+if [ -n "$LEITOR_ATUAL" ]; then
+    LEITOR_VOLTA="gateway-leitor:volta-$COMMIT"
+    docker tag "$(docker inspect "$LEITOR_ATUAL" --format '{{.Image}}')" "$LEITOR_VOLTA"
+    echo "   volta do leitor: $LEITOR_VOLTA"
+fi
 
 echo "== 4/8 backup"
 DESTINO=/home/twadmin/backups/gateway/pre-$ROTULO-$(date -u +%Y%m%dT%H%M%SZ)
@@ -46,9 +54,10 @@ echo "   $DESTINO/gateway.dump ($TABELAS tabelas)"
 
 echo "== 5/8 build"
 REG_BUILD=$(mktemp /tmp/build-gateway-XXXXXX.log)
-docker compose build -q gateway >"$REG_BUILD" 2>&1 || { tail -n 20 "$REG_BUILD"; parar "o build falhou; os serviços continuam na imagem anterior"; }
+docker compose build -q gateway leitor >"$REG_BUILD" 2>&1 || { tail -n 20 "$REG_BUILD"; parar "o build falhou; os serviços continuam na imagem anterior"; }
 rm -f "$REG_BUILD"
 docker tag gateway-gateway:latest "gateway:$COMMIT"
+docker tag gateway-leitor:latest "gateway-leitor:$COMMIT"
 NOVA=$(docker image inspect "gateway:$COMMIT" --format '{{.Id}}')
 [ "$NOVA" != "$EM_USO" ] || echo "   aviso: a imagem nova é idêntica à que está em uso"
 
@@ -62,7 +71,7 @@ echo "== 7/8 troca dos serviços"
 # Imagem esperada pelo vigia (scripts/vigia.sh): contêiner do gateway em outra imagem = implantação por fora, com alerta.
 ESPERADA=/home/twadmin/backups/gateway/estado/imagem_implantada
 printf '%s gateway:%s\n' "$NOVA" "$COMMIT" > "$ESPERADA"
-docker compose up -d --no-deps gateway worker agendador 2>&1 | tail -n 2
+docker compose up -d --no-deps leitor gateway worker agendador 2>&1 | tail -n 2
 
 echo "== 8/8 conferência"
 n=0
@@ -72,8 +81,9 @@ while :; do
     for c in $(docker compose ps -q gateway worker agendador); do
         [ "$(docker inspect "$c" --format '{{.State.Health.Status}} {{.Image}}')" = "healthy $NOVA" ] || RUINS=$((RUINS+1))
     done
+    [ "$(docker inspect "$(docker compose ps -q leitor | head -n 1)" --format '{{.State.Health.Status}}' 2>/dev/null)" = "healthy" ] || RUINS=$((RUINS+1))
     [ "$RUINS" -eq 0 ] && break
     [ "$n" -lt 24 ] || parar "depois de 2 minutos há $RUINS contêiner(es) fora do ar ou na imagem errada. Para voltar: docker tag $VOLTA gateway-gateway:latest && docker compose up -d --no-deps gateway worker agendador && echo \"$EM_USO $VOLTA\" > $ESPERADA"
 done
-echo "IMPLANTADO: gateway:$COMMIT nos $(docker compose ps -q gateway worker agendador | wc -l) contêineres, todos saudáveis"
+echo "IMPLANTADO: gateway:$COMMIT nos $(docker compose ps -q gateway worker agendador | wc -l) contêineres e gateway-leitor:$COMMIT, todos saudáveis"
 echo "   volta: $VOLTA | backup: $DESTINO/gateway.dump"

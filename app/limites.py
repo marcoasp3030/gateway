@@ -7,6 +7,9 @@ from erros_api import resposta
 from seguranca import REDES_INTERNAS
 
 
+DOCUMENTOS_BYTES = 16 * 1024 * 1024
+
+
 class LimiteCorpo:
     """Conta bytes reais, inclusive em requisições sem Content-Length."""
 
@@ -19,7 +22,10 @@ class LimiteCorpo:
             return await self.app(scope, receive, send)
         headers = dict(scope.get("headers", []))
         tamanho = headers.get(b"content-length", b"")
-        if tamanho.isdigit() and int(tamanho) > self.max_bytes:
+        # ARQ1-a1: só as rotas de envio de documento aceitam até 16 MiB (o arquivo tem teto próprio, conferido depois).
+        caminho = scope.get("path", "")
+        maximo = DOCUMENTOS_BYTES if caminho == "/api/v1/documentos" or (caminho.startswith("/admin/v1/") and caminho.endswith("/simular-documento")) else self.max_bytes
+        if tamanho.isdigit() and int(tamanho) > maximo:
             return await self.recusar(scope, receive, send)
         partes, total = [], 0
         while True:
@@ -28,7 +34,7 @@ class LimiteCorpo:
                 return
             parte = evento.get("body", b"")
             total += len(parte)
-            if total > self.max_bytes:
+            if total > maximo:
                 return await self.recusar(scope, receive, send)
             partes.append(parte)
             if not evento.get("more_body", False):

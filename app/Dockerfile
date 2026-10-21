@@ -5,7 +5,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 # SEG09: processo sem privilégios de root
-RUN useradd --system --uid 10001 --no-create-home gateway && chown -R gateway /app
+RUN useradd --system --uid 10001 --no-create-home gateway && chown -R gateway /app \
+    && mkdir -p /dados/arquivos && chown gateway /dados/arquivos && chmod 700 /dados/arquivos
 USER gateway
 # 1 worker: o agendador de debounce roda dentro do processo
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--no-date-header"]

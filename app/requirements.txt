@@ -8,3 +8,5 @@ cryptography==46.0.3
 # CAL1: feriados nacionais e estaduais do calendário do pacote (versão fixa: a lista de feriados muda entre versões).
 holidays==0.106
 python-dateutil==2.9.0.post0
+# ARQ1-a1: envio de documento em multipart/form-data (o FastAPI usa para ler formulário com arquivo).
+python-multipart==0.0.20
