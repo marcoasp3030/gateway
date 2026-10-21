@@ -1,5 +1,7 @@
 #!/bin/sh
-# Backup diário (OPS1): Postgres + snapshot do Redis + manifesto; cifrado com a chave pública e enviado ao destino externo.
+# Backup diário (OPS1): Postgres + snapshot do Redis + documentos (ARQ1, já cifrados com AES) + manifesto; cifrado com a chave
+# pública e enviado ao destino externo. A chave mestra dos documentos (ARQUIVOS_CHAVE_MESTRA) NUNCA vai no mesmo pacote: a cópia do
+# .env dentro dele sai sem essa linha (decisão do Marco, 21/10/2026); a chave fica guardada à parte, com o Marco.
 # Sem destino configurado, faz só o backup local e registra "local" (o /health/ops fica 503 até o destino existir).
 # Nunca envia nada sem cifrar. Uso: sh scripts/backup.sh   (cron diário 04:30, America/Sao_Paulo)
 set -u
@@ -41,14 +43,24 @@ PASSO=redis
 compose exec -T redis sh -c 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning --rdb /data/.backup.rdb >/dev/null 2>&1 && cat /data/.backup.rdb; r=$?; rm -f /data/.backup.rdb; exit $r' > "$DIR/redis.rdb" 2>/dev/null || falhar "o snapshot do Redis falhou"
 [ "$(head -c 5 "$DIR/redis.rdb")" = "REDIS" ] || falhar "o snapshot do Redis não é válido"
 
+PASSO=documentos
+# Volume `arquivos` (ARQ1): os documentos já estão cifrados (AES-256-GCM, chave por documento); sem a chave mestra não se lê nada.
+compose exec -T gateway tar -cf - -C /dados arquivos > "$DIR/arquivos.tar" 2>"$TMP/tar.err" || falhar "não consegui copiar o volume dos documentos"
+tar -tf "$DIR/arquivos.tar" >/dev/null 2>&1 || falhar "a cópia dos documentos não pôde ser lida de volta"
+N_DOCS=$(tar -tf "$DIR/arquivos.tar" | grep -c '/anx_[0-9a-f]*$' || true)
+
 PASSO=manifesto
-SHA_DUMP=$(sha256sum "$DIR/gateway.dump" | cut -d' ' -f1); SHA_RDB=$(sha256sum "$DIR/redis.rdb" | cut -d' ' -f1); SHA_ENV=$(sha256sum "$ARQ_ENV" | cut -d' ' -f1)
+# Cópia do .env para o pacote cifrado, SEM a chave mestra dos documentos.
+grep -v '^[[:space:]]*ARQUIVOS_CHAVE_MESTRA=' "$ARQ_ENV" > "$TMP/.env"; chmod 600 "$TMP/.env"
+SHA_DUMP=$(sha256sum "$DIR/gateway.dump" | cut -d' ' -f1); SHA_RDB=$(sha256sum "$DIR/redis.rdb" | cut -d' ' -f1); SHA_ENV=$(sha256sum "$TMP/.env" | cut -d' ' -f1)
+SHA_DOCS=$(sha256sum "$DIR/arquivos.tar" | cut -d' ' -f1)
 cat > "$DIR/manifesto.json" <<JSON
 {"feito_em":"$INICIO","commit":"$(cd "$RAIZ" && git rev-parse --short HEAD 2>/dev/null)","contagens_exatas":$EXATAS,
  "contagens":$DEPOIS,"contagens_antes":$ANTES,"tabelas_com_dados":$N_TABELAS,
  "arquivos":{"gateway.dump":{"bytes":$(stat -c %s "$DIR/gateway.dump"),"sha256":"$SHA_DUMP"},
              "redis.rdb":{"bytes":$(stat -c %s "$DIR/redis.rdb"),"sha256":"$SHA_RDB"},
-             "env":{"bytes":$(stat -c %s "$ARQ_ENV"),"sha256":"$SHA_ENV"}}}
+             "arquivos.tar":{"bytes":$(stat -c %s "$DIR/arquivos.tar"),"sha256":"$SHA_DOCS","documentos":$N_DOCS},
+             "env":{"bytes":$(stat -c %s "$TMP/.env"),"sha256":"$SHA_ENV","sem":"ARQUIVOS_CHAVE_MESTRA"}}}
 JSON
 chmod 600 "$DIR"/*; chmod 700 "$DIR"
 
@@ -57,7 +69,7 @@ if [ -z "$FALTA" ]; then
     PASSO=cifrar
     NOME="gateway-backup-$TS.tar.gpg"; GNUPGHOME="$TMP/gnupg"; mkdir -m 700 "$GNUPGHOME"; export GNUPGHOME
     # O .env vai dentro do pacote cifrado (sem ele o banco restaurado não lê as credenciais guardadas).
-    tar -cf - -C "$DIR" gateway.dump redis.rdb manifesto.json -C "$(dirname "$ARQ_ENV")" "$(basename "$ARQ_ENV")" 2>/dev/null \
+    tar -cf - -C "$DIR" gateway.dump redis.rdb arquivos.tar manifesto.json -C "$TMP" .env 2>/dev/null \
         | gpg --batch --yes --no-tty --quiet --trust-model always --recipient-file "$(cfg BACKUP_CHAVE_PUBLICA)" --encrypt --output "$TMP/$NOME" 2>"$TMP/gpg.err" \
         || falhar "não consegui cifrar (confira a chave pública)"
     [ -s "$TMP/$NOME" ] || falhar "o arquivo cifrado saiu vazio"
