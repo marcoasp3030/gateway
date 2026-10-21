@@ -219,6 +219,13 @@ def _cursor(v):
     return n
 
 
+def normalizar(texto):
+    """Sem acento, minúsculas, pontuação vira espaço (a mesma regra da busca do catálogo, sem depender do módulo)."""
+    import unicodedata
+    sem=''.join(c for c in unicodedata.normalize('NFKD',str(texto or '')) if not unicodedata.combining(c))
+    return re.sub(r'[^a-z0-9]+',' ',sem.lower()).strip()
+
+
 @router.get('/api/v1/documentos/{anexo_id}/conteudo')
 async def ler_documento(request:Request,anexo_id:str,conversation_id:str,pagina:int|None=None,busca:str|None=None,tabela:str|None=None,cursor:str|None=None):
     """Skill do agente: só documento da própria conversa. Sem parâmetro: a estrutura e todos os campos (com a confiança).
@@ -248,7 +255,6 @@ async def ler_documento(request:Request,anexo_id:str,conversation_id:str,pagina:
         if busca is not None:
             alvo=' '.join(busca.lower().split())
             if not 2<=len(alvo)<=100: raise Erro(400,'busca')
-            from modulos.catalogo.busca import normalizar
             n_alvo=normalizar(alvo);achados=[]
             for p in paginas:
                 texto=p['texto'];baixo=normalizar(texto)
