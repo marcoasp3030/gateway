@@ -30,7 +30,7 @@ def test_nucleo_nao_conhece_carrinho_nem_pedido():
     # O que era fixo no núcleo agora é declarado pelo módulo.
     assert 'pedido_fechado' in skyone.ACOES and 'pedido_fechado' in botoes.ACOES_COM_BOTAO and declarados('motivos_com_recusa')==('pedido_para_confirmar',)
     assert skill_registro.SKILLS[('POST','/api/v1/pedidos')]=='fechar_pedido' and skill_registro.SKILLS[('GET','/api/v1/catalogo/busca')]=='buscar_catalogo'
-    assert skill_registro.SKILLS[('GET','/api/v1/unidades')]=='info_unidades' and len(skill_registro.SKILLS)==12
+    assert skill_registro.SKILLS[('GET','/api/v1/unidades')]=='info_unidades' and len(skill_registro.SKILLS)==13   # + ler_documento (ARQ1-a1, núcleo)
     assert set(REGISTRO['pedidos'].comportamentos)=={'carrinho_expira_h','acoes_recentes_min'}
 
 
