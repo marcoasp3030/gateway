@@ -12,7 +12,18 @@ MODO=${1:-}
 case "$MODO" in ensaio|executar) ;; *) echo "uso: sh scripts/recriar_base.sh ensaio|executar"; exit 2;; esac
 . scripts/ops/comum.sh
 PREFIXO=gw05
-parar() { echo "RECRIAÇÃO INTERROMPIDA: $1"; exit 1; }
+# Alerta pelo canal de operação (scripts/alerta.sh: Telegram quando configurado; senão fica no registro ops.log).
+# Depois do passo 3 (algo já desligado), toda parada avisa em que passo parou e o que ficou desligado.
+PASSO=1; DESLIGADO=""
+alertar() { sh scripts/alerta.sh disparar "recriar-base-$(date -u +%Y%m%dT%H%M%S)" "$1" "$2" "$3" >/dev/null 2>&1 || true; }
+ALERTADO=""
+parar() {
+    echo "RECRIAÇÃO INTERROMPIDA no passo $PASSO: $1"
+    [ "$PASSO" -ge 3 ] && alertar critico "recriar_base parou no passo $PASSO" "$1 · desligado: ${DESLIGADO:-nada} · log: ${LOG:-tela}"
+    ALERTADO=1; exit 1
+}
+# Rede de segurança: erro inesperado (set -e) depois do passo 3 também avisa.
+trap 'st=$?; if [ "$st" -ne 0 ] && [ -z "$ALERTADO" ] && [ "$PASSO" -ge 3 ]; then echo "RECRIAÇÃO INTERROMPIDA no passo $PASSO: erro inesperado (saída $st)"; alertar critico "recriar_base parou no passo $PASSO" "erro inesperado (saída $st) · desligado: ${DESLIGADO:-nada} · log: ${LOG:-tela}"; fi' EXIT
 agora() { date -u '+%Y-%m-%dT%H:%M:%SZ'; }
 rcli() { docker compose exec -T redis sh -c 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning '"$*"; }
 psql_prod() { docker compose exec -T -e B="$BANCO_PRODUCAO" postgres sh -c 'psql -U "$POSTGRES_USER" -d "$B" -At -c "$0"' "$1"; }
@@ -56,7 +67,7 @@ if [ "$MODO" = ensaio ]; then
 fi
 
 INICIO=$(date +%s); echo "INÍCIO: $(agora)"
-echo "== 2/9 backup"
+PASSO=2; echo "== 2/9 backup"
 DESTINO=/home/twadmin/backups/gateway/pre-recriar-base-$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -m 700 "$DESTINO"
 docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -Fc gateway' > "$DESTINO/gateway.dump" || parar "o backup falhou (nada foi parado)"
@@ -65,27 +76,27 @@ TABELAS=$(docker compose exec -T postgres pg_restore --list < "$DESTINO/gateway.
 [ "${TABELAS:-0}" -gt 20 ] || parar "o backup não pôde ser lido de volta ($TABELAS tabelas); nada foi parado"
 echo "   $DESTINO/gateway.dump ($TABELAS tabelas)"
 
-echo "== 3/9 para o agendador (nada novo é distribuído)"
-docker compose stop -t 30 agendador >/dev/null 2>&1
+PASSO=3; echo "== 3/9 para o agendador (nada novo é distribuído)"
+docker compose stop -t 30 agendador >/dev/null 2>&1; DESLIGADO="agendador"
 
-echo "== 4/9 espera o que está em processamento terminar (até 120 s)"
+PASSO=4; echo "== 4/9 espera o que está em processamento terminar (até 120 s)"
 n=0
 while :; do
     q=$(em_processamento); [ "$q" -eq 0 ] && break
-    n=$((n+1)); [ "$n" -le 24 ] || { docker compose start agendador >/dev/null 2>&1; parar "ainda há $q item(ns) em processamento depois de 120 s; agendador religado, nada recriado"; }
+    n=$((n+1)); [ "$n" -le 24 ] || { docker compose start agendador >/dev/null 2>&1; DESLIGADO="nada (agendador religado)"; parar "ainda há $q item(ns) em processamento depois de 120 s; nada recriado"; }
     sleep 5
 done
-echo "== 5/9 para os workers"
-docker compose stop -t 90 worker >/dev/null 2>&1
-[ "$(em_processamento)" -eq 0 ] || { docker compose start worker agendador >/dev/null 2>&1; parar "item em processamento apareceu ao parar os workers; religados, nada recriado"; }
+PASSO=5; echo "== 5/9 para os workers"
+docker compose stop -t 90 worker >/dev/null 2>&1; DESLIGADO="agendador e workers"
+[ "$(em_processamento)" -eq 0 ] || { docker compose start worker agendador >/dev/null 2>&1; DESLIGADO="nada (religados)"; parar "item em processamento apareceu ao parar os workers; nada recriado"; }
 sleep 2   # o AOF grava a cada segundo (appendfsync everysec)
 ANTES=$(fotografia); echo "   fila antes: $ANTES"
 
-echo "== 6/9 recria postgres e redis (mesmos volumes)"
+PASSO=6; DESLIGADO="agendador, workers, postgres e redis (sendo recriados)"; echo "== 6/9 recria postgres e redis (mesmos volumes)"
 PARADA=$(date +%s)
 docker compose up -d --no-deps --force-recreate -t 60 postgres redis 2>&1 | tail -n 2 | sed 's/^/   /'
 
-echo "== 7/9 espera saudáveis (até 120 s)"
+PASSO=7; echo "== 7/9 espera saudáveis (até 120 s)"
 n=0
 while :; do
     ok=0
@@ -94,13 +105,13 @@ while :; do
     n=$((n+1)); [ "$n" -le 24 ] || parar "postgres/redis não ficaram saudáveis em 120 s (workers e agendador continuam parados; backup em $DESTINO)"
     sleep 5
 done
-VOLTA=$(date +%s)
+VOLTA=$(date +%s); DESLIGADO="agendador e workers (postgres e redis de volta)"
 DEPOIS=$(fotografia); echo "   fila depois: $DEPOIS · chaves no Redis: $(rcli DBSIZE)"
 [ "$ANTES" = "$DEPOIS" ] || parar "a fila do Redis não voltou igual do AOF (antes: $ANTES | depois: $DEPOIS); workers e agendador continuam parados"
 [ "$(psql_prod 'SELECT max(versao) FROM schema_migrations')" -gt 0 ] || parar "o banco não respondeu"
 
-echo "== 8/9 religa workers e agendador"
-docker compose start worker agendador >/dev/null 2>&1
+PASSO=8; echo "== 8/9 religa workers e agendador"
+docker compose start worker agendador >/dev/null 2>&1; DESLIGADO=""
 n=0
 while :; do
     ruins=0
@@ -113,8 +124,9 @@ SAUDE=$(docker compose exec -T gateway python -c "import urllib.request;print(ur
 [ "$SAUDE" = 200 ] || parar "saúde do gateway: $SAUDE"
 FIM=$(date +%s)
 
-echo "== 9/9 conferência"
+PASSO=9; echo "== 9/9 conferência"
 echo "   oom_score_adj efetivo:"; oom
 ERROS=$(docker compose logs --since "$(date -u -d @$INICIO '+%Y-%m-%dT%H:%M:%S')" postgres redis gateway worker agendador 2>&1 | grep -ciE 'error|fatal|panic|traceback' || true)
 echo "   linhas com erro nos logs desde o início: $ERROS"
+alertar aviso "recriar_base concluído" "postgres e redis recriados; fora por $((VOLTA-PARADA)) s; total $((FIM-INICIO)) s; tudo saudável"
 echo "RECRIADO: início $(date -u -d @$INICIO '+%H:%M:%S') UTC · fim $(date -u -d @$FIM '+%H:%M:%S') UTC · total $((FIM-INICIO)) s · banco e Redis fora por $((VOLTA-PARADA)) s · backup: $DESTINO"
