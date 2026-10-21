@@ -108,7 +108,7 @@ def test_modo_extrair_sincrono_cifrado_consulta_e_webhook(tmp_path,monkeypatch):
         assert (await c.get(f'/api/v1/documentos/{d["anexo_id"]}',params={'pagina':9},headers=h)).status_code==404
         # Webhook de retorno: só ids e estado.
         [e]=await eventos('documento.pronto');assert e=={'anexo_id':d['anexo_id'],'estado':'pronto','motivo':None,'modo':'extrair','referencia':'pedido-77',
-                                                         'agente_id':A,'conversation_id':None,'formato':'pdf','paginas':2,'tipo_documento':None}
+                                                         'agente_id':A,'conversation_id':None,'formato':'pdf','paginas':2,'tipo_documento':'outro'}
         # Idempotência: o mesmo envio repetido devolve o mesmo documento, sem ler de novo.
         r1=await enviar(idempotencia='envio-1');r2=await enviar(idempotencia='envio-1')
         assert r1.json()['anexo_id']==r2.json()['anexo_id'] and r2.json()['duplicado'] is True and len(_['chamadas'])==2
@@ -252,12 +252,12 @@ def test_imagem_xml_painel_retencao_e_lgpd(tmp_path,monkeypatch):
         d=r.json();assert (d['estado'],d['tipo_documento'])==('pronto','nfe')
         await p.processar_duravel(T,d['conversation_id'])
         [anexo]=_['pacotes'][-1]['anexos']
-        assert anexo['campos']['chave_acesso']=={'valor':P.CHAVE,'confianca':'lido_do_texto'} and anexo['campos']['destinatario_documento']['valor']=='***.456.789-**'
+        assert anexo['campos']['chave_acesso']=={'valor':P.CHAVE,'confianca':'validado'}   # ARQ1-a3: DV conferido and anexo['campos']['destinatario_documento']['valor']=='***.456.789-**'
         assert anexo['campos']['valor_total']['valor']=='49.00' and anexo['tipo_documento']=='nfe'
         # Painel: lista, detalhe com todos os campos, texto, download do original, apagar (admin).
         base=f'/admin/v1/tenants/{T}/anexos'
         lista=(await c.get(base)).json()['itens'];assert {x['formato'] for x in lista}=={'jpg','xml'}
-        det=(await c.get(f'{base}/{d["anexo_id"]}')).json();assert det['conteudo']['campos']['destinatario_documento']['valor']=='12345678909'
+        det=(await c.get(f'{base}/{d["anexo_id"]}')).json();assert det['conteudo']['campos']['destinatario_documento']['valor']=='123.456.789-09'
         assert (await c.get(f'{base}/{d["anexo_id"]}/texto',params={'pagina':1})).json()['texto'].startswith('Chave de acesso')
         orig=await c.get(f'{base}/{d["anexo_id"]}/original')
         assert orig.content==P.NFE_XML.format(chave=P.CHAVE).encode() and orig.headers['content-disposition'].startswith('attachment') and orig.headers['x-content-type-options']=='nosniff'

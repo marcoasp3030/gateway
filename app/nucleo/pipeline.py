@@ -693,6 +693,13 @@ return 1
         import importlib
         from modulos import REGISTRO
         resultado=json.loads(turno['resposta']) if isinstance(turno['resposta'],str) else (turno['resposta'] or {})
+        # ARQ1-a3 (núcleo, decisão 32): com documentos ligados, a resposta não pode afirmar pagamento confirmado por comprovante.
+        try:
+            from nucleo import documentos
+            if turno['pagamento_afirmado']!='segurado' and (await documentos.capacidade(self.db,tenant,cfg['id']) or {}).get('ativo'):
+                if await documentos.GUARDA_PAGAMENTO['avaliar'](self.db,tenant,conversa,resultado,None): return documentos.GUARDA_PAGAMENTO
+        except Exception:
+            log.warning('Guarda de pagamento afirmado não conferida; a resposta segue')
         for nome in cfg.get('modulos') or ():
             if not REGISTRO[nome].ganchos: continue
             for guarda in getattr(importlib.import_module(REGISTRO[nome].ganchos),'GUARDAS_DA_RESPOSTA',()):

@@ -277,5 +277,5 @@ async def ler_documento(request:Request,anexo_id:str,conversation_id:str,pagina:
         return {**base,'estrutura':[{'pagina':p['pagina'],'origem':p['origem'],'caracteres':len(p['texto']),
                                      'tabelas':[{'id':f'tab_{p["pagina"]}_{n}','linhas':len(t['linhas']),'colunas':max((len(l) for l in t['linhas']),default=0),
                                                  'cabecalho':t['linhas'][0] if t['linhas'] else []} for n,t in enumerate(p['tabelas'],1)]} for p in paginas],
-                'campos':D.campos(lido),'avisos':[],'verificacao_pagamento':None}
+                'campos':D.campos(lido),'avisos':D.avisos(lido),'verificacao_pagamento':D.verificacao(lido)}
     except Erro as e: return _erro(e)

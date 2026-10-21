@@ -215,8 +215,17 @@ async def ler_no_leitor(http,formato,dados):
 
 
 def _tipo_documento(lido):
+    if lido.get('analise'): return lido['analise'].get('tipo_documento')
     nfe=lido.get('nfe') or {}
     return {'55':'nfe','65':'nfce'}.get(nfe.get('modelo')) if nfe else None
+
+
+def avisos(lido): return list(((lido or {}).get('analise') or {}).get('avisos') or [])
+
+
+def verificacao(lido):
+    """Comprovante lido nunca confirma pagamento: {"estado": "nao_verificado"} em comprovante; None nos demais."""
+    return ((lido or {}).get('analise') or {}).get('verificacao_pagamento')
 
 
 async def processar(state,anexo_id):
@@ -236,6 +245,10 @@ async def processar(state,anexo_id):
             if not r.get('ok'): estado,motivo='rejeitado',str(r.get('motivo') or 'falha_na_leitura')[:60]
             else:
                 lido={k:r[k] for k in ('formato','paginas','nfe') if k in r}
+                # ARQ1-a3: tipo e campos por regra (linha digitável, chave de acesso, E2E…), com a confiança de cada um.
+                from nucleo import documentos_regras
+                try: lido['analise']=documentos_regras.analisar(lido,a['criado_em'])
+                except Exception: log.warning('Análise por regra do documento falhou; segue só com o texto')
                 cap=await capacidade(db,a['tenant_id'],a['agente_id']) if a['agente_id'] else PADRAO
                 if len(lido['paginas'])>((cap or PADRAO)['max_paginas']): estado,motivo,lido='rejeitado','paginas_demais',None
                 elif any(p['tem_texto'] for p in lido['paginas']): estado='pronto'
@@ -303,14 +316,14 @@ def documento(a,lido,completo=True,limite=256*1024):
     """JSON do documento para quem enviou (modo extrair e consulta). Grande demais → só a estrutura, `parcial: true` (texto por página na consulta)."""
     base={'anexo_id':a['id'],'estado':a['estado'],'motivo':a['motivo'],'modo':a['modo'],'referencia':a['referencia'],'conversation_id':a['conversation_id'],
           'nome':a['nome'],'formato':a['formato'],'tamanho_bytes':a['tamanho_bytes'],'paginas':a['paginas'],'tipo_documento':a['tipo_documento'],
-          'recebido_em':a['criado_em'],'expira_em':a['expira_em'],'verificacao_pagamento':None}
+          'recebido_em':a['criado_em'],'expira_em':a['expira_em'],'verificacao_pagamento':verificacao(lido)}
     if not lido or not completo: return {**base,'conteudo':None}
     paginas=[{'pagina':p['pagina'],'origem':p['origem'],'texto':p['texto'],'tabelas':[{'id':f'tab_{p["pagina"]}_{n}','linhas':t['linhas']} for n,t in enumerate(p['tabelas'],1)]}
              for p in lido['paginas']]
-    conteudo={'paginas':paginas,'campos':campos(lido),'avisos':[]}
+    conteudo={'paginas':paginas,'campos':campos(lido),'avisos':avisos(lido)}
     if len(json.dumps(conteudo,ensure_ascii=False,default=str))>limite:
         conteudo={'paginas':[{'pagina':p['pagina'],'origem':p['origem'],'caracteres':len(p['texto']),'tabelas':len(p['tabelas'])} for p in paginas],
-                  'campos':conteudo['campos'],'avisos':[],'parcial':True}
+                  'campos':conteudo['campos'],'avisos':conteudo['avisos'],'parcial':True}
     return {**base,'conteudo':conteudo}
 
 
@@ -319,7 +332,8 @@ def _c(valor,confianca='lido_do_texto',fonte='xml'):
 
 
 def campos(lido):
-    """Campos por tipo (ARQ1-a1: só os do XML da NF-e, `lido_do_texto`; a validação por dígito verificador é do ARQ1-a3)."""
+    """Campos por tipo com a confiança (ARQ1-a3: análise por regra; leituras anteriores a ela: só os do XML, `lido_do_texto`)."""
+    if (lido or {}).get('analise'): return dict(lido['analise'].get('campos') or {})
     nfe=lido.get('nfe')
     if not nfe: return {}
     c={'chave_acesso':_c(nfe.get('chave')),'modelo':_c(nfe.get('modelo')),'serie':_c(nfe.get('serie')),'numero':_c(nfe.get('numero')),
@@ -334,7 +348,8 @@ def mascarar_cpf(campos_):
     saida={}
     for k,v in campos_.items():
         valor=v['valor']
-        if k.endswith('_documento') and isinstance(valor,str) and len(''.join(ch for ch in valor if ch.isdigit()))==11:
+        cpf=(k.endswith('_documento') or (k=='chave_pix' and v.get('tipo')=='cpf'))
+        if cpf and isinstance(valor,str) and len(''.join(ch for ch in valor if ch.isdigit()))==11:
             d=''.join(ch for ch in valor if ch.isdigit());valor=f'***.{d[3:6]}.{d[6:9]}-**'
         saida[k]={**v,'valor':valor}
     return saida
@@ -344,11 +359,13 @@ def para_o_pacote(a,lido,fuso):
     """Resumo compacto do anexo para o agente: nunca o texto inteiro. Campos só `validado` e `lido_do_texto`, com a marca."""
     texto=' '.join(' '.join(p['texto'].split()) for p in (lido or {}).get('paginas',[]) if p.get('texto'))
     todos=campos(lido or {})
-    bons={k:{'valor':v['valor'],'confianca':v['confianca']} for k,v in mascarar_cpf(todos).items() if v['confianca'] in ('validado','lido_do_texto')}
+    # Listas (itens da nota) não vão ao pacote: o agente lê pela Skill.
+    bons={k:{'valor':v['valor'],'confianca':v['confianca']} for k,v in mascarar_cpf(todos).items()
+          if v['confianca'] in ('validado','lido_do_texto') and not isinstance(v['valor'],list)}
     return {'anexo_id':a['id'],'estado':a['estado'],**({'motivo':a['motivo']} if a['motivo'] else {}),'nome':a['nome'],'formato':a['formato'],
             'paginas':a['paginas'],'origem':_origem(lido),'tipo_documento':a['tipo_documento'] or ('outro' if a['estado']=='pronto' else None),
             'recebido_em':a['criado_em'].astimezone(fuso).isoformat(timespec='seconds'),'campos':bons,'outros_campos_a_conferir':len(todos)-len(bons),
-            'tabelas':sum(len(p['tabelas']) for p in (lido or {}).get('paginas',[])),'avisos':[],'verificacao_pagamento':None,
+            'tabelas':sum(len(p['tabelas']) for p in (lido or {}).get('paginas',[])),'avisos':avisos(lido),'verificacao_pagamento':verificacao(lido),
             'trecho_inicial':texto[:300]+('…' if len(texto)>300 else '') if texto else None}
 
 
@@ -376,3 +393,30 @@ async def do_pacote(db,tenant,conversa,atendimento_id,fuso):
             if len(json.dumps(saida+[item],ensure_ascii=False,default=str))>MAX_BLOCO_PACOTE: break
         saida.append(item)
     return saida
+
+
+# ---------------- guarda: pagamento afirmado (ARQ1-a3, decisão 32) ----------------
+
+async def _pagamento_afirmado(db,tenant,conversa,resultado,desde):
+    """A resposta afirma pagamento confirmado/recebido, e o atendimento atual tem documento (comprovante nunca é verificado aqui)?"""
+    from nucleo import documentos_regras
+    if not documentos_regras.afirma_pagamento(resultado): return False
+    return bool(await db.fetchval("""SELECT EXISTS(SELECT 1 FROM anexos a JOIN conversas c ON c.tenant_id=a.tenant_id AND c.conversation_id=a.conversation_id
+        WHERE a.tenant_id=$1 AND a.conversation_id=$2 AND a.apagado_em IS NULL AND (c.atendimento_id IS NULL OR a.atendimento_id IS NOT DISTINCT FROM c.atendimento_id))""",tenant,conversa))
+
+
+def _resposta_segura(original):
+    from nucleo import documentos_regras
+    return {'resposta':[documentos_regras.TEXTO_AO_CLIENTE],'acao':'nenhuma','segurado':{k:original.get(k) for k in ('resposta','acao','desfecho','motivo')}}
+
+
+def _guarda():
+    from nucleo import documentos_regras
+    return {'coluna':'pagamento_afirmado','avaliar':_pagamento_afirmado,'recado':documentos_regras.AVISO_AO_AGENTE,'resposta_segura':_resposta_segura,
+            'auditoria':'documento.pagamento_afirmado_segurado','log':'Resposta afirmou pagamento confirmado por comprovante: segurada',
+            'alerta':('pagamento afirmado pelo agente','O agente disse que o pagamento foi confirmado a partir de um comprovante, o que o gateway não faz. '
+                      'O cliente recebeu: "a equipe vai conferir". Confira o pagamento.')}
+
+
+GUARDA_PAGAMENTO=_guarda()
+

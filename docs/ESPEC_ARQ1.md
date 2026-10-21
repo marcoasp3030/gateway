@@ -1,6 +1,6 @@
 # ARQ1 — Arquivos no núcleo dos agentes
 
-**Situação: proposta de 15/10/2026, revista em 21/10 (seção 13) e decidida em 21/10 (seção 14: canal de formulário por API, sem WhatsApp por enquanto; a seção 14 prevalece sobre as anteriores). ARQ1-a1 implementado (seção 14).** Entra na fila **depois do MULTI1-b**, sem ativar capacidade em modelos existentes. Arquivos são capacidade transversal do núcleo, não módulo de delivery. Delivery permanece desligado; o By Koji preserva pacote e comportamento anteriores.
+**Situação: proposta de 15/10/2026, revista em 21/10 (seção 13) e decidida em 21/10 (seção 14: canal de formulário por API, sem WhatsApp por enquanto; a seção 14 prevalece sobre as anteriores). ARQ1-a1 implementado (seção 14); ARQ1-a3 implementado (seção 15).** Entra na fila **depois do MULTI1-b**, sem ativar capacidade em modelos existentes. Arquivos são capacidade transversal do núcleo, não módulo de delivery. Delivery permanece desligado; o By Koji preserva pacote e comportamento anteriores.
 
 Todos os limites, nomes de campos e rotas abaixo são **propostos**, não contratos disponíveis. As decisões em aberto estão na seção 12, cada uma com recomendação.
 
@@ -676,4 +676,72 @@ Só com a capacidade ligada (o By Koji não muda; delivery desligado):
   - `leitor/tests/test_leitor.py` (5), na imagem do leitor, rodando antes da suíte principal pelo `scripts/test_suite.sh`.
 
 **Dependência do [PAINEL] (Caddy):** o proxy limita a 2 MiB o corpo em `/gateway/api/*` e espera a resposta por até 30 s. Enquanto isso valer, envio maior que 2 MiB pelo endereço público é recusado pelo proxy, antes do gateway. Pedido ao painel: em `/gateway/api/v1/documentos`, `max_size 11MiB`. Os 30 s bastam (`aguardar_s` vai até 20).
+
+---
+
+## 15. ARQ1-a3 implementado — campos por regra, confiança e guarda de pagamento (migração 049)
+
+### 15.1 Fontes oficiais conferidas (21/10/2026, antes de implementar)
+
+- **NT Conjunta 2025.001 (portal da NF-e, PDF oficial):** a chave de acesso continua com 44 posições e aceita letras nas 12 primeiras posições do CNPJ, pelo padrão `[0-9]{6}[A-Z0-9]{12}[0-9]{26}`.
+  - **DV:** "trocando todos os caracteres (44) que compõe a chave (números e letras) pelos números correspondentes da tabela ASCII subtraindo 48. Posteriormente à substituição, deverá ser aplicado o cálculo do Modulo 11". O cálculo é feito sobre os 43 caracteres antes do DV.
+  - **CNPJ:** `[A-Z0-9]{12}[0-9]{2}`, com o mesmo cálculo. Conferido com o exemplo oficial da Receita, `12.ABC.345/01DE-35`.
+  - **Letras vedadas:** I, O, U, Q e F ainda "precisam ser confirmadas" na própria NT, então **não são recusadas**.
+- **Pix:**
+  - **O que o oficial diz:** o Manual de Padrões para Iniciação do Pix **2.10.0** (BCB, PDF oficial) usa o EndToEndId, mas não define a regra de formação dele. Os identificadores irmãos do mesmo manual (`idRec`, `idSolicRec`) seguem o padrão `xxxxxxxx` = ISPB **alfanumérico `[0-9A-Z]{8}`** + data + sequencial de 11 alfanuméricos com diferença entre maiúsculas e minúsculas.
+  - **Regra adotada:** `E` + `[0-9A-Z]{8}` + `AAAAMMDDHHMM` (UTC, data válida, de out/2020 até o dia seguinte ao recebimento) + `[A-Za-z0-9]{11}`, com 32 caracteres. Vem dos PSPs e de versões anteriores do manual; o catálogo de mensagens do SPI, onde ela deve estar, não abriu no site do BCB.
+  - **O que o gateway confere:** **só o formato**, nunca o pagamento. Revisar quando o catálogo do SPI estiver disponível.
+- **Fator de vencimento:** reiniciado em 1000 a partir de 22/02/2025 (Febraban). Um fator vale duas datas; vale a mais próxima da data do documento (decisão 29).
+
+### 15.2 O que é lido e com que confiança
+
+| Tipo (`tipo_documento`) | `validado` | `lido_do_texto` | `a_conferir` |
+|---|---|---|---|
+| `boleto` | `linha_digitavel` (3 DVs mód. 10 + DV geral mód. 11), `codigo_barras`, `banco`, `valor`, `vencimento` (fator), `beneficiario_documento`/`pagador_documento` (DV do CPF/CNPJ; `pertence: lido_do_texto`), `pix_brcode_*` (CRC16) | `beneficiario_nome`, `pagador_nome` | — |
+| `boleto_concessionaria` | `linha_digitavel` (DVs mód. 10 ou 11 pelo 3º dígito), `codigo_barras`, `segmento`, `valor` (ou `valor_referencia`, quando o 3º dígito é 7 ou 9) | `vencimento` (não está no código), nomes | — |
+| `nfe` / `nfce` (DANFE) | `chave_acesso` (DV ASCII−48), `modelo`, `serie`, `numero`, `ano_mes_emissao`, `uf`, `emitente_cnpj` | `valor_total`, `itens` (tabela) | `itens` quando quantidade × unitário ≠ total |
+| `nfe` / `nfce` (XML, preferido) | `chave_acesso`, campos da chave, `emitente_documento`/`destinatario_documento` (DV) | `emissao`, nomes, `valor_total`, `protocolo`, `situacao` | chave com DV errado |
+| `nfse` | — | — | tudo (`numero`, `valor`, `emissao`, `prestador_documento`, `tomador_documento`) |
+| `comprovante_pix` | `id_transacao` (formato do E2E), `instituicao_pagador` (ISPB do E2E), `brcode_*` | `valor`, `data_hora`, `pagador_nome`, `recebedor_nome`, `chave_pix` (com `tipo`) | — |
+| `pix_cobranca` | `brcode_*` | — | — |
+| `outro` | — | — | — |
+
+**Avisos:**
+- `valor_impresso_difere_do_codigo` e `vencimento_impresso_difere_do_codigo` (vale o código, decisão 28);
+- `itens_nao_fecham`;
+- `chave_de_acesso_com_dv_invalido`;
+- `data_difere_do_id_da_transacao`;
+- `nfse_sem_padrao_nacional_conferido`.
+
+**Comprovante:**
+- **Sempre** `verificacao_pagamento: {"estado": "nao_verificado"}`.
+- Cada campo: `{"valor", "confianca", "fonte": "texto"|"xml"|"tabela", "pagina"?, "regra"?}`.
+- **Pacote do agente:** só `validado` e `lido_do_texto`, sem listas (itens pela Skill), CPF mascarado (inclusive a chave PIX do tipo CPF).
+
+Foto e PDF escaneado continuam `sem_texto` até o ARQ1-a2 (OCR e leitura de código de barras/QR). O mesmo analisador vale para o texto do OCR, com os campos sem DV marcados `a_conferir` (decisão 27).
+
+### 15.3 Guarda de pagamento afirmado (decisão 32)
+
+Vale para agente com a capacidade de documentos ligada e documento no atendimento atual. Uma resposta que afirma pagamento confirmado, recebido ou aprovado é refeita **uma vez**, com o recado ao agente no `aviso_do_gateway`. São exemplos "pagamento confirmado", "recebemos seu Pix" e "já está pago".
+
+Se repetir, a resposta é trocada por "Recebi o seu comprovante. A equipe vai conferir o pagamento e te confirma por aqui." e vai um alerta à operação. Frase com negação ou futuro não conta ("vamos conferir", "assim que for confirmado", "ainda não"). Fica registrado em `turnos.pagamento_afirmado` (`refeito`/`segurado`).
+
+### 15.4 Medição de acerto
+
+- **Amostras reais:** em `/home/twadmin/backups/gateway/corpus-arq1/` (pasta 700, fora do git), com um `gabarito.json`.
+- **Script:** `scripts/medir_documentos.py`, rodado **na imagem do leitor e sem rede**; o comando está no cabeçalho do script.
+- **Saída:** acerto por tipo e por campo, separado por confiança, e a lista de campos `validado` errados, só com nomes de arquivo e de campo (meta: zero).
+- **Teste com corpus sintético:** 3 de 3 documentos, 100% e zero `validado` errado.
+
+### 15.5 Testes
+
+`tests/test_arq1a3.py` (16) cobre:
+- **DVs e CNPJ:** dígitos verificadores, incluindo o exemplo oficial do CNPJ alfanumérico.
+- **Boleto:** as duas bases do fator e o valor livre.
+- **Concessionária:** módulos 10 e 11, nas quatro variantes do 3º dígito.
+- **Pix:** E2E (formato, data, ISPB com letras), BR Code e tipos de chave.
+- **Análises:** boleto com divergência e BR Code; concessionária; DANFE com CNPJ alfanumérico e itens que não fecham; NFS-e; XML; comprovante.
+- **Guarda:** frases que afirmam pagamento, e o ponta a ponta com a guarda refazendo e segurando.
+
+Geradores sintéticos em `tests/documentos_sinteticos.py`, sem dado real.
 

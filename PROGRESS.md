@@ -1335,3 +1335,14 @@ PY
 - **Leitura:** o documento fica cifrado (AES-GCM, chave mestra no `.env`), com retenção de 30 dias e apagamento por LGPD. O leitor é um contêiner isolado (`gateway-leitor`, sem rede para fora e sem credenciais) e lê PDF digital e XML da NF-e.
 - Testes em `tests/test_arq1a.py` (7) e `leitor/tests` (5). A capacidade está desligada em todos os modelos, então o By Koji não muda.
 - Pendente no painel (Caddy): aceitar até 11 MiB em `/gateway/api/v1/documentos` (hoje 2 MiB).
+
+## ARQ1-a3 — campos por regra, confiança e guarda de pagamento — 2026-10-21
+
+- Fontes oficiais conferidas antes de implementar (seção 15.1 de `docs/ESPEC_ARQ1.md`):
+  - NT 2025.001 confirmada, incluindo o exemplo oficial do CNPJ alfanumérico;
+  - formato do E2E adotado como o dos PSPs: o manual oficial 2.10.0 não traz a regra, e o gateway confere só o formato.
+- **Tipos lidos:** boleto (DVs, fator nas duas bases, partes), concessionária (módulos 10 e 11), NF-e/NFC-e (chave com CNPJ alfanumérico, DANFE, itens, XML), NFS-e (tudo `a_conferir`), comprovante PIX (E2E, nunca pagamento confirmado) e BR Code (CRC16).
+- **Guarda:** a resposta que afirma pagamento confirmado é refeita e, se repetir, segurada (migração 049).
+- **Medição:** `scripts/medir_documentos.py`, que roda na imagem do leitor e sem rede; o corpus fica em `backups/gateway/corpus-arq1/`.
+- Testes em `tests/test_arq1a3.py` (16).
+- Teste do Marco: na empresa `bench_passo5`, o agente "Teste Documentos" (`ag_92b3853d724f146f03ecfdb9`, modelo `teste_documentos` v1 com documentos ligados) e o canal api `can_ddefc934b2a21dcca872234c`. O agente está em mock/dry e com o piloto ligado.

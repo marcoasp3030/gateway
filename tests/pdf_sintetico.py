@@ -55,4 +55,4 @@ NFE_XML = '''<?xml version="1.0" encoding="UTF-8"?>
 <det nItem="2"><prod><cProd>B2</cProd><xProd>Caderno</xProd><qCom>2.0000</qCom><uCom>UN</uCom><vUnCom>12.00</vUnCom><vProd>24.00</vProd></prod></det>
 <total><ICMSTot><vProd>49.00</vProd><vNF>49.00</vNF></ICMSTot></total></infNFe></NFe>
 <protNFe><infProt><nProt>135260000000001</nProt><cStat>100</cStat><xMotivo>Autorizado o uso da NF-e</xMotivo></infProt></protNFe></nfeProc>'''
-CHAVE='35261011222333000181550010000012341000012345'
+CHAVE='35261011222333000181550010000012341000123453'
