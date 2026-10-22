@@ -96,12 +96,35 @@ def _item(a):
                              'referencia','criado_em','processado_em','expira_em','apagado_em')}
 
 
+# Filtro por tipo: os do painel e os dois que o leitor também reconhece. "outro" = sem tipo reconhecido.
+TIPOS_DO_FILTRO=('boleto','nfe','nfce','nfse','comprovante_pix','outro','boleto_concessionaria','pix_cobranca')
+FUSO_DO_FILTRO='America/Sao_Paulo'
+
+
+def _data(valor):
+    from datetime import date
+    if valor is None: return None
+    try: return date.fromisoformat(valor) if len(valor)==10 else None
+    except ValueError: return None
+
+
 @router.get('/tenants/{tenant}/anexos')
-async def anexos(request:Request,tenant:str,conversation_id:str|None=None,agente_id:str|None=None,estado:str|None=None,limite:int=50,cursor:str|None=None):
+async def anexos(request:Request,tenant:str,conversation_id:str|None=None,agente_id:str|None=None,estado:str|None=None,limite:int=50,cursor:str|None=None,
+                 tipo_documento:str|None=None,de:str|None=None,ate:str|None=None):
+    """Filtros combináveis entre si e com o cursor. `de`/`ate`: datas AAAA-MM-DD em America/Sao_Paulo, inclusivas, sobre o recebimento."""
     db=request.app.state.db;await _empresa(db,tenant)
     if not 1<=limite<=100: return _erro(400,'limite')
+    if tipo_documento is not None and tipo_documento not in TIPOS_DO_FILTRO: return _erro(400,'tipo_documento')
+    d_de,d_ate=_data(de),_data(ate)
+    if de is not None and d_de is None: return _erro(400,'de')
+    if ate is not None and d_ate is None: return _erro(400,'ate')
+    if d_de and d_ate and d_de>d_ate: return _erro(400,'de')
     rows=await db.fetch("""SELECT * FROM anexos WHERE tenant_id=$1 AND ($2::text IS NULL OR conversation_id=$2) AND ($3::text IS NULL OR agente_id=$3)
-        AND ($4::text IS NULL OR estado=$4) AND ($5::text IS NULL OR id<$5) ORDER BY id DESC LIMIT $6""",tenant,conversation_id,agente_id,estado,cursor,limite+1)
+        AND ($4::text IS NULL OR estado=$4) AND ($5::text IS NULL OR id<$5)
+        AND ($7::text IS NULL OR CASE WHEN $7='outro' THEN coalesce(tipo_documento,'outro')='outro' ELSE tipo_documento=$7 END)
+        AND ($8::date IS NULL OR criado_em>=($8::date::timestamp AT TIME ZONE $10))
+        AND ($9::date IS NULL OR criado_em<(($9::date+1)::timestamp AT TIME ZONE $10))
+        ORDER BY id DESC LIMIT $6""",tenant,conversation_id,agente_id,estado,cursor,limite+1,tipo_documento,d_de,d_ate,FUSO_DO_FILTRO)
     return {'itens':[_item(a) for a in rows[:limite]],'proximo_cursor':rows[limite-1]['id'] if len(rows)>limite else None}
 
 

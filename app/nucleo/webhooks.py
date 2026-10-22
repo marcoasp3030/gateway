@@ -1,5 +1,6 @@
 """Outbox assinada; três tentativas, sem redirects e sem registrar respostas."""
 import asyncio,hashlib,hmac,json,time
+from datetime import datetime,timezone
 from seguranca import validar_url_saida
 from nucleo.banco import escopo
 
@@ -7,6 +8,15 @@ async def emitir(db,tenant,evento,dados):
     escopo(tenant)
     corpo=json.dumps({'evento':evento,'tenant_id':tenant,'dados':dados},ensure_ascii=False,separators=(',',':'))
     await db.execute("INSERT INTO webhook_entregas(tenant_id,webhook_id,evento,corpo) SELECT tenant_id,id,$2,$3 FROM tenant_webhooks_saida WHERE tenant_id=$1 AND ativo AND $2=ANY(eventos)",tenant,evento,corpo)
+
+def assinaturas(cofre,tenant,w,ts,corpo):
+    """Valor de X-Gateway-Signature: "sha256=<hex>" com o segredo atual; durante as 24 h depois de uma rotação, também com o
+    anterior, separadas por vírgula e o novo primeiro ("sha256=<novo>,sha256=<anterior>"). HMAC-SHA256 de "<timestamp>.<corpo>"."""
+    segredos=[cofre.abrir(tenant,w['segredo_enc'])]
+    if w.get('segredo_anterior_enc') and w.get('segredo_anterior_ate') and w['segredo_anterior_ate']>datetime.now(timezone.utc):
+        segredos.append(cofre.abrir(tenant,w['segredo_anterior_enc']))
+    return ','.join('sha256='+hmac.new(s.encode(),ts.encode()+b'.'+corpo,hashlib.sha256).hexdigest() for s in segredos)
+
 
 async def despachar(db,http,cofre):
     # Enumera identidades; cada entrega é relida e travada com seu tenant explícito.
@@ -21,12 +31,11 @@ async def despachar(db,http,cofre):
                 await c.execute("UPDATE webhook_entregas SET status='cancelada' WHERE tenant_id=$1 AND id=$2",t,e['id']);continue
             codigo=None;ok=False
             try:
-                segredo=cofre.abrir(t,w['segredo_enc'])
                 corpo=e['corpo'].encode();ts=str(int(time.time()))
-                sig=hmac.new(segredo.encode(),ts.encode()+b'.'+corpo,hashlib.sha256).hexdigest()
+                sig=assinaturas(cofre,t,w,ts,corpo)
                 async def enviar():
                     await validar_url_saida(w['url'])
-                    async with http.stream('POST',w['url'],content=corpo,headers={'Content-Type':'application/json','X-Gateway-Event':e['evento'],'X-Gateway-Timestamp':ts,'X-Gateway-Signature':'sha256='+sig,'X-Gateway-Delivery':str(e['id'])},follow_redirects=False,timeout=10) as response:
+                    async with http.stream('POST',w['url'],content=corpo,headers={'Content-Type':'application/json','X-Gateway-Event':e['evento'],'X-Gateway-Timestamp':ts,'X-Gateway-Signature':sig,'X-Gateway-Delivery':str(e['id'])},follow_redirects=False,timeout=10) as response:
                         return response.status_code
                 codigo=await asyncio.wait_for(enviar(),timeout=12);ok=200<=codigo<300
             except Exception:

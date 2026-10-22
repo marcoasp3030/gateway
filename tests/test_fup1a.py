@@ -322,9 +322,11 @@ def test_painel_lista_cancela_e_opt_out(tmp_path):
         r=await c.put(o,headers={'X-Role':'membro'});assert r.status_code==200 and r.json()['ativo'] and r.json()['origem']=='painel'
         await enviar('5511900000341','oi')
         assert (await c.get(o,headers=H)).json()['ativo'] is True
-        assert (await c.delete(o,headers={'X-Role':'membro'})).status_code==403
-        r=await c.delete(o,headers={'X-Role':'admin'});assert r.status_code==200 and r.json()['ativo'] is False and r.json()['removido_por']=='teste'
-        assert (await c.delete(o,headers=H)).status_code==404
+        motivo={'motivo':'cliente pediu para voltar'}
+        assert (await c.request('DELETE',o,json=motivo,headers={'X-Role':'membro'})).status_code==403
+        r=await c.request('DELETE',o,json=motivo,headers={'X-Role':'admin'})
+        assert r.status_code==200 and r.json()['ativo'] is False and r.json()['removido_por']=='teste' and r.json()['removido_motivo']=='cliente pediu para voltar'
+        assert (await c.request('DELETE',o,json=motivo,headers=H)).status_code==404
         assert (await c.get(f'/admin/v1/tenants/{T}/contatos/ct_inexistente/opt-out-follow-up',headers=H)).status_code==404
         acoes=[r['acao'] for r in await pool.fetch("SELECT acao FROM audit_log WHERE tenant_id=$1 AND acao LIKE 'follow_up.opt%' ORDER BY id",T)]
         assert acoes==['follow_up.opt_out','follow_up.opt_out_removido']

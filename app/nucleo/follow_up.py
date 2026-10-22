@@ -46,8 +46,13 @@ def _sem_acento(texto):
 
 
 def limpar_pergunta(texto,nomes=()):
-    """A pergunta da pendência sem dado pessoal, em até MAX_PERGUNTA caracteres: e-mail, CPF/CNPJ, CEP, telefone e qualquer
-    número longo, endereço (rua, avenida… com número) e o nome do cliente viram marcadores. Vazia → None."""
+    """A pergunta da pendência sem dado pessoal, em até MAX_PERGUNTA caracteres (limpar_texto)."""
+    return limpar_texto(texto,nomes,MAX_PERGUNTA)
+
+
+def limpar_texto(texto,nomes=(),maximo=MAX_PERGUNTA):
+    """Texto livre sem dado pessoal (limpeza da LGPD1), em até `maximo` caracteres: e-mail, CPF/CNPJ, CEP, telefone e qualquer
+    número longo, endereço (rua, avenida… com número) e o nome do cliente viram marcadores. Vazio → None."""
     if not isinstance(texto,str): return None
     texto=''.join(' ' if ord(c)<32 or ord(c)==127 else c for c in texto)
     texto=_EMAIL.sub('[email]',texto)
@@ -62,7 +67,7 @@ def limpar_pergunta(texto,nomes=()):
                 texto=re.sub(r'(?<!\w)'+re.escape(parte)+r'(?!\w)','[nome]',texto,flags=re.I)
     texto=' '.join(texto.split())
     if not texto: return None
-    return texto if len(texto)<=MAX_PERGUNTA else texto[:MAX_PERGUNTA-1].rstrip()+'…'
+    return texto if len(texto)<=maximo else texto[:maximo-1].rstrip()+'…'
 
 
 def do_retorno(valor,nomes=()):
@@ -186,20 +191,28 @@ async def registrar_opt_out(conn,tenant,contato_id,origem,actor):
     return novo
 
 
-async def remover_opt_out(conn,tenant,contato_id,actor):
-    """Reativa o follow-up do contato (só pelo painel, admin ou plataforma). Devolve True se havia opt-out."""
-    feito=bool(await conn.fetchval("""UPDATE follow_up_opt_out SET removido_em=now(),removido_por=$3
-        WHERE tenant_id=$1 AND contato_id=$2 AND removido_em IS NULL RETURNING true""",tenant,contato_id,actor[:100]))
-    if feito: await auditar(conn,tenant,actor,'follow_up.opt_out_removido',contato_id)
-    return feito
+MAX_MOTIVO=300
+
+
+async def remover_opt_out(conn,tenant,contato_id,actor,motivo):
+    """Reativa o follow-up do contato (só pelo painel, admin ou plataforma), com o motivo já limpo de dado pessoal (nomes do
+    contato inclusive). O motivo fica no registro e na auditoria, com quem reativou e quando. Devolve True se havia opt-out."""
+    nomes=await conn.fetchrow('SELECT nome,nome_cadastro,nome_informado,nome_perfil FROM contatos WHERE tenant_id=$1 AND id=$2',tenant,contato_id)
+    motivo=limpar_texto(motivo,[v for v in (nomes or {}).values() if v] if nomes else (),MAX_MOTIVO)
+    quando=await conn.fetchval("""UPDATE follow_up_opt_out SET removido_em=now(),removido_por=$3,removido_motivo=$4
+        WHERE tenant_id=$1 AND contato_id=$2 AND removido_em IS NULL RETURNING removido_em""",tenant,contato_id,actor[:100],motivo)
+    if quando is None: return False
+    await auditar(conn,tenant,actor,'follow_up.opt_out_removido',contato_id,{'motivo':motivo,'em':quando.isoformat(timespec='seconds')})
+    return True
 
 
 async def opt_out_do_painel(conn,tenant,contato_id):
-    r=await conn.fetchrow('SELECT origem,actor,criado_em,removido_em,removido_por FROM follow_up_opt_out WHERE tenant_id=$1 AND contato_id=$2',
+    r=await conn.fetchrow('SELECT origem,actor,criado_em,removido_em,removido_por,removido_motivo FROM follow_up_opt_out WHERE tenant_id=$1 AND contato_id=$2',
                           tenant,contato_id)
     ativo=bool(r) and r['removido_em'] is None
     return {'ativo':ativo,'origem':r['origem'] if r else None,'criado_em':r['criado_em'] if r else None,'actor':r['actor'] if r else None,
-            'removido_em':r['removido_em'] if r else None,'removido_por':r['removido_por'] if r else None}
+            'removido_em':r['removido_em'] if r else None,'removido_por':r['removido_por'] if r else None,
+            'removido_motivo':r['removido_motivo'] if r else None}
 
 
 def ligado(cfg):

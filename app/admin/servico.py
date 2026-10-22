@@ -66,14 +66,14 @@ def fallback_valido(texto):
     return texto
 
 
-async def auditar(conn, tenant, actor, acao, alvo):
+async def auditar(conn, tenant, actor, acao, alvo, dados=None):
     # Serializa a alocação de IDs por tenant até o commit: polling não pula
     # um evento de transação concorrente que confirmar depois. Chamador usa transação.
     if not conn.is_in_transaction(): raise RuntimeError("Auditoria exige transação")
     await conn.execute('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', 'auditoria:'+(tenant or 'plataforma'))
-    # Auditoria só com identificadores/ação; nunca corpo ou segredos.
+    # Auditoria só com identificadores/ação; nunca corpo ou segredos. `dados`: só o que já vem limpo de dado pessoal (ex.: motivo).
     await conn.execute('INSERT INTO audit_log(tenant_id,actor,acao,alvo,dados) VALUES ($1,$2,$3,$4,$5::jsonb)',
-        tenant,actor,acao,alvo,'{}')
+        tenant,actor,acao,alvo,json.dumps(dados or {},ensure_ascii=False))
 
 
 async def versao_por_alteracao_direta(conn,tenant_id,agente_id,actor,antes,depois):

@@ -1376,3 +1376,11 @@ PY
 - **Contrato e texto da instrução do prompt:** seção 10 da especificação.
 - **Testes:** `tests/test_fup1a.py` (9).
 - **By Koji:** não muda enquanto ninguém ligar. Liga só depois do prompt v6.12.
+
+## Ajustes de rota ARQ1/FUP1 — 2026-10-22
+
+- **Reativar o follow-up do contato:** o `DELETE …/contatos/{id}/opt-out-follow-up` exige `{"motivo"}` (3 a 300 caracteres). O motivo é limpo de dado pessoal (limpeza da LGPD1, incluindo os nomes do contato) e gravado no opt-out (`removido_motivo`) e na auditoria, com quem reativou e quando.
+- **Lista de documentos:** `GET …/anexos` aceita `tipo_documento`, `de` e `ate` (datas em America/Sao_Paulo), combináveis com os filtros de antes e com o cursor.
+- **Webhook de saída:** `POST …/webhooks-saida/{id}/rotacionar-segredo` devolve o segredo novo uma vez só. Por 24 h, `X-Gateway-Signature` leva as duas assinaturas, a do novo primeiro (documentado em `docs/API_ADMIN.md`). Fica registrado na auditoria.
+- **Migração 051:** só colunas e um índice.
+- **Testes:** `tests/test_ajustes_rotas.py` (3).

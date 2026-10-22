@@ -8,20 +8,25 @@ from nucleo.autenticacao import painel
 from seguranca import validar_formato_url
 router=APIRouter(prefix='/admin/v1',dependencies=[Depends(painel)])
 
+# Segredo nunca sai daqui; só quando foi rotacionado e até quando o anterior ainda assina.
+CAMPOS="id,tenant_id,url,eventos,ativo,segredo_rotacionado_em,CASE WHEN segredo_anterior_ate>now() THEN segredo_anterior_ate END AS segredo_anterior_ate"
+# Durante este tempo depois da rotação, as entregas saem assinadas com o segredo novo e com o anterior.
+JANELA_ROTACAO_H=24
+
 class Saida(Estrito):
     url:str|None=None
     eventos:list[str]|None=None
     ativo:bool|None=None
 
 async def obter(db,t,w):
-    row=await db.fetchrow('SELECT id,tenant_id,url,eventos,ativo FROM tenant_webhooks_saida WHERE tenant_id=$1 AND id=$2',t,w)
+    row=await db.fetchrow(f'SELECT {CAMPOS} FROM tenant_webhooks_saida WHERE tenant_id=$1 AND id=$2',t,w)
     if not row: raise HTTPException(404,'NOT_FOUND')
     return dict(row)
 
 @router.get('/tenants/{tenant_id}/webhooks-saida')
 async def lista(request:Request,tenant_id:str):
     await empresa(request.app.state.db,tenant_id)
-    return {'itens':[dict(r) for r in await request.app.state.db.fetch('SELECT id,tenant_id,url,eventos,ativo FROM tenant_webhooks_saida WHERE tenant_id=$1 ORDER BY id',tenant_id)]}
+    return {'itens':[dict(r) for r in await request.app.state.db.fetch(f'SELECT {CAMPOS} FROM tenant_webhooks_saida WHERE tenant_id=$1 ORDER BY id',tenant_id)]}
 
 @router.get('/tenants/{tenant_id}/webhooks-saida/{wid}')
 async def detalhe(request:Request,tenant_id:str,wid:str): return await obter(request.app.state.db,tenant_id,wid)
@@ -68,3 +73,22 @@ async def entregas(request:Request,tenant_id:str,wid:str):
     await obter(request.app.state.db,tenant_id,wid)
     rows=await request.app.state.db.fetch('SELECT id,evento,tentativas,status,http_status,criado_em FROM webhook_entregas WHERE tenant_id=$1 AND webhook_id=$2 ORDER BY id DESC LIMIT 100',tenant_id,wid)
     return {'itens':[dict(r) for r in rows]}
+
+
+@router.post('/tenants/{tenant_id}/webhooks-saida/{wid}/rotacionar-segredo')
+async def rotacionar(request:Request,tenant_id:str,wid:str,actor=Depends(painel)):
+    """Gera um segredo novo e devolve UMA vez. O anterior continua assinando por 24 h (X-Gateway-Signature com as duas assinaturas,
+    a do novo primeiro), para o destino trocar sem perder aviso. Rotacionar de novo dentro das 24 h: o "anterior" passa a ser o que
+    estava em uso, e o mais antigo deixa de valer."""
+    cofre=request.app.state.cofre
+    async with request.app.state.db.acquire() as c,c.transaction():
+        await empresa(c,tenant_id)
+        w=await c.fetchrow('SELECT segredo_enc FROM tenant_webhooks_saida WHERE tenant_id=$1 AND id=$2 FOR UPDATE',tenant_id,wid)
+        if not w: raise HTTPException(404,'NOT_FOUND')
+        segredo=secrets.token_urlsafe(32)
+        ate=await c.fetchval("""UPDATE tenant_webhooks_saida SET segredo_anterior_enc=segredo_enc,segredo_enc=$3,
+            segredo_anterior_ate=now()+make_interval(hours=>$4),segredo_rotacionado_em=now() WHERE tenant_id=$1 AND id=$2 RETURNING segredo_anterior_ate""",
+            tenant_id,wid,cofre.cifrar(tenant_id,segredo),JANELA_ROTACAO_H)
+        await auditar(c,tenant_id,actor,'webhook.segredo_rotacionado',wid,{'anterior_valido_ate':ate.isoformat(timespec='seconds')})
+        result=await obter(c,tenant_id,wid)
+    return {**result,'segredo':segredo}
