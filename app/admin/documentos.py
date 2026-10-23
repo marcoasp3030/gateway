@@ -6,7 +6,7 @@ from datetime import datetime
 from fastapi import APIRouter,Depends,Request,HTTPException
 from fastapi.encoders import jsonable_encoder
 from starlette.responses import JSONResponse,Response
-from nucleo.autenticacao import painel,exigir_admin,hash_chave
+from nucleo.autenticacao import painel,exigir_admin,exigir_plataforma,hash_chave
 from nucleo.banco import Repositorio
 from nucleo import documentos as D
 from admin.servico import auditar
@@ -203,7 +203,39 @@ async def capacidades(request:Request,tenant:str,agente_id:str):
     db=request.app.state.db;await _empresa(db,tenant)
     cap=await D.capacidade(db,tenant,agente_id)
     if cap is None: return _erro(404,'agente_id')
-    return {'documentos':{**{k:cap[k] for k in D.PADRAO},'do_modelo':cap['do_modelo'],'do_agente':cap['do_agente'],'armazenamento':D.disponivel()}}
+    return {'documentos':{**{k:cap[k] for k in D.PADRAO},'do_modelo':cap['do_modelo'],'do_agente':cap['do_agente'],'da_empresa':cap['da_empresa'],
+                          'armazenamento':D.disponivel()}}
+
+
+# ---------------- interruptor da plataforma por empresa ----------------
+
+async def _da_empresa(db,tenant):
+    v=await db.fetchval('SELECT capacidades FROM tenants WHERE id=$1',tenant)
+    v=D._ler_json(v)
+    return {'documentos':{'ativo':(v.get('documentos') or {}).get('ativo',True)}}
+
+
+@router.get('/tenants/{tenant}/capacidades')
+async def capacidades_da_empresa(request:Request,tenant:str):
+    """O que a plataforma liberou para a empresa (padrão: tudo liberado). Os agentes ainda dependem do modelo e da restrição deles."""
+    db=request.app.state.db;await _empresa(db,tenant)
+    return await _da_empresa(db,tenant)
+
+
+@router.put('/tenants/{tenant}/capacidades/documentos',dependencies=[Depends(exigir_plataforma)])
+async def bloquear_documentos(request:Request,tenant:str,actor=Depends(painel)):
+    """Só a plataforma: {"ativo": false} bloqueia documentos em todos os agentes da empresa; {"ativo": true} libera de novo. Auditado."""
+    import json
+    db=request.app.state.db;await _empresa(db,tenant)
+    try: d=await request.json()
+    except ValueError: return _erro(400,'corpo')
+    if not isinstance(d,dict) or set(d)!={'ativo'} or type(d['ativo']) is not bool: return _erro(400,'ativo')
+    async with db.acquire() as conn,conn.transaction():
+        await conn.execute("""UPDATE tenants SET capacidades=jsonb_set(coalesce(capacidades,'{}'::jsonb),'{documentos}',$2::jsonb) WHERE id=$1""",
+                           tenant,json.dumps({'ativo':d['ativo']}))
+        await auditar(conn,tenant,actor,'capacidade.documentos.'+('liberada' if d['ativo'] else 'bloqueada'),tenant)
+    request.app.state.configuracoes.invalidar(tenant)
+    return await _da_empresa(db,tenant)
 
 
 @router.put('/tenants/{tenant}/agentes/{agente_id}/capacidades/documentos',dependencies=[Depends(exigir_admin)])

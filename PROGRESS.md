@@ -1390,3 +1390,9 @@ PY
 - **XML que não é NF-e/NFC-e:** é recusado com `xml_nao_e_nfe`. Antes vinha `tipo_nao_aceito` com `xml` na lista de aceitos. Nada entra na conversa e não há turno.
 - **Registro de Skill:** a chamada de uma empresa que pede conversa de outra fica registrada para a empresa da chave, mas sem o `conversation_id` alheio, que pode ter telefone. Conversa inexistente continua registrada.
 - **Testes:** em `tests/test_arq1a.py`.
+
+## Modelos para todas as empresas, interruptor de documentos e FERR1 (especificação) — 2026-10-23
+
+- **Modelo global `assistente_documentos` v1:** "Assistente de documentos", segmento `financeiro_administrativo`, com documentos ligado. Comportamento de partida neutro: envio de teste, mock e piloto. A referência do fluxo é a mesma do Teste Documentos. Foi criado pela API admin. O `teste_documentos` continua só da bench_passo5.
+- **Interruptor da plataforma por empresa:** `tenants.capacidades` (migração 052), com padrão liberado. Rotas `GET /admin/v1/tenants/{t}/capacidades` e `PUT …/capacidades/documentos`; esta é só da plataforma e auditada. Bloqueado, nenhum agente da empresa recebe documento.
+- **FERR1:** passe por turno para as Skills, especificado em `docs/ESPEC_FERR1.md`. Nada implementado.

@@ -322,3 +322,25 @@ def test_xml_que_nao_e_nfe_recusado_sem_turno_e_registro_de_skill_sem_conversa_a
         assert (await skill(d['anexo_id'],d['conversation_id'])).status_code==200
         assert await pool.fetchval("SELECT conversation_id FROM skill_registro WHERE tenant_id=$1 AND skill='ler_documento' ORDER BY id DESC LIMIT 1",T)==d['conversation_id']
     cenario(tmp_path,monkeypatch,corpo)
+
+
+def test_interruptor_da_plataforma_bloqueia_documentos_na_empresa(tmp_path,monkeypatch):
+    """Padrão liberado; só a plataforma bloqueia (auditado); bloqueado, nenhum agente da empresa recebe documento, mesmo com o modelo ligado."""
+    async def corpo(pool,c,enviar,**_):
+        PLAT={'X-Role':'plataforma'}
+        q=f'/admin/v1/tenants/{T}/capacidades'
+        assert (await c.get(q,headers=ADMIN)).json()=={'documentos':{'ativo':True}}
+        assert (await enviar()).status_code==200
+        for h in (ADMIN,{'X-Role':'membro'}):
+            assert (await c.put(q+'/documentos',json={'ativo':False},headers=h)).status_code==403
+        for corpo_ruim in ({},{'ativo':'nao'},{'ativo':False,'x':1},[False]):
+            assert (await c.put(q+'/documentos',json=corpo_ruim,headers=PLAT)).status_code==400
+        r=await c.put(q+'/documentos',json={'ativo':False},headers=PLAT);assert r.status_code==200 and r.json()=={'documentos':{'ativo':False}}
+        cap=(await c.get(f'/admin/v1/tenants/{T}/agentes/{A}/capacidades',headers=ADMIN)).json()['documentos']
+        assert cap['ativo'] is False and cap['do_modelo']=={'ativo':True} and cap['da_empresa']=={'ativo':False}
+        r=await enviar();assert (r.status_code,r.json()['erro']['detalhes']['motivo'])==(409,'capacidade_desligada')
+        assert (await c.put(q+'/documentos',json={'ativo':True},headers=PLAT)).json()=={'documentos':{'ativo':True}}
+        assert (await enviar()).status_code==200
+        acoes=[r['acao'] for r in await pool.fetch("SELECT acao FROM audit_log WHERE tenant_id=$1 AND acao LIKE 'capacidade.documentos.%' ORDER BY id",T)]
+        assert acoes==['capacidade.documentos.bloqueada','capacidade.documentos.liberada']
+    cenario(tmp_path,monkeypatch,corpo)

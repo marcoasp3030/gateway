@@ -68,19 +68,21 @@ def _ler_json(v):
 
 
 async def capacidade(db,tenant,agente_id):
-    """Capacidade efetiva de documentos do agente: a do modelo (versão em que o agente está), restringida pelo agente.
-    Devolve o dicionário completo (com `ativo`) e a origem de cada parte."""
-    row=await db.fetchrow("""SELECT a.capacidades AS do_agente,m.capacidades AS do_modelo FROM agentes a
+    """Capacidade efetiva de documentos do agente: a do modelo (versão em que o agente está), restringida pelo agente, e só se a
+    plataforma não bloqueou documentos na empresa (padrão: liberado). Devolve o dicionário completo (com `ativo`) e a origem de cada parte."""
+    row=await db.fetchrow("""SELECT a.capacidades AS do_agente,m.capacidades AS do_modelo,t.capacidades AS da_empresa FROM agentes a
+        JOIN tenants t ON t.id=a.tenant_id
         LEFT JOIN modelos_agente m ON m.id=a.modelo_id AND m.versao=a.modelo_versao WHERE a.tenant_id=$1 AND a.id=$2""",tenant,agente_id)
     if row is None: return None
     modelo=_ler_json(row['do_modelo']).get('documentos') or {}
     agente=_ler_json(row['do_agente']).get('documentos') or {}
+    empresa=_ler_json(row['da_empresa']).get('documentos') or {}
     efetiva={**PADRAO,**modelo}
-    efetiva['ativo']=bool(modelo.get('ativo')) and agente.get('ativo',True)
+    efetiva['ativo']=bool(modelo.get('ativo')) and agente.get('ativo',True) and empresa.get('ativo',True)
     if 'tipos' in agente: efetiva['tipos']=[t for t in efetiva['tipos'] if t in agente['tipos']]
     for campo in ('max_bytes','max_paginas','retencao_dias'):
         if campo in agente: efetiva[campo]=min(efetiva[campo],agente[campo])
-    return {**efetiva,'do_modelo':modelo,'do_agente':agente}
+    return {**efetiva,'do_modelo':modelo,'do_agente':agente,'da_empresa':{'ativo':empresa.get('ativo',True)}}
 
 
 # ---------------- formato e nome ----------------
