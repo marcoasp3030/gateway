@@ -66,6 +66,10 @@ class RegistroDeSkills:
         consulta=dict(parse_qsl(scope.get('query_string',b'').decode('latin-1'),keep_blank_values=True))
         dados=_json(corpo) if corpo else None;dados=dados if isinstance(dados,dict) else {}
         conversa=(scope.get('path_params') or {}).get('conversation_id') or consulta.get('conversation_id') or dados.get('conversation_id')
+        # Conversa de OUTRA empresa não é gravada: chave de uma empresa pedindo conversa de outra (recusada) não leva o identificador
+        # alheio (que pode conter telefone) para o registro dela. Conversa inexistente continua registrada (o agente errou o id).
+        if isinstance(conversa,str) and conversa and await scope['app'].state.db.fetchval(
+                'SELECT EXISTS(SELECT 1 FROM conversas WHERE conversation_id=$1 AND tenant_id<>$2)',conversa[:300],tenant): conversa=None
         campos=sorted({str(k)[:40] for k in list(consulta)+list(dados) if k!='conversation_id'})[:30]
         # Valores que não são dado de cliente, numa lista fechada por Skill (quem monta é a rota, em request.state.skill_ref).
         ref=scope['state'].get('skill_ref');ref={k:v for k,v in ref.items() if v is not None} if isinstance(ref,dict) else None

@@ -580,7 +580,7 @@ Fontes externas consultadas em 21/10: documentação da uazapi (`docs.uazapi.com
 
 | Status | Quando |
 |---|---|
-| 400 | Campo inválido: `arquivo` (`vazio`, `tipo_nao_aceito`, com `tipos`), `contato`, `modo`, `agente_id`, `aguardar_s`; `corpo`/`multipart_invalido`; `credencial`/`duas_credenciais` |
+| 400 | Campo inválido: `arquivo` (`vazio`, `tipo_nao_aceito`, com `tipos`; `xml_nao_e_nfe` quando é XML mas não de NF-e/NFC-e, desde 23/10/2026), `contato`, `modo`, `agente_id`, `aguardar_s`; `corpo`/`multipart_invalido`; `credencial`/`duas_credenciais` |
 | 401 | Sem credencial, chave inválida, revogada ou vencida |
 | 403 | Chave sem o escopo; chave da empresa no navegador; origem não permitida; agente diferente do da chave; modo não permitido |
 | 404 | Agente ou canal inexistente |

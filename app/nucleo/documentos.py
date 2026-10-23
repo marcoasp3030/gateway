@@ -97,6 +97,11 @@ def formato_real(dados):
     return None
 
 
+def parece_xml(dados):
+    """Começa como XML (fora a NF-e, que formato_real já reconhece): para recusar com `xml_nao_e_nfe` em vez de `tipo_nao_aceito`."""
+    return dados[:4096].lstrip(b'\xef\xbb\xbf \t\r\n')[:1]==b'<'
+
+
 def nome_seguro(nome,formato):
     """Nome para mostrar: sem caminho nem caractere de controle, até 120 caracteres, com a extensão do formato real."""
     base=os.path.basename(str(nome or '').replace('\\','/'))

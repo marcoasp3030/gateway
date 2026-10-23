@@ -294,3 +294,31 @@ def test_capacidade_no_modelo_e_pacote_desligado_intacto(tmp_path,monkeypatch):
         assert 'anexos' not in pacotes[-1] and 'documentos' not in pacotes[-1]['recursos']
         assert (await c.get(f'/admin/v1/tenants/{T}/agentes/{A}/capacidades')).json()['documentos']['ativo'] is False
     cenario(tmp_path,monkeypatch,corpo,ligar=True)
+
+
+def test_xml_que_nao_e_nfe_recusado_sem_turno_e_registro_de_skill_sem_conversa_alheia(tmp_path,monkeypatch):
+    """Teste real de 23/10: XML que não é NF-e é recusado com `xml_nao_e_nfe` (antes: `tipo_nao_aceito` com xml na lista), nada entra
+    na conversa; chave de outra empresa pedindo documento daqui fica registrada para ela SEM o identificador da conversa alheia."""
+    async def corpo(pool,c,enviar,skill,**_):
+        motivo=lambda r: r.json()['erro']['detalhes'].get('motivo')
+        antes=await pool.fetchval('SELECT count(*) FROM mensagens WHERE tenant_id=$1',T)
+        xml=b'<?xml version="1.0" encoding="UTF-8"?>\n<pedido><cliente>Ficticio</cliente><valor>10.00</valor></pedido>'
+        for modo in ('agente','extrair'):
+            r=await enviar(arquivo=xml,nome='pedido.xml',modo=modo,contato='5511900000391')
+            assert (r.status_code,motivo(r),r.json()['erro']['detalhes']['campo'])==(400,'xml_nao_e_nfe','arquivo'),r.text
+        r=await enviar(arquivo=b'\xef\xbb\xbf  <html><body>x</body></html>',nome='pagina.xml');assert motivo(r)=='xml_nao_e_nfe'
+        r=await enviar(arquivo=b'texto qualquer',nome='nota.xml');assert motivo(r)=='tipo_nao_aceito'
+        assert await pool.fetchval('SELECT count(*) FROM mensagens WHERE tenant_id=$1',T)==antes
+        assert await pool.fetchval("SELECT count(*) FROM anexos WHERE tenant_id=$1 AND nome IN ('pedido.xml','pagina.xml')",T)==0
+        # Documento de uma conversa daqui; chave válida de outra empresa, sem o escopo: 403, registrada na outra empresa sem a conversa.
+        d=(await enviar(modo='agente',contato='5511900000392')).json()
+        assert (await c.post('/admin/v1/tenants',json={'id':'outra_empresa','nome':'Outra'})).status_code==201
+        alheia=next(v for k,v in (await c.post('/admin/v1/tenants/outra_empresa/api-keys',json={'nome':'x','escopos':['ferramentas:catalogo']})).json().items() if k=='chave')
+        r=await c.get(f'/api/v1/documentos/{d["anexo_id"]}/conteudo',params={'conversation_id':d['conversation_id']},headers={'X-API-Key':alheia,'Authorization':''})
+        assert r.status_code==403
+        reg=await pool.fetchrow("SELECT conversation_id,status FROM skill_registro WHERE tenant_id='outra_empresa' AND skill='ler_documento'")
+        assert reg['status']==403 and reg['conversation_id'] is None
+        # A chave certa continua registrando a conversa (é da empresa).
+        assert (await skill(d['anexo_id'],d['conversation_id'])).status_code==200
+        assert await pool.fetchval("SELECT conversation_id FROM skill_registro WHERE tenant_id=$1 AND skill='ler_documento' ORDER BY id DESC LIMIT 1",T)==d['conversation_id']
+    cenario(tmp_path,monkeypatch,corpo)

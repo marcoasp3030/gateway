@@ -109,6 +109,8 @@ async def receber(state,tenant,agente_id,dados,nome,modo,origem,chave=None,conta
     if len(dados)>limite: raise Erro(413,'arquivo','tamanho',max_bytes=limite)
     formato=D.formato_real(dados)
     aceitos=[t for t in cap['tipos'] if not (chave and chave['tipos_aceitos']) or t in chave['tipos_aceitos']]
+    # XML que não é NF-e/NFC-e: só esses XML são aceitos, e a recusa diz isso (não "tipo não aceito" com xml na lista).
+    if formato is None and 'xml' in aceitos and D.parece_xml(dados): raise Erro(400,'arquivo','xml_nao_e_nfe',tipos=aceitos)
     if formato is None or formato not in aceitos: raise Erro(400,'arquivo','tipo_nao_aceito',tipos=aceitos)
     canal=None
     if modo=='agente':

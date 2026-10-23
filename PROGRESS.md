@@ -1384,3 +1384,9 @@ PY
 - **Webhook de saída:** `POST …/webhooks-saida/{id}/rotacionar-segredo` devolve o segredo novo uma vez só. Por 24 h, `X-Gateway-Signature` leva as duas assinaturas, a do novo primeiro (documentado em `docs/API_ADMIN.md`). Fica registrado na auditoria.
 - **Migração 051:** só colunas e um índice.
 - **Testes:** `tests/test_ajustes_rotas.py` (3).
+
+## Teste real do modo agente (Skyone) — correções do gateway — 2026-10-23
+
+- **XML que não é NF-e/NFC-e:** é recusado com `xml_nao_e_nfe`. Antes vinha `tipo_nao_aceito` com `xml` na lista de aceitos. Nada entra na conversa e não há turno.
+- **Registro de Skill:** a chamada de uma empresa que pede conversa de outra fica registrada para a empresa da chave, mas sem o `conversation_id` alheio, que pode ter telefone. Conversa inexistente continua registrada.
+- **Testes:** em `tests/test_arq1a.py`.
