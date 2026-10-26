@@ -100,7 +100,8 @@ class Agente(Comportamento):
     skyone_auth: str | None = None
     skyone_auth_usuario: str | None = None
     timeout_s: int | None = Field(None,gt=0,le=600)
-    instrucoes_agente: str | None = None
+    # Vão ao agente como instrução: até 4.000 caracteres e sem texto que pareça instrução de sistema (conferido em salvar).
+    instrucoes_agente: str | None = Field(None,max_length=4000)
     modo_resposta: Literal['sync'] | None = None
 
 

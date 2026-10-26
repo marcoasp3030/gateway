@@ -1404,3 +1404,10 @@ PY
 - **Dependências:** python-multipart 0.0.31 e cryptography 46.0.7. O pip foi atualizado para 26.2.2 nas imagens do gateway e do leitor.
 - **Contêineres:** `cap_drop: [ALL]` no gateway, worker, agendador e leitor. `.dockerignore` em `app/` e `leitor/`.
 - **DEP2:** fastapi/starlette e pdfplumber/pdfminer/Pillow, com o plano de medição, em `docs/ESPEC_DEP2.md`. Nada implementado.
+
+## Campos só da plataforma barrados no gateway; instruções do agente com limite — 2026-10-26
+
+- **Falha 2 da análise de comportamento:** na ficha do agente (`PATCH` e `POST` de agente) e no `PUT /config`, quem não é plataforma recebe 403 `so_plataforma`, com a lista `campos`, e o pedido todo é recusado (nada é aplicado). A tentativa fica na auditoria como `acesso.campo_so_plataforma`, com os campos e o papel, sem valores.
+  - Campos: envio, modo do agente, piloto e lista do piloto, telefone de alerta, limites, domínios do Skyone, provedor, fluxo e credencial do Skyone, tempo limite, `instrucoes_agente`, modo de resposta e modelo.
+- **Falha 8:** `instrucoes_agente` com no máximo 4.000 caracteres e a mesma análise que bloqueia instrução de sistema nas regras da casa (400 `texto_bloqueado`).
+- **Testes:** o cliente de teste passa a ser plataforma por padrão, e os testes de papel mandam o papel explícito. Testes novos em `tests/test_papel_campos.py`.

@@ -37,7 +37,8 @@ async def montar(conn,ligada,tmp_path,skyone_rpm=240,**fila_kw):
     infra=Infra('a'*32,'b'*32,'c'*32,Fernet.generate_key().decode())
     app=criar_app(infra,conn,r)
     c=httpx.AsyncClient(transport=httpx.ASGITransport(app=app,client=('127.0.0.1',1234)),base_url='http://teste')
-    c.headers.update({'Authorization':'Bearer '+infra.panel_key,'X-Actor':'teste'})
+    # Quem monta o cenário é a plataforma; os testes de papel passam X-Role explícito.
+    c.headers.update({'Authorization':'Bearer '+infra.panel_key,'X-Actor':'teste','X-Role':'plataforma'})
     pref='teste:'+uuid.uuid4().hex
     p=Pipeline(app.state.db,r,app.state.configuracoes,app.state.cofre,app.state.http,prefixo=pref,
                skyone_rpm=skyone_rpm,fila_duravel=ligada)

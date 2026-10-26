@@ -3,9 +3,26 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from nucleo.autenticacao import painel, contexto_da_chave
 from nucleo.banco import Repositorio, registro
 from .servico import ENTIDADES, limpar, auditar
+from starlette.responses import JSONResponse
 
 router = APIRouter(prefix='/admin/v1',dependencies=[Depends(painel)])
 api = APIRouter(prefix='/api/v1')
+
+
+async def barrar_so_plataforma(request,tenant_id,dados,campos,actor,alvo):
+    """Campos só da plataforma num corpo vindo de admin ou membro: o pedido inteiro é recusado (403, nada é aplicado) e a tentativa
+    fica na auditoria, com os campos e o papel. Devolve a resposta de recusa, ou None (segue)."""
+    from nucleo.autenticacao import papel
+    quem=papel(request)
+    if quem=='plataforma' or not isinstance(dados,dict): return None
+    achados=sorted(c for c in dados if c in campos)
+    if not achados: return None
+    if await Repositorio(request.app.state.db).tenant(tenant_id):
+        async with request.app.state.db.acquire() as conn,conn.transaction():
+            await auditar(conn,tenant_id,actor or 'painel','acesso.campo_so_plataforma',alvo,{'campos':achados,'papel':quem})
+    return JSONResponse({'erro':{'codigo':'FORBIDDEN','mensagem':'Estes campos só podem ser alterados pela plataforma.',
+                                 'detalhes':{'motivo':'so_plataforma','campos':achados}}},status_code=403,
+                        headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
 
 
 def pagina(itens,limite):
@@ -49,6 +66,9 @@ async def config(request:Request,tenant_id:str):
 
 @router.put('/tenants/{tenant_id}/config')
 async def salvar_config(request:Request,tenant_id:str,dados:dict,actor=Depends(painel)):
+    from nucleo.atendimento import SO_PLATAFORMA
+    recusa=await barrar_so_plataforma(request,tenant_id,dados,SO_PLATAFORMA,actor,'config')
+    if recusa: return recusa
     return await request.app.state.admin.salvar_config(tenant_id,dados,actor)
 
 
@@ -82,6 +102,12 @@ async def listar(request:Request,tenant_id:str,entidade:str,limite:int=50,cursor
 @router.post('/tenants/{tenant_id}/{entidade}',status_code=201)
 async def criar(request:Request,tenant_id:str,entidade:str,dados:dict,actor=Depends(painel)):
     if entidade not in ENTIDADES: raise HTTPException(404,'NOT_FOUND')
+    if entidade=='agentes':
+        # O agente novo nasce com o modelo escolhido; o resto do que é só da plataforma, não.
+        from nucleo.atendimento import SO_PLATAFORMA_AGENTE
+        campos=tuple(c for c in SO_PLATAFORMA_AGENTE if c not in ('modelo_id','modelo_versao'))
+        recusa=await barrar_so_plataforma(request,tenant_id,dados,campos,actor,'agente:novo')
+        if recusa: return recusa
     result=await request.app.state.admin.salvar(tenant_id,entidade,dados,actor)
     # MULTI1-a: canal uazapi criado com credenciais → o gateway cadastra o webhook na instância.
     if entidade=='canais' and result.get('tipo')=='uazapi' and isinstance(dados,dict) and dados.get('credenciais') and request.app.state.infra.registrar_webhook_uazapi:
@@ -109,8 +135,11 @@ async def alterar(request:Request,tenant_id:str,entidade:str,identidade:str,dado
     if entidade not in ENTIDADES: raise HTTPException(404,'NOT_FOUND')
     if entidade=='agentes' and isinstance(dados,dict):
         from nucleo.autenticacao import papel
-        # MULTI1-a: trocar o modelo do agente é da plataforma; ligar e desligar módulos no agente, de admin ou plataforma.
-        if any(k in dados for k in ('modelo_id','modelo_versao')) and papel(request)!='plataforma': raise HTTPException(403,'FORBIDDEN')
+        from nucleo.atendimento import SO_PLATAFORMA_AGENTE
+        # Envio, piloto, alerta, fluxo e credencial do Skyone, provedor, instruções, limites e modelo: só a plataforma (pedido todo recusado).
+        recusa=await barrar_so_plataforma(request,tenant_id,dados,SO_PLATAFORMA_AGENTE,actor,'agente:'+identidade)
+        if recusa: return recusa
+        # MULTI1-a: ligar e desligar módulos no agente, de admin ou plataforma.
         if 'modulos_ligados' in dados and papel(request) not in ('admin','plataforma'): raise HTTPException(403,'FORBIDDEN')
     result=await request.app.state.admin.salvar(tenant_id,entidade,dados,actor,identidade)
     # MULTI1-a: credenciais novas num canal uazapi → cadastra de novo o webhook (pode ser outra instância).

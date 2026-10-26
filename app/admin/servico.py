@@ -168,6 +168,11 @@ class Administracao:
     async def salvar(self,tenant_id,entidade,dados,actor,identidade=None):
         tabela,modelo,prefixo = ENTIDADES[entidade]
         dados = validar(modelo,dados)
+        if entidade=='agentes' and dados.get('instrucoes_agente'):
+            # A mesma análise que bloqueia instrução de sistema nas regras da casa (CFG1-a).
+            from nucleo.atendimento import analisar_texto
+            bloqueios,_ = analisar_texto('instrucoes_agente',dados['instrucoes_agente'])
+            if bloqueios: raise HTTPException(400,{'campo':'instrucoes_agente','motivo':'texto_bloqueado'})
         novo = identidade is None
         identidade = identidade or prefixo+secrets.token_hex(12)
         unico = {}

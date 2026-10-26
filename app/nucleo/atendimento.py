@@ -73,6 +73,10 @@ VARIAVEIS_DE_TEXTO={'fora_do_horario_mensagem':('proxima_abertura','nome_empresa
 # De operação e proteção: fora da versão, efeito imediato, só a plataforma muda (pelas rotas de sempre).
 SO_PLATAFORMA=('send_mode','agente_mode','modo_piloto','contatos_permitidos','max_lotes_simultaneos','max_concorrencia',
                'max_msgs_por_minuto_contato','skyone_dominios_permitidos','alerta_telefone')
+# Ficha do agente (PATCH/POST) e PUT /config: além dos de operação acima, o que liga o agente ao fluxo e o instrui é só da plataforma.
+SO_PLATAFORMA_AGENTE=SO_PLATAFORMA+('provedor','skyone_estrategia','skyone_webhook_url','skyone_auth_tipo','skyone_auth_cabecalho','skyone_auth',
+                                    'skyone_auth_usuario','timeout_s','instrucoes_agente','modo_resposta','modelo_id','modelo_versao')
+MAX_INSTRUCOES=4000
 ORIGENS={'plataforma':'plataforma','modelo':'segmento','tenant':'empresa','agente':'agente'}
 
 # Instrução de sistema escrita no lugar de regra da casa: bloqueia a publicação.

@@ -85,7 +85,7 @@ def test_rascunho_publicacao_versoes_restauracao_previa_e_papeis():
             AG=f'/admin/v1/tenants/alpha/agentes/{a}/atendimento'
             cfg=lambda: app.state.configuracoes.efetiva('alpha',a)
             # Estado inicial: nada publicado, tudo no padrão; o pacote já teria o perfil padrão.
-            g=(await client.get(E)).json()
+            g=(await client.get(E,headers={'X-Role':''})).json()   # sem papel válido = membro
             assert (g['escopo'],g['versao_publicada'],g['perfil_versao'],g['rascunho'],g['publicado'])==('empresa',0,'e0',None,{'perfil':{},'comportamentos':{}})
             # O modelo de teste não tem módulos nem motivos próprios: só os motivos do núcleo (MULTI1-a).
             PADRAO_ALPHA=A.bloco_do_pacote(A.resolver_perfil(nome_da_empresa=(await conn.fetchval("SELECT nome FROM tenants WHERE id='alpha'")),motivos=['pediu_humano','reclamacao'])[0])
@@ -99,7 +99,7 @@ def test_rascunho_publicacao_versoes_restauracao_previa_e_papeis():
             assert esq['comportamentos']['fora_do_horario_mensagem']['variaveis']==['proxima_abertura','nome_empresa','abre'] and esq['comportamentos']['transbordo_fora_do_horario']['variaveis']==['retorno_equipe','horario'] and g['pendencias']==[]
             assert esq['comportamentos']['send_mode']['tipo']=='so_plataforma' and (await client.get(E,headers={'X-Role':'plataforma'})).json()['esquema']['comportamentos']['send_mode']['editavel'] is False
             # Papéis: membro, sem cabeçalho ou papel desconhecido leem e veem a prévia, não salvam nem publicam nem restauram.
-            for cab in ({'X-Actor':'joana','X-Role':'membro'},{'X-Actor':'joana'},{'X-Actor':'joana','X-Role':'dono'}):
+            for cab in ({'X-Actor':'joana','X-Role':'membro'},{'X-Actor':'joana','X-Role':''},{'X-Actor':'joana','X-Role':'dono'}):
                 assert (await client.put(E+'/rascunho',json={'perfil':{'tom':'formal'}},headers=cab)).status_code==403
                 assert (await client.post(E+'/publicar',json={'baseado_em':0},headers=cab)).status_code==403 and (await client.delete(E+'/rascunho',headers=cab)).status_code==403
                 assert (await client.post(E+'/versoes/1/restaurar',headers=cab)).status_code==403 and (await client.post(E+'/previa',headers=cab)).status_code==200

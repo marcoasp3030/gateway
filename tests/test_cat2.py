@@ -40,7 +40,7 @@ def test_edicao_do_item_concorrencia_historico_e_carrinho_aberto(monkeypatch):
             assert (await client.get(f'/admin/v1/tenants/{T}/catalogo/itens/99999999')).status_code==404
 
             # Só admin e plataforma editam; membro só lê. Empresa conferida no gateway.
-            assert (await client.patch(url,json={'nome':'X'})).status_code==403 and (await patch({'nome':'X'},{'X-Role':'membro'})).status_code==403
+            assert (await client.patch(url,json={'nome':'X'},headers={'X-Role':''})).status_code==403 and (await patch({'nome':'X'},{'X-Role':'membro'})).status_code==403
             assert (await patch({'nome':'X'},u=f'/admin/v1/tenants/alpha/catalogo/itens/{edamame}')).status_code==404
             assert (await client.get(url)).json()['nome']=='Edamame'
             # Validações, com o campo no erro. Nada é gravado quando um campo não serve.

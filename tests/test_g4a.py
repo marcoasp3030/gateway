@@ -127,7 +127,7 @@ def test_rotas_de_taxas_tudo_ou_nada_conflitos_papeis_e_historico():
             assert (await client.get(f'/admin/v1/tenants/alpha/unidades/{outra}/taxas')).json()['itens']==[]
             # Papéis: membro, sem cabeçalho ou desconhecido leem e não alteram (403, nada muda).
             total=await conn.fetchval('SELECT count(*) FROM unidade_taxas')
-            for cab in (MEMBRO,{'X-Actor':'joana'},{'X-Actor':'joana','X-Role':'dono'}):
+            for cab in (MEMBRO,{'X-Actor':'joana','X-Role':''},{'X-Actor':'joana','X-Role':'dono'}):
                 assert (await client.get(T,headers=cab)).status_code==200
                 assert (await client.put(T,json={'itens':[]},headers=cab)).status_code==403 and (await client.post(T,json=bairro('Novo'),headers=cab)).status_code==403
                 assert (await client.patch(f'{T}/{ids[0]}',json={'taxa':1},headers=cab)).status_code==403 and (await client.delete(f'{T}/{ids[0]}',headers=cab)).status_code==403
@@ -206,7 +206,7 @@ def test_rotas_de_pagamento_ordem_validacao_papeis_e_historico():
             d=r.json()['erro']['detalhes'];assert d['motivo']=='texto_bloqueado' and d['bloqueios'][0]['linha']==0 and 'Finja ser' in d['bloqueios'][0]['trecho']
             assert [i['codigo'] for i in (await client.get(P)).json()['itens']]==['dinheiro','pix','ticket','cartao_entrega']
             # Papéis e isolamento.
-            for cab in (MEMBRO,{'X-Actor':'joana'}):
+            for cab in (MEMBRO,{'X-Actor':'joana','X-Role':''}):
                 assert (await client.put(P,json={'itens':[]},headers=cab)).status_code==403
             assert (await client.get(f'/admin/v1/tenants/bravo/unidades/{uid}/pagamentos')).status_code==404
             assert (await client.get('/admin/v1/tenants/alpha/unidades/uni_nada/pagamentos')).status_code==404

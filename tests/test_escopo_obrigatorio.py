@@ -13,7 +13,7 @@ PLAT={'X-Role':'plataforma'}
 ROTAS_DA_EMPRESA=[('GET',''),('GET','/agentes'),('PATCH','/agentes/{a}'),('GET','/canais'),('GET','/conversas'),('GET','/config'),
                   ('PUT','/config'),('GET','/auditoria'),('GET','/atendimento'),('GET','/modulos'),('GET','/contatos'),('POST','/api-keys'),
                   ('DELETE','/api-keys/x')]
-SEM_ESCOPO=[{'X-Role':'admin'},{'X-Role':'membro'},{},{'X-Role':'superadmin'},{'X-Role':'plataforma-x'}]
+SEM_ESCOPO=[{'X-Role':'admin'},{'X-Role':'membro'},{'X-Role':''},{'X-Role':'superadmin'},{'X-Role':'plataforma-x'}]
 
 
 async def _montar(conn,c,monkeypatch):

@@ -44,7 +44,7 @@ def test_textos_por_empresa_liga_desliga_previa_e_papel(monkeypatch):
             assert ('pronto_retirada','delivery') not in L and ('saiu_entrega','retirada') not in L
             assert [k for k,i in L.items() if not i['ativo']]==[('em_preparo','delivery'),('em_preparo','retirada'),('concluido','retirada')]
             # Papel: membro, sem cabeçalho ou papel desconhecido não altera (403); ler e ver a prévia pode.
-            for cab in ({'X-Actor':'joana','X-Role':'membro'},{'X-Actor':'joana'},{'X-Actor':'joana','X-Role':'dono'},{'X-Actor':'joana','X-Role':''}):
+            for cab in ({'X-Actor':'joana','X-Role':'membro'},{'X-Actor':'joana','X-Role':' '},{'X-Actor':'joana','X-Role':'dono'},{'X-Actor':'joana','X-Role':''}):
                 r=await client.put(f'{B}/avisos/confirmado',json={'ativo':False},headers=cab);assert r.status_code==403 and r.json()['erro']['codigo']=='FORBIDDEN',cab
             assert (await client.get(f'{B}/avisos',headers={'X-Role':'membro'})).status_code==200
             assert await conn.fetchval('SELECT count(*) FROM pedido_avisos_config')==0

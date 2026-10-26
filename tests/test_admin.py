@@ -24,7 +24,8 @@ def preparar(conn):
     infra=Infra('a'*32,'b'*32,'c'*32,Fernet.generate_key().decode())
     app=criar_app(infra,Pool(conn),Redis())
     client=httpx.AsyncClient(transport=httpx.ASGITransport(app=app,client=('127.0.0.1',1234)),base_url='http://teste')
-    client.headers.update({'Authorization':'Bearer '+infra.panel_key,'X-Actor':'teste'})
+    # Quem monta o cenário é a plataforma; os testes de papel passam X-Role explícito.
+    client.headers.update({'Authorization':'Bearer '+infra.panel_key,'X-Actor':'teste','X-Role':'plataforma'})
     return app,client
 
 
