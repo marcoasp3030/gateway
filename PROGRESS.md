@@ -1396,3 +1396,11 @@ PY
 - **Modelo global `assistente_documentos` v1:** "Assistente de documentos", segmento `financeiro_administrativo`, com documentos ligado. Comportamento de partida neutro: envio de teste, mock e piloto. A referência do fluxo é a mesma do Teste Documentos. Foi criado pela API admin. O `teste_documentos` continua só da bench_passo5.
 - **Interruptor da plataforma por empresa:** `tenants.capacidades` (migração 052), com padrão liberado. Rotas `GET /admin/v1/tenants/{t}/capacidades` e `PUT …/capacidades/documentos`; esta é só da plataforma e auditada. Bloqueado, nenhum agente da empresa recebe documento.
 - **FERR1:** passe por turno para as Skills, especificado em `docs/ESPEC_FERR1.md`. Nada implementado.
+
+## Segurança: dependências pequenas, endurecimento dos contêineres e DEP2 (especificação) — 2026-10-26
+
+- **Verificação de 26/10:** pip-audit nas imagens, usuários dos contêineres, SQL dinâmico, gitleaks no histórico, conteúdo das imagens.
+  - Os achados do gitleaks nas fixtures do uazapi são valores de exemplo (as fixtures já eram anonimizadas), então o histórico não foi reescrito.
+- **Dependências:** python-multipart 0.0.31 e cryptography 46.0.7. O pip foi atualizado para 26.2.2 nas imagens do gateway e do leitor.
+- **Contêineres:** `cap_drop: [ALL]` no gateway, worker, agendador e leitor. `.dockerignore` em `app/` e `leitor/`.
+- **DEP2:** fastapi/starlette e pdfplumber/pdfminer/Pillow, com o plano de medição, em `docs/ESPEC_DEP2.md`. Nada implementado.

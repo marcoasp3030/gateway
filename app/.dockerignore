@@ -1,0 +1,8 @@
+# Nada de segredo, histórico ou teste no contexto do build.
+.env
+.env.*
+.git
+__pycache__/
+*.pyc
+tests/
+.local/

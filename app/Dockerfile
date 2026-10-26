@@ -2,7 +2,8 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# pip atualizado na imagem final (advisories do pip 25.x; ele só é usado no build e na suíte).
+RUN pip install --no-cache-dir --upgrade pip==26.2.2 && pip install --no-cache-dir -r requirements.txt
 COPY . .
 # SEG09: processo sem privilégios de root
 RUN useradd --system --uid 10001 --no-create-home gateway && chown -R gateway /app \
