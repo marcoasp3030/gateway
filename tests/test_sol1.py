@@ -136,10 +136,13 @@ def test_notificar_equipe_nao_pausa_protecao_e_painel(tmp_path):
                 assert (await c.patch(f'/admin/v1/tenants/{T}',json={'whatsapp_alerta_transbordo':'5511900000060'})).status_code==200
                 cfg=await app.state.configuracoes.efetiva(T,AG);assert (cfg['notificar_equipe'],cfg['origem_config']['notificar_equipe'],cfg['transbordo_destino_externo'])==('off','plataforma',False)
 
-                # 0) Desligado (padrão): a ação nova é tratada como "nenhuma" (o balão sai, nada é gravado nem avisado) e a proteção não atua.
+                # 0) Desligado (padrão): notificar_equipe refaz o turno com aviso (guarda da ação, 26/10); repetindo, vira "nenhuma"
+                # (o balão sai, nada é gravado nem avisado) e a proteção não atua.
                 c0=await conversa('n0');await item(c0)
-                await rodar(c0,fala('Avisei a equipe.',acao='notificar_equipe',motivo='evento_ou_encomenda',solicitacao=EVENTO))
+                await rodar(c0,fala('Avisei a equipe.',acao='notificar_equipe',motivo='evento_ou_encomenda',solicitacao=EVENTO),
+                            fala('Avisei a equipe.',acao='notificar_equipe',motivo='evento_ou_encomenda',solicitacao=EVENTO))
                 assert [m['conteudo'] for m in await saidas(c0)]==['Avisei a equipe.'] and await sols(c0)==[] and await alertas()==[] and not (await estado(c0))['pausada']
+                assert await pool.fetchval('SELECT acao_fora_da_regra FROM turnos WHERE conversation_id=$1 ORDER BY id DESC LIMIT 1',c0)=='segurado'
                 await chegar(c0,'e o evento?');await rodar(c0,fala('Vou transferir.',acao='transferir_humano',motivo='evento_ou_encomenda'))
                 e=await estado(c0);assert e['pausada'] and e['aguardando_motivo']=='transferido_pelo_agente' and (await turno(c0))['acao_original'] is None and await sols(c0)==[]
 

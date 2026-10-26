@@ -31,6 +31,7 @@ RECUSAS={
  'item_nao_buscado':('item_id','Este item_id não veio de uma busca desta conversa. Chame buscar_catalogo e use o item_id devolvido.'),
  'item_indisponivel':('item_id','Este item não é servido no dia e horário do pedido. Diga ao cliente quando ele é servido (veja resumo) e ofereça outra opção ou outro horário.'),
  'horario_passado':('horario','O horário marcado já passou. Pergunte ao cliente outro horário e chame definir_entrega de novo.'),
+ 'unidade_fechada':('unidade','A unidade está fechada agora: o pedido não pode ser fechado para já. Ofereça agendar para a próxima abertura (veja proxima_abertura) ou para outro horário em que ela funcione.'),
  'horario_fora_funcionamento':('horario','A unidade não funciona nesse dia e horário. Ofereça um horário dentro do funcionamento (veja proxima_abertura).'),
  'horario_invalido':('horario','Não deu para entender o horário. Envie agendado_para (AAAA-MM-DDTHH:MM) ou um texto com a hora ("hoje às 19h", "19:30", "o quanto antes").'),
  'horario_muito_distante':('horario','O horário marcado está longe demais. O pedido pode ser agendado para até 7 dias à frente.'),
@@ -575,6 +576,13 @@ async def fechar(conn,tenant,conversa):
     subtotal=sum((l['preco_unitario']*l['quantidade'] for l in ls),Decimal('0'))
     if u and u['pedido_minimo'] is not None and subtotal<u['pedido_minimo']: raise Recusa('abaixo_do_minimo')
     agendado=await conferir_horario(conn,tenant,c,u)
+    # Análise de comportamento (26/10): pedido para já com a unidade fechada (horário, exceção ou pausa) não fecha, qualquer que seja o
+    # modo de fora do horário. Sem horário cadastrado não dá para afirmar que está fechada: segue (a unidade confirma).
+    if agendado is None and u:
+        from nucleo.horarios import situacao_da_unidade
+        s=await situacao_da_unidade(conn,tenant,u,await conn.fetchval('SELECT timezone FROM tenants WHERE id=$1',tenant),agendamento.agora_utc())
+        if s['aberta_agora'] is False:
+            raise Recusa('unidade_fechada',detalhes={'motivo_unidade':s['motivo'],'proxima_abertura':s.get('proxima_abertura'),'pausada_ate':s.get('pausada_ate')})
     # DISP1: confere de novo se cada item é servido no dia e horário do pedido.
     fora=await indisponiveis(conn,tenant,conversa,ls)
     if fora: raise Recusa('item_indisponivel',detalhes={'itens':fora,'resumo':fora[0]['resumo'],'motivo_indisponivel':fora[0]['motivo'],'data_referencia':fora[0]['data_referencia']})

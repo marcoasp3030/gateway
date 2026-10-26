@@ -1411,3 +1411,16 @@ PY
   - Campos: envio, modo do agente, piloto e lista do piloto, telefone de alerta, limites, domínios do Skyone, provedor, fluxo e credencial do Skyone, tempo limite, `instrucoes_agente`, modo de resposta e modelo.
 - **Falha 8:** `instrucoes_agente` com no máximo 4.000 caracteres e a mesma análise que bloqueia instrução de sistema nas regras da casa (400 `texto_bloqueado`).
 - **Testes:** o cliente de teste passa a ser plataforma por padrão, e os testes de papel mandam o papel explícito. Testes novos em `tests/test_papel_campos.py`.
+
+## Regras de comportamento garantidas pelo gateway — 2026-10-26
+
+- **Guarda da ação (falha 4):** a guarda age em dois casos:
+  - transferência com motivo fora da lista do perfil (sem motivo continua valendo);
+  - `notificar_equipe` com o recurso desligado.
+
+  O turno é refeito uma vez com `aviso_do_gateway`. Se o agente repetir, a ação vira transferir por `pediu_humano` (ou `nenhuma`), o texto é mantido, a operação é avisada e o turno fica com `turnos.acao_fora_da_regra`.
+- **Pedido para já com a unidade fechada (falha 5):** é recusado com `unidade_fechada` (horário, exceção ou pausa), em qualquer modo, com `proxima_abertura` nos detalhes. Pedido agendado continua com a conferência própria.
+- **Emojis "nenhum" (falha 7):** os emojis saem dos balões antes do envio, e a contagem fica em `turnos.emojis_removidos`. O texto original continua em `turnos.resposta`.
+- **Campos obsoletos (falha 3):** `aviso_demora` (texto), `media_wait_s` e `fora_do_horario_aceita_agendado` aparecem no esquema com `obsoleto: true` e `disponivel: false`. Continuam aceitos, para o painel antigo não quebrar, e são ignorados.
+- **Cache (falha 9):** publicar ou alterar a configuração avisa os workers e o agendador por Redis (pub/sub), e o valor novo vale na hora. Os 30 s continuam como reserva se o Redis falhar.
+- **Migração 053.** Testes em `tests/test_comportamento_regras.py`.

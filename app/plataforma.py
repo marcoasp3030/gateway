@@ -103,6 +103,9 @@ def criar_app(infra,db=None,redis=None):
     def preparar(app):
         app.state.cofre=Cofre(infra.encryption_key)
         app.state.configuracoes=Configuracoes(Repositorio(app.state.db))
+        # Publicar ou mudar configuração aqui limpa também o cache dos workers e do agendador (Redis), não só o deste processo.
+        from nucleo.configuracao import avisar_pelo_redis
+        app.state.configuracoes.aviso=avisar_pelo_redis(lambda: app.state.redis,lambda: app.state.pipeline.prefixo)
         app.state.admin=Administracao(app.state.db,app.state.cofre,app.state.configuracoes,infra)
         app.state.http=httpx.AsyncClient(follow_redirects=False)
         app.state.pipeline=Pipeline(app.state.db,app.state.redis,app.state.configuracoes,app.state.cofre,app.state.http,

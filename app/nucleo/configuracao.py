@@ -61,9 +61,19 @@ class Configuracoes:
         self._cache = {}
         self._geracao = 0
 
+    # Chamado depois de cada invalidação local (o app liga ao Redis: os workers e o agendador limpam o cache deles na hora).
+    aviso = None
+
     def invalidar(self, tenant_id=None):
+        self.invalidar_local(tenant_id)
+        if self.aviso:
+            try: self.aviso(tenant_id)
+            except Exception: pass
+
+    def invalidar_local(self, tenant_id=None):
         self._geracao += 1
         self._cache = {k:v for k,v in self._cache.items() if tenant_id is not None and k[0]!=tenant_id}
+
 
     async def efetiva(self, tenant_id, agente_id):
         if not tenant_id:
@@ -143,3 +153,35 @@ class Configuracoes:
         # Mesma ordem do agente: núcleo, módulos em uso, modelos.
         em_uso = [m for m in REGISTRO if m in modulos]
         return _em_ordem(list(MOTIVOS_NUCLEO)+[i for m in em_uso for i in REGISTRO[m].motivos_transferencia]+dos_modelos),em_uso
+
+
+CANAL_INVALIDACAO = ':config:invalidar'
+
+
+def avisar_pelo_redis(obter_redis, obter_prefixo):
+    """aviso → PUBLISH no canal de invalidação (empresa, ou "*" para todas). Sem Redis, vale a validade de 30 s de cada processo."""
+    import asyncio
+    def aviso(tenant_id):
+        redis = obter_redis()
+        if redis is None or not hasattr(redis, 'publish'): return
+        tarefa = asyncio.get_running_loop().create_task(redis.publish(obter_prefixo()+CANAL_INVALIDACAO, tenant_id or '*'))
+        tarefa.add_done_callback(lambda t: t.cancelled() or t.exception())
+    return aviso
+
+
+async def escutar_invalidacoes(redis, configuracoes, prefixo, log=None):
+    """Workers e agendador: limpam o próprio cache quando o gateway publica uma configuração. Cai e volta sozinho."""
+    import asyncio
+    while True:
+        try:
+            canal = redis.pubsub()
+            await canal.subscribe(prefixo+CANAL_INVALIDACAO)
+            async for m in canal.listen():
+                if m.get('type') == 'message':
+                    dado = m.get('data')
+                    configuracoes.invalidar_local(None if dado in ('*', b'*') else (dado.decode() if isinstance(dado, bytes) else dado))
+        except asyncio.CancelledError:
+            raise
+        except Exception as erro:
+            if log: log.warning('Escuta de invalidação de configuração caiu (%s); tenta de novo', type(erro).__name__)
+            await asyncio.sleep(5)

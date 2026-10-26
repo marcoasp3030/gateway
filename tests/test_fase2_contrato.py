@@ -154,7 +154,7 @@ def test_INV04_turno_grava_acao_motivo_e_desfecho(duravel):
             t,c,bot=await turno('u3',{'resposta':['Até logo!'],'acao':'encerrar','desfecho':'pedido_feito'})
             assert bot==['Até logo!'] and (t['acao'],t['desfecho'],t['status'])==('encerrar','pedido_feito','ok')
             # Transferir: envia o texto, pausa o bot e marca aguardando atendente; o motivo não é "silêncio".
-            t,c,bot=await turno('u4',{'resposta':['Vou chamar um atendente.'],'acao':'transferir_humano','motivo':'reclamação'})
+            t,c,bot=await turno('u4',{'resposta':['Vou chamar um atendente.'],'acao':'transferir_humano','motivo':'reclamacao'})
             assert bot==['Vou chamar um atendente.'] and (t['acao'],t['motivo_silencio'],t['status'])==('transferir_humano',None,'ok')
             assert c['aguardando_motivo']=='transferido_pelo_agente' and c['bot_pausado_ate'] is not None
             # INV04: silêncio sem motivo → reconsulta uma vez; na segunda o agente responde.

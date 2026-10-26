@@ -40,9 +40,9 @@ EMOJIS_DE_REACAO=('👍','❤️','🙏','😊','😂','👏','🎉','✅')
 COMPORTAMENTOS={
     'debounce_s':('ritmo','inteiro',1,15,None,True),'debounce_curto_s':('ritmo','decimal',0.5,15,None,True),
     'debounce_incompleta_s':('ritmo','decimal',1,15,None,True),'debounce_palavras':('ritmo','inteiro',1,50,None,True),
-    'max_wait_s':('ritmo','inteiro',1,30,None,True),'media_wait_s':('ritmo','inteiro',0,60,None,True),
+    'max_wait_s':('ritmo','inteiro',1,30,None,True),'media_wait_s':('ritmo','inteiro',0,60,None,False),
     'refazer_turno':('ritmo','escolha',None,None,['on','off'],True),'history_turns':('ritmo','inteiro',0,100,None,True),
-    'slow_notice_s':('mensagens','inteiro',0,300,None,True),'aviso_demora':('mensagens','texto',0,300,None,True),
+    'slow_notice_s':('mensagens','inteiro',0,300,None,True),'aviso_demora':('mensagens','texto',0,300,None,False),
     'aviso_demora_janela_s':('mensagens','inteiro',0,3600,None,True),
     'aviso_espera_modo':('mensagens','escolha',None,None,['off','presenca','presenca_e_texto_contextual'],True),
     'aviso_espera_textos':('mensagens','lista_textos',1,6,None,True),'fallback':('mensagens','texto',15,500,None,True),
@@ -64,6 +64,9 @@ COMPORTAMENTOS={
     'follow_up_fora_unidade':('follow_up','escolha',None,None,['cancelar','adiar_abertura'],True),
     'follow_up_limite_dia':('follow_up','inteiro',0,5,None,True),
 }
+# Obsoletos (26/10/2026): aceitos e guardados para não quebrar o painel antigo, mas o gateway não os usa. aviso_demora (texto): o AVS1
+# trocou por aviso_espera_textos; media_wait_s: nunca foi lido; fora_do_horario_aceita_agendado: nunca foi executado.
+OBSOLETOS=('aviso_demora','media_wait_s','fora_do_horario_aceita_agendado')
 # MULTI1-b: os comportamentos declarados pelos módulos (carrinho_expira_h, acoes_recentes_min…) entram aqui.
 from modulos import REGISTRO as _MODULOS
 for _m in _MODULOS.values():
@@ -221,6 +224,7 @@ def esquema(padroes,papel,motivos=None,ocultos=()):
         if maximo is not None: item['max']=maximo
         if opcoes: item['opcoes']=opcoes
         if campo in VARIAVEIS_DE_TEXTO: item['variaveis']=list(VARIAVEIS_DE_TEXTO[campo])
+        if campo in OBSOLETOS: item['obsoleto']=True
         comportamentos[campo]=item
     for campo in SO_PLATAFORMA:
         comportamentos[campo]={'grupo':'operacao','tipo':'so_plataforma','padrao':padroes.get(campo),'editavel':False,'disponivel':True}

@@ -47,8 +47,14 @@ async def principal(papel):
         laco = asyncio.get_running_loop()
         for sinal in (signal.SIGTERM, signal.SIGINT): laco.add_signal_handler(sinal, parar.set)
         log.info('%s iniciado; fila durável %s', papel, 'ligada' if infra.fila_duravel else 'desligada')
-        if papel == 'worker': await fila.worker(parar)
-        else: await fila.agendador(parar=parar)
+        # Configuração publicada no gateway vale aqui na hora (sem esperar os 30 s do cache).
+        from nucleo.configuracao import escutar_invalidacoes
+        escuta = asyncio.create_task(escutar_invalidacoes(redis, configuracoes, pipeline.prefixo, log))
+        try:
+            if papel == 'worker': await fila.worker(parar)
+            else: await fila.agendador(parar=parar)
+        finally:
+            escuta.cancel(); await asyncio.gather(escuta, return_exceptions=True)
         await pipeline.fechar()
     finally:
         await http.aclose(); await redis.aclose(); await db.close()

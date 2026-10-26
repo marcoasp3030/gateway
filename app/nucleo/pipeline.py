@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import random
+import re
 import time
 import uuid
 from datetime import datetime,timezone,timedelta
@@ -42,6 +43,20 @@ def campos_do_retorno(resultado):
 ESPERA_ANEXOS_S=20
 # INV14: tentativas de pegar a trava da conversa com o Redis falhando — espera crescente, ~10 s no total; depois a conversa volta à fila.
 ESPERAS_TRAVA=(0.25,0.5,1,2,3,3.25)
+
+
+# Emoji (pictogramas, símbolos, bandeiras, teclas "1️⃣"), com variação, tom de pele e junções (ZWJ) contados como um só.
+_E='\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\u231A\u231B\u23E9-\u23FA\u3030\u303D\u3297\u3299'
+EMOJI=re.compile('(?:[0-9#*]\uFE0F?\u20E3|[\U0001F1E6-\U0001F1FF]{2}|['+_E+'](?:\uFE0F|[\U0001F3FB-\U0001F3FF]|\u200D['+_E+'])*\uFE0F?)')
+
+
+def sem_emojis(texto):
+    """(texto sem emojis, quantos saíram). Só mexe nos espaços que a retirada deixou sobrando."""
+    novo,n=EMOJI.subn('',texto)
+    if not n: return texto,0
+    novo='\n'.join(' '.join(linha.split(' ')).replace('  ',' ').strip() if linha.strip() else '' for linha in novo.split('\n'))
+    while '  ' in novo: novo=novo.replace('  ',' ')
+    return novo.strip(),n
 
 
 def anexos_do_lote(itens):
@@ -729,6 +744,12 @@ return 1
                 if await documentos.GUARDA_PAGAMENTO['avaliar'](self.db,tenant,conversa,resultado,None): return documentos.GUARDA_PAGAMENTO
         except Exception:
             log.warning('Guarda de pagamento afirmado não conferida; a resposta segue')
+        # Motivo de transferência fora da lista do perfil, ou notificar_equipe com o recurso desligado (núcleo).
+        try:
+            from nucleo import guarda_acao
+            if turno['acao_fora_da_regra']!='segurado' and guarda_acao.fora_da_regra(cfg,resultado): return guarda_acao.guarda(cfg)
+        except Exception:
+            log.warning('Guarda da ação não conferida; a resposta segue')
         for nome in cfg.get('modulos') or ():
             if not REGISTRO[nome].ganchos: continue
             for guarda in getattr(importlib.import_module(REGISTRO[nome].ganchos),'GUARDAS_DA_RESPOSTA',()):
@@ -799,8 +820,8 @@ return 1
         original=json.loads(turno['resposta']) if isinstance(turno['resposta'],str) else (turno['resposta'] or {})
         nova=guarda['resposta_segura'](original)
         async with self.db.acquire() as conn,conn.transaction():
-            turno=await conn.fetchrow(f"""UPDATE turnos SET resposta=$3::jsonb,acao='nenhuma',desfecho=NULL,motivo_silencio=NULL,{guarda['coluna']}='segurado'
-                WHERE tenant_id=$1 AND id=$2 RETURNING *""",tenant,turno['id'],json.dumps(nova,ensure_ascii=False))
+            turno=await conn.fetchrow(f"""UPDATE turnos SET resposta=$3::jsonb,acao=$4,desfecho=NULL,motivo_silencio=NULL,{guarda['coluna']}='segurado'
+                WHERE tenant_id=$1 AND id=$2 RETURNING *""",tenant,turno['id'],json.dumps(nova,ensure_ascii=False),nova.get('acao') or 'nenhuma')
             await auditar(conn,tenant,'sistema',guarda['auditoria'],conversa)
         log.warning(guarda['log']+' (empresa %s, turno %s)',tenant,turno['id'])
         try:
@@ -1000,11 +1021,23 @@ return 1
         await self._reagir(tenant,conversa,cfg,turno,resultado)
         try:
             ultima=len(resultado['resposta'])
+            # Perfil com "emojis: nenhum": os emojis saem dos balões antes de enviar (o texto do agente fica intacto em turnos.resposta).
+            sem=((cfg.get('perfil_atendimento') or {}).get('emojis'))=='nenhum';removidos=0
             for i,texto in enumerate(resultado['resposta'],start=1):
+                botoes_da_parte=resultado.get('botoes') if i==ultima else None
+                if sem:
+                    limpo,n=sem_emojis(texto)
+                    if n and (limpo or not botoes_da_parte):
+                        removidos+=n;texto=limpo
+                        # Balão que era só emoji não sai.
+                        if not texto: continue
                 # Os botões pertencem ao último balão.
-                r=await self._enviar_parte(tenant,conversa,cfg,turno['request_id'],i,texto,resultado.get('botoes') if i==ultima else None)
+                r=await self._enviar_parte(tenant,conversa,cfg,turno['request_id'],i,texto,botoes_da_parte)
                 if r=='ignorada': status='ignorado';break
                 if r=='enviada': entregue=True
+            if removidos:
+                await self.db.execute('UPDATE turnos SET emojis_removidos=$3 WHERE tenant_id=$1 AND id=$2',tenant,turno['id'],removidos)
+                log.info('Emojis removidos dos balões (perfil sem emojis): %s',removidos)
             if resultado.get('acao')=='transferir_humano' and status!='ignorado':
                 # T1: fora do horário da equipe o cliente é avisado e o bot NÃO é pausado (segue atendendo); dentro, pausa como sempre.
                 if await self._equipe_ausente(tenant,conversa,cfg,turno): pass

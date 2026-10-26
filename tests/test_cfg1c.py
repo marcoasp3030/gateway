@@ -173,7 +173,8 @@ def test_H1a_fora_do_horario_atender_e_so_avisar(monkeypatch):
             c2,t=await turno('5511900000002',['alô?','tem alguém?']);assert len(pacotes)==n and len(enviados)==1 and json.loads(t['resposta'])['fora_do_horario']=='sem_resposta'
             assert await conn.fetchval("SELECT count(*) FROM mensagens WHERE conversation_id=$1 AND direcao='entrada' AND processada_em IS NULL",c2)==0
             # Com pedido ativo na conversa, o agente atende mesmo em "só avisar".
-            c3,numero=await pedido('5511900000003');c3,t=await turno('5511900000003','cadê meu pedido?',OK);assert len(pacotes)==n+1 and t['acao']=='nenhuma' and pacotes[-1]['fora_do_horario'] is True
+            # O pedido é feito com a unidade aberta (desde 26/10, pedido para já com a unidade fechada é recusado) e ela fecha de novo.
+            await abrir();c3,numero=await pedido('5511900000003');await fechar(2);c3,t=await turno('5511900000003','cadê meu pedido?',OK);assert len(pacotes)==n+1 and t['acao']=='nenhuma' and pacotes[-1]['fora_do_horario'] is True
             # Conversa com atendente (bot pausado): nada é enviado.
             c4=(await webhook('5511900000004','oi'))['conversation_id'];await conn.execute("UPDATE conversas SET bot_pausado_ate=now()+interval '1 hour' WHERE conversation_id=$1",c4)
             await p.processar_duravel(T,c4);assert len(enviados)==1 or all(e[0]!='5511900000004' for e in enviados)

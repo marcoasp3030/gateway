@@ -95,7 +95,7 @@ def test_rascunho_publicacao_versoes_restauracao_previa_e_papeis():
             esq=g['esquema'];assert esq['perfil']['tom']['opcoes']==['formal','equilibrado','descontraido'] and esq['perfil']['regras_da_casa']['max']==1500
             assert esq['comportamentos']['debounce_s']=={'grupo':'ritmo','tipo':'inteiro','padrao':4,'editavel':False,'disponivel':True,'min':1,'max':15}
             # Desde o CFG1-c, reações, fora do horário e transbordo estão disponíveis; só o pedido agendado continua "em breve". Os de operação não são editáveis aqui.
-            assert [c for c,i in esq['comportamentos'].items() if not i['disponivel']]==['fora_do_horario_aceita_agendado']
+            assert [c for c,i in esq['comportamentos'].items() if not i['disponivel']]==['media_wait_s','aviso_demora','fora_do_horario_aceita_agendado']
             assert esq['comportamentos']['fora_do_horario_mensagem']['variaveis']==['proxima_abertura','nome_empresa','abre'] and esq['comportamentos']['transbordo_fora_do_horario']['variaveis']==['retorno_equipe','horario'] and g['pendencias']==[]
             assert esq['comportamentos']['send_mode']['tipo']=='so_plataforma' and (await client.get(E,headers={'X-Role':'plataforma'})).json()['esquema']['comportamentos']['send_mode']['editavel'] is False
             # Papéis: membro, sem cabeçalho ou papel desconhecido leem e veem a prévia, não salvam nem publicam nem restauram.
