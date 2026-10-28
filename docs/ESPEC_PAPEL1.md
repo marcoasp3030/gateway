@@ -123,7 +123,7 @@ Coluna "hoje": a trava que o gateway aplica hoje. Coluna "proposta": o nível m�
 | `GET /tenants/{tenant_id}/atendimento/versoes/{versao}` | qualquer papel | **supervisor** | — |
 | `POST /tenants/{tenant_id}/atendimento/versoes/{versao}/restaurar` | admin | **gestor** | — |
 | `GET /tenants/{tenant_id}/auditoria` | qualquer papel | **gestor** | — |
-| `GET /tenants/{tenant_id}/avisos` | qualquer papel | **supervisor** | aviso → unidade (filtro) |
+| `GET /tenants/{tenant_id}/avisos` | qualquer papel | **funcionario** (decisão 4) | aviso → unidade (filtro) |
 | `GET /tenants/{tenant_id}/catalogo/categorias` | qualquer papel | **funcionario** | item.unidade (filtro) |
 | `POST /tenants/{tenant_id}/catalogo/categorias` | admin | **gestor** | — |
 | `PUT /tenants/{tenant_id}/catalogo/categorias/ordem` | admin | **gestor** | — |
@@ -165,7 +165,7 @@ Coluna "hoje": a trava que o gateway aplica hoje. Coluna "proposta": o nível m�
 | `DELETE /tenants/{tenant_id}/contatos/{cid}` | qualquer papel | **gestor** | — |
 | `PATCH /tenants/{tenant_id}/contatos/{cid}` | qualquer papel | **supervisor** | contato → conversas → unidade |
 | `GET /tenants/{tenant_id}/contatos/{cid}/exportar` | qualquer papel | **gestor** | — |
-| `GET /tenants/{tenant_id}/conversas/{conversa_id}/mensagens` | qualquer papel | **funcionario** | conversa → unidade (filtro) |
+| `GET /tenants/{tenant_id}/conversas/{conversa_id}/mensagens` | qualquer papel | **funcionario** (histórico: todos os papéis) | conversa → unidade (filtro); funcionário: apelido `cv_` e telefone mascarado |
 | `GET /tenants/{tenant_id}/gestao/alteracoes` | qualquer papel | **supervisor** | unidade (filtro, quando houver) |
 | `GET /tenants/{tenant_id}/metricas` | qualquer papel | **supervisor** | unidade (filtro, quando houver) |
 | `GET /tenants/{tenant_id}/modulos` | qualquer papel | **gestor** | — |
@@ -237,16 +237,16 @@ Coluna "hoje": a trava que o gateway aplica hoje. Coluna "proposta": o nível m�
 | `DELETE /tenants/{tenant}/contatos/{cid}/opt-out-follow-up` | admin | **gestor** | contato → conversas → unidade |
 | `GET /tenants/{tenant}/contatos/{cid}/opt-out-follow-up` | qualquer papel | **supervisor** | contato → conversas → unidade |
 | `PUT /tenants/{tenant}/contatos/{cid}/opt-out-follow-up` | qualquer papel | **supervisor** | contato → conversas → unidade |
-| `GET /tenants/{tenant}/conversas` | qualquer papel | **funcionario** | conversa → unidade (filtro) |
+| `GET /tenants/{tenant}/conversas` | qualquer papel | **funcionario** (histórico: todos os papéis) | conversa → unidade (filtro); funcionário: apelido `cv_` e telefone mascarado |
 | `POST /tenants/{tenant}/conversas/{conv}/assumir` | qualquer papel | **funcionario** | conversa → unidade |
-| `GET /tenants/{tenant}/conversas/{conv}/atendimentos` | qualquer papel | **funcionario** | conversa → unidade (filtro) |
+| `GET /tenants/{tenant}/conversas/{conv}/atendimentos` | qualquer papel | **funcionario** (histórico: todos os papéis) | conversa → unidade (filtro); funcionário: apelido `cv_` |
 | `POST /tenants/{tenant}/conversas/{conv}/devolver` | qualquer papel | **supervisor** | conversa → unidade |
 | `POST /tenants/{tenant}/conversas/{conv}/encerrar` | qualquer papel | **supervisor** | conversa → unidade |
-| `GET /tenants/{tenant}/conversas/{conv}/follow-ups` | qualquer papel | **funcionario** | conversa → unidade (filtro) |
+| `GET /tenants/{tenant}/conversas/{conv}/follow-ups` | qualquer papel | **funcionario** (histórico: todos os papéis) | conversa → unidade (filtro); funcionário: apelido `cv_` |
 | `POST /tenants/{tenant}/conversas/{conv}/follow-ups/cancelar` | qualquer papel | **supervisor** | conversa → unidade |
 | `POST /tenants/{tenant}/conversas/{conv}/mensagens` | qualquer papel | **funcionario** | conversa → unidade |
 | `POST /tenants/{tenant}/conversas/{conv}/reabrir` | qualquer papel | **supervisor** | conversa → unidade |
-| `GET /tenants/{tenant}/eventos` | qualquer papel | **funcionario** | evento → unidade (filtro) |
+| `GET /tenants/{tenant}/eventos` | qualquer papel | **funcionario** (histórico: todos os papéis) | evento → unidade (filtro); funcionário: apelido `cv_` e telefone mascarado |
 | `GET /tenants/{tenant}/eventos/cursor` | qualquer papel | **funcionario** | evento → unidade (filtro) |
 | `GET /tenants/{tenant}/fila` | qualquer papel | **supervisor** | — |
 
@@ -284,7 +284,7 @@ Coluna "hoje": a trava que o gateway aplica hoje. Coluna "proposta": o nível m�
 - **Painel:** precisa mandar a chave de plataforma só na sessão de plataforma, o `X-Role` com os nomes novos e o `X-Unidades` montado de `usuario_unidades`.
   - Na fase A do CHAVES1, e com o legado ligado, nada quebra se ele demorar.
 
-## 10. Decisões em aberto
+## 10. Decisões (aprovadas em 28/10/2026; a 8 é o ajuste do mesmo dia)
 
 | # | Decisão | Proposta |
 |---|---|---|
@@ -295,5 +295,6 @@ Coluna "hoje": a trava que o gateway aplica hoje. Coluna "proposta": o nível m�
 | 5 | Contatos (lista e ficha) | Supervisor ou acima, filtrado pelas unidades das conversas; exportar e anonimizar: gestor |
 | 6 | `conversation_id` com telefone para o funcionário | Apelido estável `cv_<hash>` (seção 5), aceito de volta nas rotas |
 | 7 | PAPEL1-a antes do LOTE1 | Sim |
+| 8 | Histórico de conversas (ajuste de 28/10) | Visível a todos os papéis de empresa (funcionário, supervisor, gestor), filtrado pelas unidades de cada um; para o funcionário, apelido `cv_` e telefone mascarado (PAPEL1-c). Rotas: lista de conversas, mensagens, atendimentos, follow-ups e eventos |
 
 **Ponto de parada:** só especificação.

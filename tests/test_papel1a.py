@@ -34,6 +34,10 @@ def test_toda_rota_admin_esta_na_tabela_e_toda_regra_tem_rota():
         sobrando=sorted(k for k in permissoes.PERMISSOES if k not in rotas)
         assert not sobrando,sobrando
         assert all(v in permissoes.NIVEIS for v in permissoes.PERMISSOES.values())
+        # Ajuste de 28/10: histórico de conversas para todos os papéis de empresa (o filtro por unidade é do PAPEL1-b).
+        for rota in ('/tenants/{tenant}/conversas','/tenants/{tenant_id}/conversas/{conversa_id}/mensagens','/tenants/{tenant}/conversas/{conv}/atendimentos',
+                     '/tenants/{tenant}/conversas/{conv}/follow-ups','/tenants/{tenant}/eventos','/tenants/{tenant}/eventos/cursor'):
+            assert permissoes.minimo('GET',rota)=='funcionario',rota
         # Rota fora da tabela: só a plataforma.
         assert permissoes.minimo('GET','/admin/v1/rota-nova')=='plataforma'
         assert permissoes.minimo('DELETE','/tenants/{tenant_id}/{entidade}/{item_id}',{'entidade':'agentes'})=='plataforma'
