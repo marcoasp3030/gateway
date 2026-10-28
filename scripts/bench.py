@@ -69,7 +69,7 @@ async def executar(c,alvos,clientes=5,timeout=90,ia_real=False,textos=None):
 async def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--url',default='http://127.0.0.1:8100')
-    p.add_argument('--panel-key',default=os.getenv('PANEL_SERVICE_KEY'))
+    p.add_argument('--panel-key',default=os.getenv('PANEL_PLATFORM_KEY') or os.getenv('PANEL_SERVICE_KEY'))
     p.add_argument('--tenant',action='append',required=True)
     p.add_argument('--agente',action='append',required=True)
     p.add_argument('--canal',action='append')
@@ -83,7 +83,7 @@ async def main():
     if not 1<=a.clientes<=100 or not 0<a.timeout<=600: p.error('Clientes 1–100; timeout até 600 s')
     alvos=list(zip(a.tenant,a.agente,a.canal or [None]*len(a.agente)))
     if len({(t,ag) for t,ag,can in alvos})!=len(alvos): p.error('Alvos duplicados')
-    async with httpx.AsyncClient(base_url=a.url.rstrip('/'),headers={'Authorization':'Bearer '+a.panel_key,'X-Actor':'benchmark'},timeout=30,follow_redirects=False) as c:
+    async with httpx.AsyncClient(base_url=a.url.rstrip('/'),headers={'Authorization':'Bearer '+a.panel_key,'X-Actor':'benchmark','X-Role':'plataforma'},timeout=30,follow_redirects=False) as c:
         try: result=await executar(c,alvos,a.clientes,a.timeout,a.ia_real,a.texto)
         except (ValueError,httpx.HTTPError,KeyError): raise SystemExit('Benchmark recusado/falhou; confira configuração e disponibilidade (segredos omitidos)') from None
     print(json.dumps(result,ensure_ascii=False,indent=2))

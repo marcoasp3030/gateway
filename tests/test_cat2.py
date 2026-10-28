@@ -165,7 +165,7 @@ def test_disponivel_agora_na_lista_categorias_e_previa(monkeypatch):
             r=await previa({'unidade':'patio_guedala','disponibilidade':ALMOCO});assert r.status_code==200
             assert r.json()=={'unidade':'patio_guedala','disponibilidade':{**ALMOCO,'resumo':RESUMO},'resumo':RESUMO,'disponivel_agora':False,'indisponivel_motivo':'feriado','data_referencia':'2026-10-12T12:00-03:00'}
             relogio[0]=datetime(2026,10,13,12,0,tzinfo=SP)
-            r=(await previa({'unidade':'patio_guedala','disponibilidade':{'dias_semana':['sab','dom']}},headers={'X-Role':'membro'})).json()
+            r=(await previa({'unidade':'patio_guedala','disponibilidade':{'dias_semana':['sab','dom']}},headers={'X-Role':'supervisor'})).json()
             assert (r['resumo'],r['disponivel_agora'],r['indisponivel_motivo'])==('sábado e domingo',False,'dia_da_semana')
             r=(await previa({'unidade':'patio_guedala','disponibilidade':None})).json();assert (r['disponibilidade'],r['resumo'],r['disponivel_agora'],r['indisponivel_motivo'])==(None,None,True,None)
             r=(await previa({'unidade':'patio_guedala','disponibilidade':{'horario':[['19:00','23:00']]}})).json();assert (r['resumo'],r['indisponivel_motivo'])==('19h–23h','horario')

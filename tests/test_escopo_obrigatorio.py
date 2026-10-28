@@ -39,11 +39,11 @@ def test_1_rota_de_empresa_sem_cabecalho_so_passa_como_plataforma(monkeypatch):
                 for metodo,rota in ROTAS_DA_EMPRESA:
                     r=await c.request(metodo,'/admin/v1/tenants/alpha'+rota.format(a=a),json={'nome':'x'},headers=h)
                     assert r.status_code==403,(h,metodo,rota,r.status_code)
-            # Nada foi gravado pelas chamadas recusadas.
-            assert await conn.fetchval('SELECT count(*) FROM audit_log')==antes
+            # Nada foi gravado pelas chamadas recusadas (só a recusa na auditoria, PAPEL1-a).
+            assert await conn.fetchval("SELECT count(*) FROM audit_log WHERE acao<>'acesso.negado'")==antes
             assert await conn.fetchval("SELECT nome FROM agentes WHERE tenant_id='alpha' AND id=$1",a)=='A'
             # Com o cabeçalho da própria empresa: normal. Outra empresa: 404.
-            for papel in ('admin','membro'):
+            for papel in ('admin','supervisor'):
                 assert (await c.get('/admin/v1/tenants/alpha/agentes',headers={'X-Role':papel,'X-Tenant-Scope':'alpha'})).status_code==200
                 assert (await c.get('/admin/v1/tenants/alpha/agentes',headers={'X-Role':papel,'X-Tenant-Scope':'bravo'})).status_code==404
             # Plataforma sem cabeçalho: vê e muda qualquer empresa.
@@ -90,12 +90,16 @@ def test_3_modelos_agente_e_tenants_com_sessao_de_empresa(monkeypatch):
                                     ('GET','/admin/v1/fila'),('GET','/admin/v1/auditoria/plataforma')]:
                     r=await c.request(metodo,rota,json={'id':'novo','nome':'x'},headers=h)
                     assert r.status_code==403,(papel,metodo,rota,r.status_code)
-                # Leituras com o cabeçalho: só a própria empresa e os modelos globais; nunca o modelo próprio de outra.
-                assert [t['id'] for t in (await c.get('/admin/v1/tenants',headers=h)).json()['itens']]==['alpha']
-                ids={m['id'] for m in (await c.get('/admin/v1/modelos-agente',headers=h)).json()['itens']}
-                assert 'privado_bravo' not in ids and ids
+                # PAPEL1-a: rotas globais só da plataforma, também as leituras. A empresa vê os modelos em modelos-disponiveis:
+                # os globais e os seus, nunca o modelo próprio de outra.
+                for rota in ('/admin/v1/tenants','/admin/v1/modelos-agente','/admin/v1/modelos-agente/delivery_restaurante'):
+                    assert (await c.get(rota,headers=h)).status_code==403,(papel,rota)
+                if papel=='admin':
+                    ids={m['id'] for m in (await c.get('/admin/v1/tenants/alpha/modelos-disponiveis',headers=h)).json()['itens']}
+                    assert 'privado_bravo' not in ids and ids
+                    assert 'privado_bravo' in {m['id'] for m in (await c.get('/admin/v1/tenants/bravo/modelos-disponiveis',headers=PLAT)).json()['itens']}
                 assert (await c.get('/admin/v1/modelos-agente?tenant=bravo',headers=h)).status_code==404
-                assert (await c.get('/admin/v1/modelos-agente/privado_bravo',headers=h)).status_code==404
+                assert (await c.get('/admin/v1/modelos-agente/privado_bravo',headers=h)).status_code==403
                 assert (await c.get('/admin/v1/modelos-agente/privado_bravo?tenant=bravo',headers=h)).status_code==404
             assert await conn.fetchval("SELECT count(*) FROM tenants WHERE id='novo'")==0
             assert await conn.fetchval("SELECT count(*) FROM modelos_agente WHERE id='novo'")==0

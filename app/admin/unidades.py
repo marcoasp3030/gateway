@@ -5,7 +5,7 @@ from .modelos import Estrito
 from .capacidades import empresa
 from .servico import validar,auditar
 from typing import Literal
-from nucleo.autenticacao import painel,papel
+from nucleo.autenticacao import painel,pode
 from datetime import date,datetime,timedelta,timezone
 from zoneinfo import ZoneInfo
 from pydantic import AwareDatetime
@@ -101,7 +101,7 @@ async def salvar(request,t,dados,actor,uid=None):
         # Texto só com espaços vale como vazio.
         for k in EXTRAS:
             if isinstance(final[k],str) and not final[k].strip(): final[k]=None
-        if papel(request) not in ('plataforma','admin') and any(final[k]!=old.get(k) for k in SO_ADMIN): raise HTTPException(403,'FORBIDDEN')
+        if not pode(request,'gestor') and any(final[k]!=old.get(k) for k in SO_ADMIN): raise HTTPException(403,'FORBIDDEN')
         if final['codigo'] and await c.fetchval('SELECT EXISTS(SELECT 1 FROM tenant_unidades WHERE tenant_id=$1 AND codigo=$2 AND id<>$3)',t,final['codigo'],uid):
             raise HTTPException(409,{'campo':'codigo'})
         if novo:

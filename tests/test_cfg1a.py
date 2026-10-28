@@ -85,7 +85,8 @@ def test_rascunho_publicacao_versoes_restauracao_previa_e_papeis():
             AG=f'/admin/v1/tenants/alpha/agentes/{a}/atendimento'
             cfg=lambda: app.state.configuracoes.efetiva('alpha',a)
             # Estado inicial: nada publicado, tudo no padrão; o pacote já teria o perfil padrão.
-            g=(await client.get(E,headers={'X-Role':''})).json()   # sem papel válido = membro
+            assert (await client.get(E,headers={'X-Role':'membro'})).status_code==403   # PAPEL1-a: supervisor para cima
+            g=(await client.get(E,headers={'X-Role':'supervisor'})).json()
             assert (g['escopo'],g['versao_publicada'],g['perfil_versao'],g['rascunho'],g['publicado'])==('empresa',0,'e0',None,{'perfil':{},'comportamentos':{}})
             # O modelo de teste não tem módulos nem motivos próprios: só os motivos do núcleo (MULTI1-a).
             PADRAO_ALPHA=A.bloco_do_pacote(A.resolver_perfil(nome_da_empresa=(await conn.fetchval("SELECT nome FROM tenants WHERE id='alpha'")),motivos=['pediu_humano','reclamacao'])[0])
@@ -98,11 +99,12 @@ def test_rascunho_publicacao_versoes_restauracao_previa_e_papeis():
             assert [c for c,i in esq['comportamentos'].items() if not i['disponivel']]==['media_wait_s','aviso_demora','fora_do_horario_aceita_agendado']
             assert esq['comportamentos']['fora_do_horario_mensagem']['variaveis']==['proxima_abertura','nome_empresa','abre'] and esq['comportamentos']['transbordo_fora_do_horario']['variaveis']==['retorno_equipe','horario'] and g['pendencias']==[]
             assert esq['comportamentos']['send_mode']['tipo']=='so_plataforma' and (await client.get(E,headers={'X-Role':'plataforma'})).json()['esquema']['comportamentos']['send_mode']['editavel'] is False
-            # Papéis: membro, sem cabeçalho ou papel desconhecido leem e veem a prévia, não salvam nem publicam nem restauram.
-            for cab in ({'X-Actor':'joana','X-Role':'membro'},{'X-Actor':'joana','X-Role':''},{'X-Actor':'joana','X-Role':'dono'}):
+            # Papéis (PAPEL1-a): supervisor lê e vê a prévia, não salva nem publica nem restaura; membro, sem cabeçalho ou desconhecido: 403 em tudo.
+            for cab in ({'X-Actor':'joana','X-Role':'supervisor'},{'X-Actor':'joana','X-Role':'membro'},{'X-Actor':'joana','X-Role':''},{'X-Actor':'joana','X-Role':'dono'}):
                 assert (await client.put(E+'/rascunho',json={'perfil':{'tom':'formal'}},headers=cab)).status_code==403
                 assert (await client.post(E+'/publicar',json={'baseado_em':0},headers=cab)).status_code==403 and (await client.delete(E+'/rascunho',headers=cab)).status_code==403
-                assert (await client.post(E+'/versoes/1/restaurar',headers=cab)).status_code==403 and (await client.post(E+'/previa',headers=cab)).status_code==200
+                assert (await client.post(E+'/versoes/1/restaurar',headers=cab)).status_code==403
+                assert (await client.post(E+'/previa',headers=cab)).status_code==(200 if cab['X-Role']=='supervisor' else 403)
             # Rascunho inválido: todos os campos errados numa resposta; campo de operação não entra por aqui.
             r=await client.put(E+'/rascunho',json={'perfil':{'tom':'x','emojis':'y'},'comportamentos':{'debounce_s':99,'send_mode':'live','inventado':1,'refazer_turno':'talvez'}},headers=ADMIN)
             assert r.status_code==400 and {(c['campo'],c['motivo']) for c in r.json()['erro']['detalhes']['campos']}=={('perfil.tom','opcao'),('perfil.emojis','opcao'),

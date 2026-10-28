@@ -43,12 +43,13 @@ async def main():
     p.add_argument('--url',default='http://gateway-gateway-1:8000')
     p.add_argument('--json',action='store_true',help='imprime o relatório completo em JSON')
     a=p.parse_args()
-    chave=os.environ.get('PANEL_SERVICE_KEY')
-    if not chave: raise ValueError('PANEL_SERVICE_KEY ausente no ambiente')
+    # PAPEL1-a: script de operação = plataforma (chave de plataforma; na fase A ainda vale a de empresa).
+    chave=os.environ.get('PANEL_PLATFORM_KEY') or os.environ.get('PANEL_SERVICE_KEY')
+    if not chave: raise ValueError('PANEL_PLATFORM_KEY/PANEL_SERVICE_KEY ausente no ambiente')
     conteudo=open(a.arquivo,'rb').read() if a.arquivo else sys.stdin.buffer.read()
     if not conteudo.strip(): raise ValueError('Arquivo vazio')
     async with httpx.AsyncClient(base_url=a.url,timeout=120,follow_redirects=False,
-            headers={'Authorization':'Bearer '+chave,'X-Actor':'importar_catalogo.py'}) as c:
+            headers={'Authorization':'Bearer '+chave,'X-Actor':'importar_catalogo.py','X-Role':'plataforma'}) as c:
         r=await enviar(c,a.tenant,conteudo,a.aplicar)
     print(json.dumps(r,ensure_ascii=False,indent=1) if a.json else resumo(r))
     return 0 if not r['erros'] else 1

@@ -43,10 +43,11 @@ def test_textos_por_empresa_liga_desliga_previa_e_papel(monkeypatch):
             L={(i['status'],i['modalidade']):i for i in g['itens']}
             assert ('pronto_retirada','delivery') not in L and ('saiu_entrega','retirada') not in L
             assert [k for k,i in L.items() if not i['ativo']]==[('em_preparo','delivery'),('em_preparo','retirada'),('concluido','retirada')]
-            # Papel: membro, sem cabeçalho ou papel desconhecido não altera (403); ler e ver a prévia pode.
+            # Papel: membro, sem cabeçalho ou papel desconhecido não altera (403); ler e ver a prévia: supervisor para cima (PAPEL1-a).
             for cab in ({'X-Actor':'joana','X-Role':'membro'},{'X-Actor':'joana','X-Role':' '},{'X-Actor':'joana','X-Role':'dono'},{'X-Actor':'joana','X-Role':''}):
                 r=await client.put(f'{B}/avisos/confirmado',json={'ativo':False},headers=cab);assert r.status_code==403 and r.json()['erro']['codigo']=='FORBIDDEN',cab
-            assert (await client.get(f'{B}/avisos',headers={'X-Role':'membro'})).status_code==200
+            assert (await client.get(f'{B}/avisos',headers={'X-Role':'membro'})).status_code==403   # PAPEL1-a: supervisor para cima
+            assert (await client.get(f'{B}/avisos',headers={'X-Role':'supervisor'})).status_code==200
             assert await conn.fetchval('SELECT count(*) FROM pedido_avisos_config')==0
             # Membro continua mudando status de pedido (PED1-a).
             c0,n0=await pedido('5511900000009');assert (await client.post(f'{B}/{n0}/status',json={'status':'confirmado'},headers={'X-Actor':'joana','X-Role':'membro'})).status_code==200
@@ -82,7 +83,7 @@ def test_textos_por_empresa_liga_desliga_previa_e_papel(monkeypatch):
             assert await conn.fetchval("SELECT count(*) FROM audit_log WHERE tenant_id='bykoji' AND acao='pedido.aviso_configurado' AND actor IN ('ana','root')")==6
             # Prévia: com o texto enviado, ou com o que vale hoje; mostra também a versão sem os opcionais. Nada é gravado nem enviado.
             antes=len(enviados)
-            r=await client.post(f'{B}/avisos/confirmado/previa',json={'texto':'Oi[[, {nome_cliente}]]! Pedido {numero} na {unidade}.[[ Previsão: {previsao}.]]'},headers={'X-Role':'membro','X-Actor':'joana'})
+            r=await client.post(f'{B}/avisos/confirmado/previa',json={'texto':'Oi[[, {nome_cliente}]]! Pedido {numero} na {unidade}.[[ Previsão: {previsao}.]]'},headers={'X-Role':'supervisor','X-Actor':'joana'})
             assert r.status_code==200 and r.json()=={'status':'confirmado','modalidade':'delivery','texto':'Oi, Ana! Pedido 12345 na Pátio Guedala. Previsão: cerca de 40 minutos.','texto_sem_opcionais':'Oi! Pedido 12345 na Pátio Guedala.'}
             r=await client.post(f'{B}/avisos/concluido/previa',json={'modalidade':'retirada'},headers={'X-Actor':'joana'});assert r.json()['texto']=='Pedido nº 12345 retirado. Bom apetite, Ana! 😊'
             assert (await client.post(f'{B}/avisos/cancelado/previa',headers={'X-Actor':'joana'})).json()['texto'].startswith('Seu pedido nº 12345 foi cancelado pela unidade Pátio Guedala. Motivo: Faltou um ingrediente.')
@@ -117,7 +118,8 @@ def test_reenvio_manual_so_de_aviso_que_falhou(monkeypatch):
             a=await aviso(n1,'confirmado');assert (a['status'],a['erro'])==('falhou','recusado_pelo_provedor')
             lt=(await ultimo(n1)).json()['linha_do_tempo'][-1]['aviso'];assert (lt['status'],lt['incerto'],lt['pode_reenviar'])==('falhou',False,True)
             p.http=bom;antes=len(enviados)
-            r=await reenviar(n1,'confirmado',**{'X-Role':'membro'});assert r.status_code==202 and r.json()=={'ok':True,'aviso':{'status':'pendente'}}
+            assert (await reenviar(n1,'confirmado',**{'X-Role':'membro'})).status_code==403
+            r=await reenviar(n1,'confirmado',**{'X-Role':'supervisor'});assert r.status_code==202 and r.json()=={'ok':True,'aviso':{'status':'pendente'}}
             await avisos.despachar(p);await avisos.despachar(p)
             assert [e[0] for e in enviados[antes:]]==[CLIENTE] and 'foi confirmado' in enviados[-1][1] and (await aviso(n1,'confirmado'))['status']=='enviado'
             # Já entregue: nunca reenvia.

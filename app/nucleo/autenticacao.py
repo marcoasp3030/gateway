@@ -15,15 +15,23 @@ def hash_chave(chave, pepper):
     return hashlib.sha256((pepper+chave).encode()).hexdigest()
 
 
-async def painel(request: Request):
+def credencial(request: Request):
+    """Qual chave do painel veio no Authorization: 'plataforma', 'empresa' ou None (nenhuma confere). CHAVES1: a chave de plataforma
+    (PANEL_PLATFORM_KEY e a próxima) é só da sessão de plataforma; a de empresa (PANEL_SERVICE_KEY e a próxima), das outras."""
     infra = request.app.state.infra
     auth = request.headers.get('authorization','')
     chave = auth[7:] if auth.startswith('Bearer ') else ''
-    atual = segredo_confere(chave,infra.panel_key)
-    proxima = segredo_confere(chave,infra.panel_next)
-    if not (atual or proxima):
+    if not chave: return None
+    if any(segredo_confere(chave,k) for k in (getattr(infra,'panel_platform_key',''),getattr(infra,'panel_platform_next','')) if k): return 'plataforma'
+    if segredo_confere(chave,infra.panel_key) or segredo_confere(chave,infra.panel_next): return 'empresa'
+    return None
+
+
+async def painel(request: Request):
+    tipo = credencial(request)
+    if tipo is None:
         raise HTTPException(401,'UNAUTHORIZED')
-    log.info('chave_painel=%s','atual' if atual else 'proxima')
+    log.info('chave_painel=%s',tipo)
     actor = request.headers.get('x-actor','')
     if request.method not in ('GET','HEAD','OPTIONS') and (not actor.strip() or len(actor)>200):
         raise HTTPException(400,'X-Actor obrigatório')
@@ -61,14 +69,27 @@ def contexto_da_chave(escopo):
     return contexto
 
 
-PAPEIS=('plataforma','admin','membro')
+def legados_ligados():
+    """Transição (PAPEL1-a): admin = gestor e membro = funcionário até o Marco desligar (PAPEIS_LEGADOS=off)."""
+    import os
+    return os.getenv('PAPEIS_LEGADOS','on').strip().lower() in ('on','1','sim','true')
 
 
 def papel(request: Request):
-    """Papel de quem está no painel (X-Role, preenchido pelo servidor do painel a partir da sessão).
-    Ausente ou desconhecido = membro: falha fechada."""
-    valor=request.headers.get('x-role','').strip().lower()
-    return valor if valor in PAPEIS else 'membro'
+    """Papel de quem está no painel (X-Role, preenchido pelo servidor do painel a partir da sessão), por comparação exata:
+    plataforma, gestor, supervisor ou funcionario (e, na transição, admin e membro). Qualquer outro valor ou ausente: None
+    (as rotas admin respondem 403 antes de chegar aqui)."""
+    from nucleo.permissoes import NIVEIS,LEGADOS
+    valor=request.headers.get('x-role','')
+    if valor in NIVEIS: return valor
+    if valor in LEGADOS and legados_ligados(): return LEGADOS[valor]
+    return None
+
+
+def pode(request: Request, minimo: str):
+    """O papel da sessão alcança o nível `minimo` (plataforma > gestor > supervisor > funcionario)?"""
+    from nucleo.permissoes import atende
+    return atende(papel(request),minimo)
 
 
 def exigir_plataforma(request: Request):
@@ -78,5 +99,6 @@ def exigir_plataforma(request: Request):
 
 
 def exigir_admin(request: Request):
-    if papel(request) not in ('plataforma','admin'):
+    """Gestor ou plataforma (o antigo "admin")."""
+    if not pode(request,'gestor'):
         raise HTTPException(403,'FORBIDDEN')

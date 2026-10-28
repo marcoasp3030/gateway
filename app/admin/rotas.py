@@ -53,8 +53,14 @@ async def tenant(request:Request,tenant_id:str):
     return row
 
 
+# PAPEL1-a: o gestor muda nome e alerta da equipe; o resto do cadastro da empresa é da plataforma.
+TECNICOS_DA_EMPRESA=('status','plano','limite_turnos_mes','retencao_dias','tenant_teste','timezone','id')
+
+
 @router.patch('/tenants/{tenant_id}')
 async def alterar_tenant(request:Request,tenant_id:str,dados:dict,actor=Depends(painel)):
+    recusa=await barrar_so_plataforma(request,tenant_id,dados,TECNICOS_DA_EMPRESA,actor,'empresa')
+    if recusa: return recusa
     return await request.app.state.admin.salvar_tenant(dados,actor,tenant_id)
 
 
@@ -134,13 +140,13 @@ async def obter(request:Request,tenant_id:str,entidade:str,identidade:str):
 async def alterar(request:Request,tenant_id:str,entidade:str,identidade:str,dados:dict,actor=Depends(painel)):
     if entidade not in ENTIDADES: raise HTTPException(404,'NOT_FOUND')
     if entidade=='agentes' and isinstance(dados,dict):
-        from nucleo.autenticacao import papel
+        from nucleo.autenticacao import pode
         from nucleo.atendimento import SO_PLATAFORMA_AGENTE
         # Envio, piloto, alerta, fluxo e credencial do Skyone, provedor, instruções, limites e modelo: só a plataforma (pedido todo recusado).
         recusa=await barrar_so_plataforma(request,tenant_id,dados,SO_PLATAFORMA_AGENTE,actor,'agente:'+identidade)
         if recusa: return recusa
         # MULTI1-a: ligar e desligar módulos no agente, de admin ou plataforma.
-        if 'modulos_ligados' in dados and papel(request) not in ('admin','plataforma'): raise HTTPException(403,'FORBIDDEN')
+        if 'modulos_ligados' in dados and not pode(request,'gestor'): raise HTTPException(403,'FORBIDDEN')
     result=await request.app.state.admin.salvar(tenant_id,entidade,dados,actor,identidade)
     # MULTI1-a: credenciais novas num canal uazapi → cadastra de novo o webhook (pode ser outra instância).
     if entidade=='canais' and result.get('tipo')=='uazapi' and isinstance(dados,dict) and dados.get('credenciais') and request.app.state.infra.registrar_webhook_uazapi:

@@ -213,13 +213,19 @@ def versao_texto(empresa,agente=0):
     return f'e{int(empresa or 0)}'+(f'.a{int(agente)}' if agente else '')
 
 
+def _edita(papel):
+    """Gestor ou plataforma editam o atendimento (rascunho e publicação)."""
+    from nucleo.permissoes import atende
+    return atende(papel,'gestor')
+
+
 def esquema(padroes,papel,motivos=None,ocultos=()):
     """Descrição dos campos para o painel desenhar a tela sem repetir regras.
     MULTI1-a: `motivos` = motivos de transferência do escopo ([{"id","rotulo"}]); `ocultos` = comportamentos de módulo que o escopo não tem."""
     comportamentos={}
     for campo,(grupo,tipo,minimo,maximo,opcoes,disponivel) in COMPORTAMENTOS.items():
         if campo in ocultos: continue
-        item={'grupo':grupo,'tipo':tipo,'padrao':padroes.get(campo),'editavel':papel in ('admin','plataforma'),'disponivel':disponivel}
+        item={'grupo':grupo,'tipo':tipo,'padrao':padroes.get(campo),'editavel':_edita(papel),'disponivel':disponivel}
         if minimo is not None: item['min']=minimo
         if maximo is not None: item['max']=maximo
         if opcoes: item['opcoes']=opcoes
@@ -228,7 +234,7 @@ def esquema(padroes,papel,motivos=None,ocultos=()):
         comportamentos[campo]=item
     for campo in SO_PLATAFORMA:
         comportamentos[campo]={'grupo':'operacao','tipo':'so_plataforma','padrao':padroes.get(campo),'editavel':False,'disponivel':True}
-    perfil={k:{**{a:b for a,b in v.items()},'editavel':papel in ('admin','plataforma')} for k,v in PERFIL.items()}
+    perfil={k:{**{a:b for a,b in v.items()},'editavel':_edita(papel)} for k,v in PERFIL.items()}
     if motivos is not None:
         ids=[m['id'] for m in motivos]
         perfil['motivos_transferencia']={**perfil['motivos_transferencia'],'opcoes':ids,'padrao':ids,'rotulos':{m['id']:m['rotulo'] for m in motivos},

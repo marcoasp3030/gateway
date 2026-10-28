@@ -308,18 +308,20 @@ def test_painel_lista_cancela_e_opt_out(tmp_path):
         r=(await c.get(q+'/follow-ups',headers={'X-Role':'membro'})).json()
         assert [(i['tipo'],i['pergunta'],i['estado']) for i in r['itens']]==[('confirmar_pedido','Confirma 2 edamames?','agendado')]
         assert r['opt_out']['ativo'] is False
-        # Membro cancela (auditado com o actor).
-        r=await c.post(q+'/follow-ups/cancelar',json={},headers={'X-Role':'membro'})
+        # Supervisor cancela (auditado com o actor); funcionário não (PAPEL1-a).
+        assert (await c.post(q+'/follow-ups/cancelar',json={},headers={'X-Role':'membro'})).status_code==403
+        r=await c.post(q+'/follow-ups/cancelar',json={},headers={'X-Role':'supervisor'})
         assert r.status_code==200 and r.json()=={'ok':True,'cancelados':1}
         assert (await tarefas(conv))[-1]['motivo']=='painel'
         assert await pool.fetchval("SELECT actor FROM audit_log WHERE tenant_id=$1 AND acao='follow_up.cancelado' ORDER BY id DESC LIMIT 1",T)=='teste'
         assert (await c.post(q+'/follow-ups/cancelar',json={'motivo':'Não!'},headers=H)).status_code==400
         lista=(await c.get(f'/admin/v1/tenants/{T}/conversas',headers=H)).json()['itens']
         assert next(i for i in lista if i['conversation_id']==conv)['follow_up'] is None
-        # Opt-out: membro registra, membro não reativa, admin reativa; resposta do cliente nunca reativa.
+        # Opt-out: supervisor registra (membro não, PAPEL1-a), supervisor não reativa, admin reativa; resposta do cliente nunca reativa.
         contato=await pool.fetchval('SELECT contato_id FROM conversas WHERE tenant_id=$1 AND conversation_id=$2',T,conv)
         o=f'/admin/v1/tenants/{T}/contatos/{contato}/opt-out-follow-up'
-        r=await c.put(o,headers={'X-Role':'membro'});assert r.status_code==200 and r.json()['ativo'] and r.json()['origem']=='painel'
+        assert (await c.put(o,headers={'X-Role':'membro'})).status_code==403
+        r=await c.put(o,headers={'X-Role':'supervisor'});assert r.status_code==200 and r.json()['ativo'] and r.json()['origem']=='painel'
         await enviar('5511900000341','oi')
         assert (await c.get(o,headers=H)).json()['ativo'] is True
         motivo={'motivo':'cliente pediu para voltar'}

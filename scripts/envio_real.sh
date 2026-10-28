@@ -12,7 +12,7 @@ import asyncio,json,os,sys,urllib.request
 import asyncpg
 def ch(metodo,caminho,dados=None):
     r=urllib.request.Request('http://127.0.0.1:8000/admin/v1'+caminho,method=metodo,data=json.dumps(dados).encode() if dados else None)
-    r.add_header('Authorization','Bearer '+os.environ['PANEL_SERVICE_KEY']);r.add_header('X-Actor','envio_real.sh');r.add_header('Content-Type','application/json')
+    r.add_header('Authorization','Bearer '+(os.environ.get('PANEL_PLATFORM_KEY') or os.environ['PANEL_SERVICE_KEY']));r.add_header('X-Actor','envio_real.sh');r.add_header('X-Role','plataforma');r.add_header('Content-Type','application/json')
     return json.load(urllib.request.urlopen(r,timeout=10))
 async def agentes():
     c=await asyncpg.connect(os.environ['DATABASE_URL'])

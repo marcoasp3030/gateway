@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 import logging
 import os
+import re
 import asyncio
 import httpx
 import asyncpg
@@ -18,7 +19,7 @@ import seguranca
 from nucleo.banco import Repositorio
 from nucleo.configuracao import Configuracoes
 from nucleo.credenciais import Cofre, CredencialInvalida
-from admin.servico import Administracao
+from admin.servico import Administracao, auditar
 from admin.rotas import router, api
 from canais.rotas import router as canais_router
 from nucleo.pipeline import Pipeline
@@ -40,11 +41,19 @@ class Infra:
     concorrencia_por_worker: int = 20
     # MULTI1-a: cadastrar sozinho o webhook na instância uazapi ao criar o canal, trocar credenciais e rotacionar o segredo.
     registrar_webhook_uazapi: bool = False
+    # CHAVES1: chave da sessão de plataforma do painel (e a próxima, na rotação). Vazia = só a chave de empresa existe (fase A).
+    panel_platform_key: str = ''
+    panel_platform_next: str = ''
 
     def validar(self):
         segredos={'PANEL_SERVICE_KEY':self.panel_key,'API_KEY_PEPPER':self.pepper}
         if self.panel_next: segredos['PANEL_SERVICE_KEY_NEXT']=self.panel_next
+        if self.panel_platform_key: segredos['PANEL_PLATFORM_KEY']=self.panel_platform_key
+        if self.panel_platform_next: segredos['PANEL_PLATFORM_KEY_NEXT']=self.panel_platform_next
         if seguranca.validar_segredos(segredos): raise ValueError('Chaves de infraestrutura inválidas')
+        # A chave de plataforma não pode ser igual a nenhuma chave de empresa (senão o papel volta a ser só um cabeçalho).
+        if {k for k in (self.panel_platform_key,self.panel_platform_next) if k} & {k for k in (self.panel_key,self.panel_next) if k}:
+            raise ValueError('PANEL_PLATFORM_KEY igual a uma chave de empresa')
         if not 1<=self.skyone_rpm<=100000: raise ValueError("SKYONE_REQUESTS_PER_MINUTE inválido")
         if not 1<=self.concorrencia_por_worker<=200: raise ValueError("CONCORRENCIA_POR_WORKER inválido")
         Cofre(self.encryption_key)
@@ -58,7 +67,8 @@ class Infra:
             skyone_rpm=int(os.getenv('SKYONE_REQUESTS_PER_MINUTE','240')),
             fila_duravel=ligada_no_ambiente(),
             concorrencia_por_worker=int(os.getenv('CONCORRENCIA_POR_WORKER','20')),
-            registrar_webhook_uazapi=os.getenv('REGISTRAR_WEBHOOK_UAZAPI','on').strip().lower() in ('on','1','sim','true'))
+            registrar_webhook_uazapi=os.getenv('REGISTRAR_WEBHOOK_UAZAPI','on').strip().lower() in ('on','1','sim','true'),
+            panel_platform_key=os.getenv('PANEL_PLATFORM_KEY',''),panel_platform_next=os.getenv('PANEL_PLATFORM_KEY_NEXT',''))
 
 
 def criar_app(infra,db=None,redis=None):
@@ -117,24 +127,80 @@ def criar_app(infra,db=None,redis=None):
     app.add_middleware(RegistroDeSkills)
     app.add_middleware(limites.LimiteCorpo,max_bytes=infra.max_body_bytes)
 
+    _negados={}
+
+    def _recusa(motivo,mensagem,**detalhes):
+        return JSONResponse({'erro':{'codigo':'FORBIDDEN','mensagem':mensagem,'detalhes':{'motivo':motivo,**detalhes}}},status_code=403,
+                            headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
+
+    async def _auditar_negado(request,quem,rota,motivo):
+        """acesso.negado na auditoria: no máximo um por minuto por sessão, rota e motivo. Sem ids nem valores."""
+        import time
+        actor=(request.headers.get('x-actor') or 'painel')[:200];chave=(actor,request.method,rota,motivo);agora=time.monotonic()
+        if agora-_negados.get(chave,0)<60: return
+        _negados[chave]=agora
+        try:
+            m=re.match(r'^/admin/v1/tenants/([^/]+)',request.url.path);tenant=m.group(1) if m else None
+            async with app.state.db.acquire() as conn,conn.transaction():
+                if tenant and not await conn.fetchval('SELECT EXISTS(SELECT 1 FROM tenants WHERE id=$1)',tenant): tenant=None
+                await auditar(conn,tenant,actor,'acesso.negado',rota[:200],{'rota':f'{request.method} {rota}','papel':quem or request.headers.get('x-role','')[:20],'motivo':motivo})
+        except Exception: logging.getLogger('gateway.auth').warning('Recusa de acesso não registrada na auditoria')
+
+    async def _papel_e_rota(request,quem,tipo):
+        """PAPEL1-a. Chave que não confere segue para a rota (que devolve 401). Devolve a resposta de recusa, ou None."""
+        if tipo is None: return None
+        from starlette.routing import Match
+        from nucleo import permissoes
+        rota=None;parametros={}
+        for r in app.router.routes:
+            casou,filho=r.matches(request.scope)
+            if casou==Match.FULL: rota=getattr(r,'path',None);parametros=filho.get('path_params',{});break
+        rota_txt=(rota or request.url.path)[len('/admin/v1'):] if (rota or request.url.path).startswith('/admin/v1') else (rota or request.url.path)
+        if '{entidade}' in rota_txt and parametros.get('entidade') in permissoes.ENTIDADES: rota_txt=rota_txt.replace('{entidade}',parametros['entidade'])
+        if quem is None:
+            await _auditar_negado(request,None,rota_txt,'papel_desconhecido')
+            return _recusa('papel_desconhecido','Papel desconhecido.')
+        if quem=='plataforma' and tipo!='plataforma':
+            # CHAVES1: na fase A a chave de empresa com papel de plataforma ainda vale, com aviso; com a exigência ligada, 403.
+            if os.getenv('CHAVE_PLATAFORMA_OBRIGATORIA','off').strip().lower() in ('on','1','sim','true'):
+                await _auditar_negado(request,quem,rota_txt,'papel_sem_credencial')
+                try:
+                    from nucleo.alertas import Alertas
+                    await Alertas(app.state.redis,app.state.http,app.state.db,app.state.pipeline.prefixo).disparar('painel_papel_plataforma','aviso',
+                        'papel de plataforma com a chave de empresa',f'{request.method} {rota_txt}')
+                except Exception: pass
+                return _recusa('papel_sem_credencial','O papel de plataforma exige a chave de plataforma.')
+            logging.getLogger('gateway.auth').warning('Papel plataforma com a chave de empresa (fase A): %s %s',request.method,rota_txt)
+        minimo=permissoes.minimo(request.method,rota or request.url.path,parametros)
+        if not permissoes.atende(quem,minimo):
+            await _auditar_negado(request,quem,rota_txt,'papel_insuficiente')
+            return _recusa('papel_insuficiente','Seu papel não permite esta operação.',minimo=minimo)
+        return None
+
     @app.middleware('http')
     async def protecoes(request,call_next):
         if seguranca.rota_interna(request.url.path) and not seguranca.chamada_interna(
                 request.client.host if request.client else None,request.headers):
             return resposta_erro(404)
-        # MULTI1-a: empresa da sessão do painel (X-Tenant-Scope).
+        # MULTI1-a: empresa da sessão do painel (X-Tenant-Scope). PAPEL1-a: papel exato, credencial e nível mínimo da rota.
         if request.url.path.startswith('/admin/v1/'):
             from nucleo import escopo_empresa
-            from nucleo.autenticacao import papel as papel_do_pedido
-            quem=papel_do_pedido(request);veredito=escopo_empresa.conferir(request,quem)
+            from nucleo.autenticacao import papel as papel_do_pedido,credencial
+            quem=papel_do_pedido(request)
+            # Primeiro a empresa (outra empresa é 404 para qualquer papel), depois o papel e o nível da rota.
+            veredito=escopo_empresa.conferir(request,quem) if credencial(request) else None
             if veredito=='sem_escopo':
-                if escopo_empresa.registrar_sem_escopo(request,quem):
+                # No log e no alerta, o papel como o painel mandou (admin/membro na transição).
+                rotulo=request.headers.get('x-role','')[:20]
+                if escopo_empresa.registrar_sem_escopo(request,rotulo):
                     try:
                         from nucleo.alertas import Alertas
                         await Alertas(app.state.redis,app.state.http,app.state.db,app.state.pipeline.prefixo).disparar('painel_sem_escopo','aviso',
-                            'painel sem a empresa da sessão',f'Chamada de papel "{quem}" sem X-Tenant-Scope: {request.method} {escopo_empresa.rota_sem_ids(request.url.path)}')
+                            'painel sem a empresa da sessão',f'Chamada de papel "{rotulo}" sem X-Tenant-Scope: {request.method} {escopo_empresa.rota_sem_ids(request.url.path)}')
                     except Exception: pass
             elif veredito is not None: return resposta_erro(veredito[0])
+            recusa=await _papel_e_rota(request,quem,credencial(request))
+            if recusa is not None: return recusa
         grupo=request.url.path.split('/',2)[1]
         if grupo in ('api','webhooks'):
             try:

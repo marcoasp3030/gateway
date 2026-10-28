@@ -7,7 +7,7 @@ from typing import Literal
 from fastapi import APIRouter,Depends,Request,HTTPException
 from pydantic import BaseModel,ConfigDict,Field,ValidationError
 from starlette.responses import JSONResponse
-from nucleo.autenticacao import painel,papel,exigir_admin
+from nucleo.autenticacao import painel,papel,pode,exigir_admin
 from nucleo.banco import Repositorio,registro
 from nucleo.configuracao import Configuracoes,PADROES
 from nucleo import atendimento as A,horarios,expediente
@@ -199,7 +199,7 @@ async def _visao(request,tenant,agente,avisos=None):
     saida={'escopo':'agente' if agente is not None else 'empresa','segmento':(linha or {}).get('modelo_id') if agente is not None else empresa.get('segmento'),
            'versao_publicada':versao,'publicado_em':ultima['publicado_em'] if ultima else None,'publicado_por':ultima['publicado_por'] if ultima else None,
            'perfil_versao':texto,'publicado':definicao,'rascunho':None,'efetivo':efetivo,
-           'esquema':A.esquema(PADROES,quem,*await listas_do_escopo(request,tenant,agente)),'pode_editar':quem in ('admin','plataforma')}
+           'esquema':A.esquema(PADROES,quem,*await listas_do_escopo(request,tenant,agente)),'pode_editar':pode(request,'gestor')}
     # Pendências que o painel deve mostrar (não impedem nada): o telefone de alerta em vigor é o da própria instância → o alerta não é enviado.
     saida['pendencias']=[{'campo':'comportamentos.transbordo_alerta','motivo':'numero_da_instancia'}] if efetivo['comportamentos'].get('transbordo_alerta') in await numeros_da_instancia(db,tenant) else []
     # O padrão de nome_empresa é o nome cadastrado desta empresa.

@@ -12,7 +12,8 @@ from test_skyone_adaptador import preparar_agente
 
 C='/admin/v1/tenants/bykoji/conversas'
 K='/admin/v1/tenants/bykoji/contatos'
-MEMBRO={'X-Actor':'joana@loja.com','X-Role':'membro'}
+# PAPEL1-a (decisão 5): contatos são do supervisor para cima; o membro (funcionário) recebe 403.
+MEMBRO={'X-Actor':'joana@loja.com','X-Role':'supervisor'}
 
 
 def test_validacao_do_nome_e_telefone():
@@ -120,6 +121,7 @@ def test_conversas_e_contatos_no_painel(monkeypatch):
             # Informado (agente) vence o perfil; cadastro (painel, qualquer papel) vence os dois; null volta ao informado.
             assert await nc.gravar_informado(conn,'bykoji',conv,'Marquinho')
             assert ((await item(conv))['nome_exibicao'],(await item(conv))['nome_origem'])==('Marquinho','informado')
+            assert (await client.patch(f'{K}/{ct["id"]}',json={'nome':'Ana'},headers={'X-Role':'membro'})).status_code==403
             r=await client.patch(f'{K}/{ct["id"]}',json={'nome':'  Marco   Silva '},headers=MEMBRO);assert r.status_code==200,r.text
             assert (r.json()['nome_exibicao'],r.json()['nome_origem'])==('Marco Silva','cadastro') and r.json()['nomes']=={'cadastro':'Marco Silva','informado':'Marquinho','perfil':'Marco Antonio'}
             assert await conn.fetchval("SELECT count(*) FROM audit_log WHERE tenant_id='bykoji' AND acao='contato.nome_cadastro' AND alvo=$1 AND actor='joana@loja.com'",ct['id'])==1

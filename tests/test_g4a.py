@@ -125,10 +125,11 @@ def test_rotas_de_taxas_tudo_ou_nada_conflitos_papeis_e_historico():
             assert (await client.get(f'/admin/v1/tenants/bravo/unidades/{uid}/taxas')).status_code==404 and (await client.get(f'/admin/v1/tenants/alpha/unidades/{ub}/taxas')).status_code==404
             assert (await client.put(f'/admin/v1/tenants/bravo/unidades/{uid}/taxas',json={'itens':[]},headers=ADMIN)).status_code==404
             assert (await client.get(f'/admin/v1/tenants/alpha/unidades/{outra}/taxas')).json()['itens']==[]
-            # Papéis: membro, sem cabeçalho ou desconhecido leem e não alteram (403, nada muda).
+            # Papéis (PAPEL1-a): supervisor lê; membro, sem cabeçalho ou desconhecido não leem nem alteram (403, nada muda).
             total=await conn.fetchval('SELECT count(*) FROM unidade_taxas')
+            assert (await client.get(T,headers={'X-Actor':'joana','X-Role':'supervisor'})).status_code==200
             for cab in (MEMBRO,{'X-Actor':'joana','X-Role':''},{'X-Actor':'joana','X-Role':'dono'}):
-                assert (await client.get(T,headers=cab)).status_code==200
+                assert (await client.get(T,headers=cab)).status_code==403
                 assert (await client.put(T,json={'itens':[]},headers=cab)).status_code==403 and (await client.post(T,json=bairro('Novo'),headers=cab)).status_code==403
                 assert (await client.patch(f'{T}/{ids[0]}',json={'taxa':1},headers=cab)).status_code==403 and (await client.delete(f'{T}/{ids[0]}',headers=cab)).status_code==403
             assert await conn.fetchval('SELECT count(*) FROM unidade_taxas')==total
@@ -167,13 +168,15 @@ def test_campos_de_entrega_da_unidade_e_so_admin_muda_taxa_e_pagamento():
             assert (await client.get(f'{base}/{uid}/taxas')).json()['avisos']==['modo_sem_linhas']
             for ruim in ({'taxa_modo':'km'},{'frete_gratis_acima':0},{'tempo_entrega_min':0},{'tempo_retirada_min':601},{'delivery_ativo':'sim'}):
                 r=await client.patch(f'{base}/{uid}',json=ruim,headers=ADMIN);assert r.status_code==400 and r.json()['erro']['detalhes']['campo']==next(iter(ruim)),ruim
-            # Membro: muda tempo e o resto; não muda taxa, modo, frete grátis, delivery nem o texto de pagamento.
-            assert (await client.patch(f'{base}/{uid}',json={'tempo_entrega_min':50,'endereco':'Rua A'},headers=MEMBRO)).status_code==200
+            # PAPEL1-a: editar a unidade é do gestor (membro e supervisor: 403 em qualquer campo).
+            assert (await client.patch(f'{base}/{uid}',json={'tempo_entrega_min':50,'endereco':'Rua A'},headers=MEMBRO)).status_code==403
+            assert (await client.patch(f'{base}/{uid}',json={'tempo_entrega_min':50},headers={'X-Actor':'joana','X-Role':'supervisor'})).status_code==403
+            assert (await client.patch(f'{base}/{uid}',json={'tempo_entrega_min':50,'endereco':'Rua A'},headers=ADMIN)).status_code==200
             for campo,valor in (('taxa_entrega',9),('taxa_modo','cep'),('frete_gratis_acima',150),('delivery_ativo',False),('formas_pagamento','Pix')):
                 r=await client.patch(f'{base}/{uid}',json={campo:valor},headers=MEMBRO);assert r.status_code==403 and r.json()['erro']['codigo']=='FORBIDDEN',campo
                 assert (await client.post(base,json={'nome':'Nova','codigo':'nova_'+campo[:4],campo:valor},headers=MEMBRO)).status_code==403,campo
             # Reenviar o mesmo valor não é alteração (o painel manda o formulário inteiro).
-            assert (await client.patch(f'{base}/{uid}',json={'taxa_entrega':7,'taxa_modo':'bairro','delivery_ativo':True,'frete_gratis_acima':200},headers=MEMBRO)).status_code==200
+            assert (await client.patch(f'{base}/{uid}',json={'taxa_entrega':7,'taxa_modo':'bairro','delivery_ativo':True,'frete_gratis_acima':200},headers=ADMIN)).status_code==200
             assert (await client.get(f'{base}/{uid}')).json()['taxa_modo']=='bairro'
             # Histórico com antes/depois dos campos novos.
             h=(await client.get('/admin/v1/tenants/alpha/gestao/alteracoes',params={'entidade':'unidade','entidade_id':uid})).json()['itens']
@@ -189,7 +192,8 @@ def test_rotas_de_pagamento_ordem_validacao_papeis_e_historico():
             await criar(client);await criar(client,'bravo')
             uid=(await client.post('/admin/v1/tenants/alpha/unidades',json={'nome':'Centro','codigo':'centro'})).json()['id']
             P=f'/admin/v1/tenants/alpha/unidades/{uid}/pagamentos'
-            g=(await client.get(P,headers=MEMBRO)).json()
+            assert (await client.get(P,headers=MEMBRO)).status_code==403
+            g=(await client.get(P,headers={'X-Actor':'joana','X-Role':'supervisor'})).json()
             assert g=={'itens':[],'sugestoes':[{'codigo':'pix','rotulo':'Pix'},{'codigo':'cartao_entrega','rotulo':'Cartão na entrega'},{'codigo':'dinheiro','rotulo':'Dinheiro'},
                                                {'codigo':'vale_refeicao','rotulo':'Vale-refeição'},{'codigo':'pagamento_online','rotulo':'Pagamento online'}]}
             lista=[{'codigo':'dinheiro','aceita_troco':True},{'codigo':'pix','instrucoes':'Chave: 11.222.333/0001-44'},{'codigo':'ticket','rotulo':'Ticket'},

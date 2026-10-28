@@ -97,7 +97,7 @@ async def main():
     if not 1<=a.conversas<=2000 or not 1<=a.tenants<=10: p.error('Conversas 1–2000; empresas 1–10')
     rodada=uuid.uuid4().hex[:8]
     db=await asyncpg.create_pool(os.environ['DATABASE_URL'],min_size=1,max_size=2)
-    cabecalhos={'Authorization':'Bearer '+os.environ['PANEL_SERVICE_KEY'],'X-Actor':'carga'}
+    cabecalhos={'Authorization':'Bearer '+(os.environ.get('PANEL_PLATFORM_KEY') or os.environ['PANEL_SERVICE_KEY']),'X-Actor':'carga','X-Role':'plataforma'}
     async with httpx.AsyncClient(base_url=a.url,headers=cabecalhos,timeout=30,
                                  limits=httpx.Limits(max_connections=60)) as c:
         alvos=[]

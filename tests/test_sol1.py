@@ -224,8 +224,9 @@ def test_notificar_equipe_nao_pausa_protecao_e_painel(tmp_path):
                 pg=(await c.get(B,params={'limite':3})).json();assert [x['numero'] for x in (await c.get(B,params={'limite':3,'cursor':pg['proximo_cursor']})).json()['itens']]==['S-0004','S-0003','S-0002']
                 k=(await c.get(B+'/contagem')).json();assert (k['abertas'],k['em_andamento'])==(7,0) and k['mais_antiga_em']
                 um=f'{B}/{d["id"]}'
-                # Qualquer papel atualiza (membro incluído); em andamento grava quem assumiu; status só anda para frente.
-                r_=await c.patch(um,json={'status':'em_andamento','nota':'Liguei para a cliente.'},headers={'X-Actor':'joana','X-Role':'membro'});assert r_.status_code==200,r_.text
+                # Atualizar é do supervisor para cima (PAPEL1-a, decisão 4); em andamento grava quem assumiu; status só anda para frente.
+                assert (await c.patch(um,json={'status':'em_andamento'},headers={'X-Actor':'joana','X-Role':'membro'})).status_code==403
+                r_=await c.patch(um,json={'status':'em_andamento','nota':'Liguei para a cliente.'},headers={'X-Actor':'joana','X-Role':'supervisor'});assert r_.status_code==200,r_.text
                 assert (r_.json()['status'],r_.json()['atendido_por'],r_.json()['nota'],r_.json()['proximos_status'])==('em_andamento','joana','Liguei para a cliente.',['concluida','cancelada'])
                 assert (await c.patch(um,json={'status':'concluida'},headers={'X-Actor':'bia'})).json()['concluido_em'] and (await c.get(um)).json()['atendido_por']=='joana'
                 r_=await c.patch(um,json={'status':'em_andamento'},headers={'X-Actor':'bia'});assert r_.status_code==409 and r_.json()['erro']['detalhes']=={'campo':'status','status':'concluida'}

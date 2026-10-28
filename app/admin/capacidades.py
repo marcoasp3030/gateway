@@ -188,3 +188,13 @@ async def consumo(request:Request,tenant_id:str,mes:str|None=None):
     from nucleo.consumo import consulta
     await empresa(request.app.state.db,tenant_id)
     return await consulta(request.app.state.db,tenant_id,mes)
+
+
+@router.get('/tenants/{tenant_id}/modelos-disponiveis')
+async def modelos_disponiveis(request:Request,tenant_id:str):
+    """PAPEL1-a: para a empresa criar agente sem a rota global. Modelos ativos (globais + os da empresa), a versão mais recente de cada."""
+    await empresa(request.app.state.db,tenant_id)
+    rows=await request.app.state.db.fetch("""SELECT DISTINCT ON (id) * FROM modelos_agente WHERE (tenant_id IS NULL OR tenant_id=$1) AND ativo
+        ORDER BY id,versao DESC""",tenant_id)
+    campos=('id','versao','tenant_id','nome','tipo','segmento','modulos_permitidos','capacidades')
+    return {'itens':[{k:registro(r).get(k) for k in campos} for r in rows]}

@@ -24,7 +24,10 @@ def test_campos_so_da_plataforma_recusados_para_admin_e_membro_com_auditoria():
             a,_=await criar(c)
             antes=dict(await conn.fetchrow('SELECT * FROM agentes WHERE tenant_id=$1 AND id=$2','alpha',a))
             q=f'/admin/v1/tenants/alpha/agentes/{a}'
-            for h in (ADMIN,MEMBRO):
+            # PAPEL1-a: membro (funcionário) não edita agente; a recusa vem antes da regra dos campos.
+            r=await c.patch(q,json={'nome':'Outro','send_mode':'live'},headers=MEMBRO)
+            assert (r.status_code,r.json()['erro']['detalhes']['motivo'])==(403,'papel_insuficiente')
+            for h in (ADMIN,):
                 for campo,valor in PROIBIDOS.items():
                     r=await c.patch(q,json={campo:valor},headers=h)
                     assert r.status_code==403,(h['X-Role'],campo,r.text)
@@ -38,9 +41,9 @@ def test_campos_so_da_plataforma_recusados_para_admin_e_membro_com_auditoria():
             assert (await c.patch(q,json={'nome':'Novo nome','debounce_s':5},headers=ADMIN)).status_code==200
             # Auditoria de cada tentativa, com os campos e o papel, sem valores.
             reg=await conn.fetch("SELECT actor,alvo,dados FROM audit_log WHERE tenant_id='alpha' AND acao='acesso.campo_so_plataforma' ORDER BY id")
-            assert len(reg)==2*(len(PROIBIDOS)+1)
+            assert len(reg)==len(PROIBIDOS)+1
             ultimo=json.loads(reg[-1]['dados'])
-            assert ultimo=={'campos':['modo_piloto','send_mode'],'papel':'membro'} and reg[-1]['alvo']==f'agente:{a}'
+            assert ultimo=={'campos':['modo_piloto','send_mode'],'papel':'gestor'} and reg[-1]['alvo']==f'agente:{a}'
             assert 'segredo-de-teste-123' not in str([r['dados'] for r in reg])
             # Criar agente: só nome e modelo para admin; com campo da plataforma, 403.
             r=await c.post('/admin/v1/tenants/alpha/agentes',json={'nome':'Novo','modelo_id':'generico_teste','modo_piloto':False},headers=ADMIN)

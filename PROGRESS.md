@@ -1424,3 +1424,25 @@ PY
 - **Campos obsoletos (falha 3):** `aviso_demora` (texto), `media_wait_s` e `fora_do_horario_aceita_agendado` aparecem no esquema com `obsoleto: true` e `disponivel: false`. Continuam aceitos, para o painel antigo não quebrar, e são ignorados.
 - **Cache (falha 9):** publicar ou alterar a configuração avisa os workers e o agendador por Redis (pub/sub), e o valor novo vale na hora. Os 30 s continuam como reserva se o Redis falhar.
 - **Migração 053.** Testes em `tests/test_comportamento_regras.py`.
+
+## PAPEL1-a: papéis por rota, chave de plataforma, escopo obrigatório — 2026-10-28
+
+- **Papéis:** `plataforma > gestor > supervisor > funcionario`, comparados de forma exata no `X-Role`. Papel desconhecido, vazio ou com outra grafia recebe 403 `papel_desconhecido`.
+  - Na transição (`PAPEIS_LEGADOS`, ligado por padrão), `admin` vale como gestor e `membro` como funcionário.
+- **Tabela por rota:** `app/nucleo/permissoes.py` traz o mínimo de cada uma das 159 rotas admin, como na matriz aprovada em `docs/ESPEC_PAPEL1.md`. Rota fora da tabela é só da plataforma.
+  - Quem não alcança o mínimo recebe 403 `papel_insuficiente`, com `minimo` nos detalhes.
+  - A recusa vai para a auditoria (`acesso.negado`), no máximo uma vez por minuto por sessão, rota e motivo.
+  - Um teste confere que toda rota do app está na tabela.
+  - A decisão 4 vale sobre a tabela: os avisos internos (`GET /avisos`) são para o funcionário.
+- **Ordem no middleware:** primeiro a empresa da sessão (outra empresa dá 404 para qualquer papel; sem cabeçalho dá 403), depois o papel e o nível da rota. Chave do painel que não confere segue para a rota, que devolve 401.
+- **CHAVES1:** `PANEL_PLATFORM_KEY` e `PANEL_PLATFORM_KEY_NEXT` dão a credencial de plataforma; elas não podem ser iguais às chaves de empresa.
+  - Na fase A (`CHAVE_PLATAFORMA_OBRIGATORIA` desligada), a chave de empresa com papel de plataforma ainda passa, com aviso no log.
+  - Com a exigência ligada, recebe 403 `papel_sem_credencial` e gera um alerta.
+  - Os scripts de operação mandam `X-Role: plataforma` com a chave de plataforma, ou a de serviço quando a outra não existe.
+- **Escopo:** `ESCOPO_EMPRESA_OBRIGATORIO` agora é ligado por padrão. Nos testes, o `conftest` desliga a exigência; os testes de escopo e de papel ligam.
+- **Rotas globais** (`/tenants`, `/modelos-agente`, `/segmentos`, `/modulos`, `/fila`, auditoria da plataforma) são só da plataforma, também as leituras. Para criar agente, a empresa usa `GET /tenants/{t}/modelos-disponiveis` (modelos ativos globais e os da empresa, na última versão).
+- **Regras por campo:**
+  - Na empresa, os campos técnicos (`status`, `plano`, limites, retenção, teste, fuso, id) são só da plataforma.
+  - No item do catálogo, o supervisor muda só a disponibilidade.
+  - Cancelar pedido que a unidade já confirmou exige supervisor.
+- **Testes:** `tests/test_papel1a.py`. Os testes antigos foram ajustados à matriz; o membro perde as rotas de supervisor.

@@ -49,14 +49,14 @@ def test_empresa_da_sessao_isola_as_rotas_e_a_plataforma_ve_tudo(monkeypatch):
                                     ('POST','/admin/v1/modelos-agente'),('PATCH','/admin/v1/modelos-agente/delivery_restaurante')]:
                     r=await c.request(metodo,rota,json={'id':'x','nome':'x'},headers=h)
                     assert r.status_code==403,(papel,metodo,rota,r.text)
-                # Lista de empresas: só a da sessão.
-                assert [t['id'] for t in (await c.get('/admin/v1/tenants',headers=h)).json()['itens']]==['alpha']
+                # Lista de empresas: só da plataforma (PAPEL1-a).
+                assert (await c.get('/admin/v1/tenants',headers=h)).status_code==403
             assert (await c.get(f'/admin/v1/tenants/bravo/agentes/{b}',headers=PLAT)).status_code==200   # bravo intacto
             assert await conn.fetchval("SELECT nome FROM agentes WHERE tenant_id='bravo' AND id=$1",b)=='A'
             # A própria empresa continua funcionando.
             assert (await c.get('/admin/v1/tenants/alpha/agentes',headers=ADMIN_ALPHA)).status_code==200
             assert (await c.patch(f'/admin/v1/tenants/alpha/agentes/{a}',json={'nome':'Novo'},headers=ADMIN_ALPHA)).status_code==200
-            assert (await c.get('/admin/v1/modelos-agente?tenant=alpha',headers=ADMIN_ALPHA)).status_code==200
+            assert (await c.get('/admin/v1/tenants/alpha/modelos-disponiveis',headers=ADMIN_ALPHA)).status_code==200   # PAPEL1-a: /modelos-agente é só da plataforma
             # A plataforma vê tudo, com ou sem o cabeçalho.
             for h in (PLAT,{**PLAT,'X-Tenant-Scope':'alpha'}):
                 assert (await c.get(f'/admin/v1/tenants/bravo/agentes/{b}',headers=h)).status_code==200
@@ -75,14 +75,14 @@ def test_sem_cabecalho_na_transicao_registra_e_avisa_e_com_a_exigencia_recusa(mo
         async with c:
             a,ca=await criar(c);await criar(c,'bravo')
             escopo_empresa._ultimo_log.clear();alertas.clear();caplog.clear()
-            monkeypatch.delenv('ESCOPO_EMPRESA_OBRIGATORIO',raising=False)
+            monkeypatch.setenv('ESCOPO_EMPRESA_OBRIGATORIO','off')   # transição (o padrão ficou ligado no PAPEL1-a)
             with caplog.at_level(logging.WARNING,logger='gateway.escopo'):
                 # Transição: segue como antes (inclusive outra empresa), com log e alerta, uma vez por minuto por rota.
                 for _ in range(3): assert (await c.get('/admin/v1/tenants/bravo/agentes',headers={'X-Role':'admin'})).status_code==200
-                assert (await c.get(f'/admin/v1/tenants/alpha/agentes/{a}',headers={'X-Role':'membro'})).status_code==200
+                assert (await c.get(f'/admin/v1/tenants/alpha/agentes/{a}',headers={'X-Role':'supervisor'})).status_code==200
             linhas=[r.getMessage() for r in caplog.records if r.name=='gateway.escopo']
             assert linhas==['Chamada do painel sem X-Tenant-Scope: papel=admin GET /admin/v1/tenants/{t}/agentes',
-                            'Chamada do painel sem X-Tenant-Scope: papel=membro GET /admin/v1/tenants/{t}/agentes/{id}']
+                            'Chamada do painel sem X-Tenant-Scope: papel=supervisor GET /admin/v1/tenants/{t}/agentes/{id}']
             assert a not in str(caplog.text) and a not in str(alertas)   # nem o id do agente vai para o log
             assert [x[:2] for x in alertas]==[('painel_sem_escopo','aviso')]*2 and 'bravo' not in str(alertas)
             # Plataforma sem cabeçalho não gera aviso.

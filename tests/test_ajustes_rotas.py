@@ -19,7 +19,9 @@ def test_reativar_follow_up_exige_motivo_limpo_e_audita(monkeypatch):
             cid='ct_'+uuid.uuid4().hex
             await conn.execute("INSERT INTO contatos(id,tenant_id,telefone,nome_cadastro) VALUES ($1,'alpha','5511900000901','Joana Teste')",cid)
             o=f'/admin/v1/tenants/alpha/contatos/{cid}/opt-out-follow-up'
-            assert (await c.put(o,headers=MEMBRO)).status_code==200
+            # PAPEL1-a (decisão 5): contatos são do supervisor para cima.
+            assert (await c.put(o,headers=MEMBRO)).status_code==403
+            assert (await c.put(o,headers={'X-Role':'supervisor','X-Tenant-Scope':'alpha'})).status_code==200
             # Sem corpo, sem motivo, curto, só espaços ou longo demais: 400. Membro: 403.
             for corpo in (None,{},{'motivo':'ok'},{'motivo':'   ab   '},{'motivo':'x'*301},{'motivo':7},{'motivo':'válido','outro':1}):
                 r=await c.request('DELETE',o,**({} if corpo is None else {'json':corpo}),headers=ADMIN)

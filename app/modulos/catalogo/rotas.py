@@ -312,14 +312,23 @@ async def item_do_catalogo(request:Request,tenant_id:str,item_id:int):
     return (await para_o_painel(request.app.state.db,tenant_id,[row]))[0]
 
 
-@admin.patch('/tenants/{tenant_id}/catalogo/itens/{item_id}',dependencies=[Depends(exigir_admin)])
+# PAPEL1-a: o supervisor muda só a disponibilidade (dias e horários) do item; o resto é do gestor.
+CAMPOS_DO_SUPERVISOR=('disponibilidade','atualizado_em')
+
+
+@admin.patch('/tenants/{tenant_id}/catalogo/itens/{item_id}')
 async def editar_item(request:Request,tenant_id:str,item_id:int,dados:ItemDoCatalogo,actor=Depends(painel)):
     """Edita nome, descrição, preço, ativo, categoria e disponibilidade (CAT2) e, no CAT3-a, tipo, alcoólico, delivery, observação,
     código, categoria_id, posição e `aplicar_em` ("este" | "todas" | [unidades]: leva nome, descrição, preço, tipo, alcoólico, delivery,
-    ativo e disponibilidade aos itens do mesmo prato; nunca código, categoria e posição). Só admin ou plataforma. Unidade e id não mudam.
+    ativo e disponibilidade aos itens do mesmo prato; nunca código, categoria e posição). Gestor para cima; o supervisor só a disponibilidade. Unidade e id não mudam.
     Com `atualizado_em`, item que mudou desde a leitura do painel devolve 409 com o item atual. Carrinhos abertos não são tocados:
     o fechar_pedido já confere preço e item ativo."""
     from . import gestao as G
+    from nucleo.autenticacao import pode
+    if not pode(request,'gestor'):
+        fora=sorted(c for c in dados.model_fields_set if c not in CAMPOS_DO_SUPERVISOR)
+        if fora: return JSONResponse({'erro':{'codigo':'FORBIDDEN','mensagem':'Seu papel muda só a disponibilidade do item.',
+                                               'detalhes':{'motivo':'papel_insuficiente','campos':fora}}},status_code=403,headers={'Cache-Control':'no-store'})
     db=request.app.state.db
     await _empresa(db,tenant_id)
     try:

@@ -455,6 +455,11 @@ async def _mudar_pelo_painel(request,tenant_id,numero,novo,motivo,previsao_min,a
     # Cancelar exige dizer por quê; previsão só faz sentido quando a unidade assume o pedido.
     if (novo=='cancelado' and (not motivo or len(motivo)<3)) or (previsao_min is not None and novo not in servico.ACEITA_PREVISAO):
         raise HTTPException(400,'VALIDATION_ERROR')
+    # PAPEL1-a: cancelar pedido que a unidade já confirmou é do supervisor para cima.
+    from nucleo.autenticacao import pode
+    if novo=='cancelado' and not pode(request,'supervisor'):
+        atual=await request.app.state.db.fetchval('SELECT status FROM pedidos WHERE tenant_id=$1 AND numero=$2',tenant_id,numero)
+        if atual and atual!='aguardando_loja': raise HTTPException(403,'FORBIDDEN')
     async with request.app.state.db.acquire() as conn:
         try:
             async with conn.transaction():

@@ -54,12 +54,13 @@ async def main():
     p.add_argument('--url',default='http://gateway-gateway-1:8000',help='endereço interno do gateway')
     a=p.parse_args()
     if not sys.stdin.isatty(): raise ValueError('Rode em terminal interativo (sem -T), para a digitação não aparecer')
-    chave=os.environ.get('PANEL_SERVICE_KEY')
-    if not chave: raise ValueError('PANEL_SERVICE_KEY ausente no ambiente')
+    # PAPEL1-a: script de operação = plataforma (chave de plataforma; na fase A ainda vale a de empresa).
+    chave=os.environ.get('PANEL_PLATFORM_KEY') or os.environ.get('PANEL_SERVICE_KEY')
+    if not chave: raise ValueError('PANEL_PLATFORM_KEY/PANEL_SERVICE_KEY ausente no ambiente')
     cred=await preparar(getpass.getpass('Endereço base da instância uazapi (não aparece): '),
                         getpass.getpass('Token da instância (não aparece): '))
     async with httpx.AsyncClient(base_url=a.url,timeout=15,follow_redirects=False,
-            headers={'Authorization':'Bearer '+chave,'X-Actor':'canal_credencial.py'}) as c:
+            headers={'Authorization':'Bearer '+chave,'X-Actor':'canal_credencial.py','X-Role':'plataforma'}) as c:
         ok=await gravar(c,a.tenant,a.canal,cred)
     print(f'Canal {a.canal}: credenciais_configurado = {str(ok).lower()}')
     return 0 if ok else 1

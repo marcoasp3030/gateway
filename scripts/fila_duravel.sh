@@ -20,7 +20,7 @@ estado() {
 import json,os,urllib.request
 def ler(caminho,chave=False):
     r=urllib.request.Request('http://127.0.0.1:8000'+caminho)
-    if chave: r.add_header('Authorization','Bearer '+os.environ['PANEL_SERVICE_KEY']);r.add_header('X-Actor','fila_duravel.sh')
+    if chave: r.add_header('Authorization','Bearer '+(os.environ.get('PANEL_PLATFORM_KEY') or os.environ['PANEL_SERVICE_KEY']));r.add_header('X-Actor','fila_duravel.sh');r.add_header('X-Role','plataforma')
     return json.load(urllib.request.urlopen(r,timeout=5))
 print('health:',json.dumps(ler('/health').get('fila'),ensure_ascii=False))
 f=ler('/admin/v1/fila',True)

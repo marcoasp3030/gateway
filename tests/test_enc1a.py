@@ -174,13 +174,14 @@ def test_encerrar_do_agente_painel_reabrir_e_api(tmp_path):
         lista=(await c.get(f'/admin/v1/tenants/{T}/conversas',headers=H)).json()['itens']
         item=next(i for i in lista if i['conversation_id']==conv)
         assert {k:item['atendimento'][k] for k in ('numero','estado','motivo_encerramento')}=={'numero':2,'estado':'aberto','motivo_encerramento':None}
-        # Encerrar pelo painel (membro também), reabrir só o último.
+        # Encerrar pelo painel (supervisor para cima; PAPEL1-a), reabrir só o último.
         q=httpx.URL(f'/admin/v1/tenants/{T}/conversas/{conv}').path
-        r=await c.post(q+'/encerrar',json={'motivo':'manual'},headers={'X-Role':'membro'});assert r.status_code==200,r.text
+        assert (await c.post(q+'/encerrar',json={'motivo':'manual'},headers={'X-Role':'membro'})).status_code==403
+        r=await c.post(q+'/encerrar',json={'motivo':'manual'},headers={'X-Role':'supervisor'});assert r.status_code==200,r.text
         assert r.json()['atendimento']['motivo_encerramento']=='manual'
         assert (await c.post(q+'/encerrar',headers=H)).status_code==409
         assert (await c.post(q+'/encerrar',json={'motivo':'outro'},headers=H)).status_code==400
-        r=await c.post(q+'/reabrir',headers={'X-Role':'membro'});assert r.status_code==200 and r.json()['atendimento']['estado']=='aberto'
+        r=await c.post(q+'/reabrir',headers={'X-Role':'supervisor'});assert r.status_code==200 and r.json()['atendimento']['estado']=='aberto'
         assert (await c.post(q+'/reabrir',headers=H)).status_code==409
         a1,a2=await atendimentos(conv)
         assert (a2['estado'],a2['motivo_inicio'],a2['resumo'])==('aberto','reaberto_manual',None)

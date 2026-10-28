@@ -20,7 +20,8 @@ LOG_A_CADA_S=60
 
 
 def obrigatorio():
-    return os.getenv('ESCOPO_EMPRESA_OBRIGATORIO','off').strip().lower() in ('on','1','sim','true')
+    # PAPEL1-a: ligado por padrão (o painel manda a empresa da sessão desde 22/10); desligar só por ordem do Marco.
+    return os.getenv('ESCOPO_EMPRESA_OBRIGATORIO','on').strip().lower() in ('on','1','sim','true')
 
 
 def do_pedido(request):
