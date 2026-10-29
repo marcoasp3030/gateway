@@ -216,7 +216,7 @@ def test_T1_telefone_de_alerta_horario_da_equipe_e_transferencia_sem_pausa(monke
             r=await rascunho('+55 (11) 90000-0060');assert r.status_code==200 and r.json()['rascunho']['comportamentos']['transbordo_alerta']==ALERTA
             r=await rascunho('(11) 90000-0060');assert r.status_code==200 and r.json()['rascunho']['comportamentos']['transbordo_alerta']==ALERTA
             assert (await rascunho('55 11 3333-4444')).status_code==200
-            for ruim in ('900000060','55119000000601','4411900000060','11 9000-006a'):
+            for ruim in ('900000060','55119000000601','4411900000060','11 9000-006a','5501900000060','14155552671','11 7333-4444'):
                 r=await rascunho(ruim);assert r.status_code==400,ruim
                 assert r.json()['erro']['detalhes']['campos']==[{'campo':'comportamentos.transbordo_alerta','motivo':'valor','mensagem':'Use DDD + número, ex.: 11912345678'}]
             r=await rascunho(proprio);assert r.status_code==400 and r.json()['erro']['detalhes']['campos']==[{'campo':'comportamentos.transbordo_alerta','motivo':'numero_da_instancia'}]

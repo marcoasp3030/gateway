@@ -1,10 +1,12 @@
 -- TEL1 (29/10/2026): lista do piloto e telefones de alerta já gravados no formato do WhatsApp (55 + DDD + número, só dígitos),
 -- a mesma regra que a API passa a aplicar (app/nucleo/telefone.py). Tira espaços, traços, parênteses e +; 10 ou 11 dígitos
--- ganham o 55; 12 ou 13 começando com 55 ficam. Fora disso (e identificador com letras do canal api) o valor fica como está.
+-- ganham o 55; 12 ou 13 começando com 55 ficam; o resultado precisa ser número brasileiro (DDD 11 a 99 sem zero; celular com 9
+-- dígitos começando com 9 ou fixo com 8 começando com 2 a 5). Fora disso (e identificador com letras do canal api) o valor fica como está.
 -- Na lista do piloto, o número que ficar repetido depois de normalizar entra uma vez só, na primeira posição em que aparecia.
 CREATE FUNCTION pg_temp.tel1(valor TEXT) RETURNS TEXT LANGUAGE sql IMMUTABLE AS $$
-    SELECT CASE WHEN d ~ '^[0-9]{10,11}$' THEN '55'||d WHEN d ~ '^55[0-9]{10,11}$' THEN d ELSE valor END
-    FROM (SELECT regexp_replace(valor,'[[:space:]()+-]','','g') AS d) x
+    SELECT CASE WHEN n ~ '^55[1-9][1-9](9[0-9]{8}|[2-5][0-9]{7})$' THEN n ELSE valor END
+    FROM (SELECT CASE WHEN d ~ '^[0-9]{10,11}$' THEN '55'||d WHEN d ~ '^55[0-9]{10,11}$' THEN d END AS n
+          FROM (SELECT regexp_replace(valor,'[[:space:]()+-]','','g') AS d) x) y
 $$;
 CREATE FUNCTION pg_temp.tel1_lista(lista TEXT[]) RETURNS TEXT[] LANGUAGE sql IMMUTABLE AS $$
     SELECT coalesce(array_agg(n ORDER BY o),'{}') FROM (

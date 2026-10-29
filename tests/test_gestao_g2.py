@@ -166,7 +166,7 @@ def test_telefone_de_pedidos_e_de_alerta_no_formato_E164():
             for bom,gravado in (('5511900000010','5511900000010'),('+55 (11) 90000-0010','5511900000010'),('1133334444','551133334444')):
                 r=await client.patch('/admin/v1/tenants/alpha',json={'whatsapp_alerta_transbordo':bom});assert r.status_code==200,bom
                 assert r.json()['whatsapp_alerta_transbordo']==gravado
-            for ruim in ('123456789','123456789012345','4411900000010','11-9999',''):
+            for ruim in ('123456789','123456789012345','4411900000010','11-9999','','1294567890','5501900000010'):
                 assert (await client.patch('/admin/v1/tenants/alpha',json={'whatsapp_alerta_transbordo':ruim})).status_code==400,ruim
             # Recusa não altera o valor; nulo limpa (não informado). O banco também recusa fora da regra.
             assert (await client.get(f'{base}/{uid}')).json()['whatsapp_pedidos']=='123456789012345'

@@ -4,19 +4,22 @@ O piloto compara o número exatamente como chega da uazapi; "11912345678" gravad
 import re
 
 MENSAGEM='Use DDD + número, ex.: 11912345678'
+# Número brasileiro: DDD de 11 a 99 sem zero; celular com 9 dígitos começando com 9, ou fixo com 8 dígitos começando com 2 a 5.
+BRASIL=re.compile(r'55[1-9][1-9](9\d{8}|[2-5]\d{7})')
 SEPARADORES=re.compile(r'[\s\-()+]')
 # Canal api (ARQ1): identificador com letras ("teste-marco-01") vale na lista do piloto como está.
 IDENTIFICADOR=re.compile(r'[A-Za-z0-9_@+.-]{3,100}')
 
 
 def telefone_br(valor):
-    """Só dígitos com 55 na frente, ou None fora da regra: 10 ou 11 dígitos ganham o 55; 12 ou 13 começando com 55 ficam."""
+    """Só dígitos com 55 na frente, ou None fora da regra: 10 ou 11 dígitos ganham o 55; 12 ou 13 começando com 55 ficam;
+    o resultado precisa ser número brasileiro (BRASIL)."""
     if not isinstance(valor,str): return None
     d=SEPARADORES.sub('',valor)
     if not d.isascii() or not d.isdigit(): return None
-    if len(d) in (10,11): return '55'+d
-    if len(d) in (12,13) and d.startswith('55'): return d
-    return None
+    if len(d) in (10,11): d='55'+d
+    elif not (len(d) in (12,13) and d.startswith('55')): return None
+    return d if BRASIL.fullmatch(d) else None
 
 
 def contato_do_piloto(valor):

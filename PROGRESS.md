@@ -1468,8 +1468,9 @@ PY
 - **Regra** (`app/nucleo/telefone.py`), para `contatos_permitidos`, `alerta_telefone`, `transbordo_alerta` e `whatsapp_alerta_transbordo`:
   - tira espaços, traços, parênteses e `+`;
   - 10 ou 11 dígitos ganham o 55; 12 ou 13 começando com 55 ficam;
+  - o resultado precisa ser número brasileiro: DDD de 11 a 99 sem zero; celular com 9 dígitos começando com 9, ou fixo com 8 dígitos começando com 2 a 5;
   - fora disso, 400 com "Use DDD + número, ex.: 11912345678" e `detalhes.campo`.
   - Na lista do piloto, número repetido entra uma vez; identificador com letras (canal api, ARQ1) fica como está.
 - **Onde vale.** Ficha do agente, `PUT /config`, empresa (`whatsapp_alerta_transbordo`) e rascunho do atendimento (lá a mensagem vem em `campos[].mensagem`). `alerta_telefone` vazio continua limpando o campo.
 - **Migração 055.** Aplica a regra aos valores já gravados e tira repetidos da lista do piloto. Valor fora da regra fica como está.
-- **Testes.** `tests/test_tel1.py`. `test_cfg1c` e `test_gestao_g2` foram ajustados: a regra anterior do alerta de transbordo exigia o 55 e conferia o formato do número brasileiro.
+- **Testes.** `tests/test_tel1.py`. `test_cfg1c` e `test_gestao_g2` foram ajustados: o alerta de transbordo passa a aceitar o número sem o 55, e o fixo fica restrito a começar com 2 a 5 (antes, de 2 a 8).
