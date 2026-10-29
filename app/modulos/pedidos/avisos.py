@@ -25,7 +25,14 @@ def texto_pedido_unidade(p,itens,nome_unidade):
             linhas.append(f'   + {(str(o["quantidade"])+"× ") if o["quantidade"]>1 else ""}{o["opcao"]} ({o["grupo"]})'+(f' +{reais(o["preco_extra"])}' if o['preco_extra'] else ''))
         if i.get('observacao'): linhas.append(f'   obs.: {i["observacao"]}')
     linhas+=['─────────────────',f'Subtotal: {reais(p["subtotal"])}',f'Taxa de entrega: {reais(p["taxa_entrega"]) if p["modalidade"]=="delivery" else "não se aplica"}',
-             f'Total: {reais(p["total"])}','']
+             f'Total: {reais(p["total"])}']
+    # PAG1: forma de pagamento e troco (pedidos de antes do PAG1 não têm).
+    if p.get('forma_pagamento'):
+        pagamento=f'Pagamento: {p.get("pagamento_rotulo") or p["forma_pagamento"]}'
+        if p.get('troco_para') is not None:
+            pagamento+=f' — troco para {reais(p["troco_para"])} (levar {reais(p["troco_para"]-p["total"])} de troco)'
+        linhas.append(pagamento)
+    linhas.append('')
     linhas.append('Modalidade: '+(f'Entrega — {p["endereco"]}' if p['modalidade']=='delivery' else 'Retirada'))
     if p['horario']: linhas.append(f'Horário: {p["horario"]}')
     if p['observacao']: linhas.append(f'Observação: {p["observacao"]}')

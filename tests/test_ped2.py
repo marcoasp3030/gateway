@@ -198,8 +198,8 @@ def test_busca_com_categorias_e_registro_de_todas_as_chamadas():
             rows=[dict(r) for r in await conn.fetch('SELECT skill,metodo,campos,status,motivo,conversation_id,duracao_ms FROM skill_registro ORDER BY id')]
             assert [(r['skill'],r['metodo'],r['campos'],r['status'],r['motivo']) for r in rows]==[
                 ('buscar_catalogo','GET',['q','unidade'],200,'ok'),('ver_carrinho','GET',[],200,'ok'),
-                ('definir_entrega','PUT',['endereco','horario','modalidade'],422,'horario_invalido'),
-                ('definir_entrega','PUT',['endereco','modalidade','telefone'],400,'campo:corpo'),
+                ('definir_entrega','PUT',['endereco','forma_pagamento','horario','modalidade'],422,'horario_invalido'),   # PAG1: Pix do helper
+                ('definir_entrega','PUT',['endereco','forma_pagamento','modalidade','telefone'],400,'campo:corpo'),
                 ('adicionar_item','POST',['quantidade'],400,'campo:item_id'),
                 ('fechar_pedido','POST',[],404,'NOT_FOUND'),('fechar_pedido','POST',[],422,'falta_modalidade'),
                 ('consultar_pedido','GET',[],403,'FORBIDDEN'),('info_unidades','GET',[],200,'ok')]

@@ -232,7 +232,7 @@ def test_item_nao_buscado_unidade_antes_do_preco_registro_e_tem_cardapio():
                 ('adicionar_item',404,'item_inexistente',{'item_id':999999,'quantidade':1}),
                 ('ver_carrinho',200,'ok',None),
                 ('alterar_item',200,'ok',{'linha_id':linha,'item_id':tempura,'item_unidade':'patio_guedala','item_nome':'Ebi no Tempurá','quantidade':5}),
-                ('definir_entrega',200,'ok',{'modalidade':'delivery'}),
+                ('definir_entrega',200,'ok',{'modalidade':'delivery','forma_pagamento':'pix'}),   # PAG1: Pix do helper
                 ('info_unidades',200,'ok',{'unidade':'patio_guedala'}),
                 ('fechar_pedido',201,'ok',{'numero':numero}),('consultar_pedido',200,'ok',{'numero':numero})]
             tudo=json.dumps(rows,ensure_ascii=False);assert not any(x in tudo for x in ('secreto','Rua Secreta','sem cebola','bem passado','interfone'))

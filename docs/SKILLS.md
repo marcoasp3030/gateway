@@ -75,6 +75,12 @@ A cada turno o gateway envia, sem o agente pedir:
     "total": 327.0,
     "pedido_minimo": null,
     "tem_alcoolico": true,
+    "forma_pagamento": "dinheiro",
+    "pagamento_rotulo": "Dinheiro",
+    "troco_para": 350.0,
+    "troco": 23.0,
+    "formas_aceitas": [{"codigo": "pix", "rotulo": "Pix", "aceita_troco": false},
+                       {"codigo": "dinheiro", "rotulo": "Dinheiro", "aceita_troco": true}],
     "faltando": ["maioridade_confirmada"],
     "pode_fechar": false
   }
@@ -83,7 +89,8 @@ A cada turno o gateway envia, sem o agente pedir:
 
 - `itens[].id` é o identificador da **linha do carrinho** (usado para alterar e remover); `item_id` é o item do catálogo.
 - `taxa_entrega` nula = a unidade não tem taxa cadastrada ou não é entrega; nesse caso o `total` é só o subtotal e o agente diz que a taxa será confirmada pela unidade.
-- `faltando` lista o que impede fechar: `itens`, `modalidade`, `endereco`, `maioridade_confirmada`.
+- `faltando` lista o que impede fechar: `itens`, `modalidade`, `endereco`, `maioridade_confirmada`, `pagamento` (forma não escolhida, ou que saiu da lista da unidade) e `troco` (o valor para troco ficou menor ou igual ao total, por exemplo depois de acrescentar itens).
+- PAG1: `formas_aceitas` são as formas de pagamento da unidade do carrinho (vazia = a unidade não cadastrou nenhuma: o pedido não fecha, transfira para a equipe). `troco` é quanto a unidade leva de troco (`troco_para` − `total`).
 
 **Recusa** — erro com o motivo e o carrinho atual:
 
@@ -117,6 +124,11 @@ A cada turno o gateway envia, sem o agente pedir:
 | `horario_invalido` | 422 | Não deu para ler a hora: pergunta ao cliente um horário claro, ou envia `agendado_para` |
 | `horario_muito_distante` | 422 | Agendamento só até 7 dias à frente |
 | `pedido_nao_cancelavel` | 409 | A unidade já decidiu: transfere para a equipe |
+| `pagamento_nao_informado` | 422 | Em `fechar_pedido`: pergunta como o cliente vai pagar, oferecendo `detalhes.formas_aceitas`, e chama `definir_entrega` com `forma_pagamento` |
+| `forma_pagamento_invalida` | 422 | A forma não é aceita nesta unidade (ou deixou de ser): oferece uma de `detalhes.formas_aceitas`. Lista vazia: transfere (`motivo = pedido_para_confirmar`) |
+| `troco_so_em_dinheiro` | 422 | `troco_para` só com a forma que aceita troco (`dinheiro`). Não envie troco em Pix ou cartão |
+| `troco_menor_que_total` | 422 | O valor para troco precisa ser maior que `detalhes.total`. Pergunte de novo; se o cliente não precisa de troco, envie `troco_para: null` |
+| `delivery_indisponivel` | 422 | A unidade não faz entrega: oferece retirada |
 
 Outros erros: 401 (chave ausente ou inválida), 403 (chave sem o escopo), 404 (conversa inexistente), 400 (campo inválido; `detalhes.campo` diz qual).
 
@@ -227,8 +239,12 @@ Exemplo: `{"item_id": 1027, "quantidade": 2, "observacao": "sem cebola", "opcoes
 | `agendado_para` | Opcional: data e hora do pedido agendado, `AAAA-MM-DDTHH:MM` no fuso da unidade. Quando vem, vale no lugar da leitura do texto. `null` tira o agendamento |
 | `observacao` | Observação geral do pedido |
 | `maioridade_confirmada` | `true` **somente** depois de o cliente confirmar, com as próprias palavras, que tem 18 anos ou mais |
+| `forma_pagamento` | PAG1: código de uma das formas aceitas da unidade (`carrinho.formas_aceitas` ou `info_unidades` → `pagamentos[].codigo`), por exemplo `pix`, `dinheiro`, `cartao_entrega`. Use o **código**, não o rótulo. `null` tira. Trocar a forma tira o troco |
+| `troco_para` | PAG1: só com `forma_pagamento` que aceita troco (`dinheiro`): o valor que o cliente vai entregar, maior que o total. `null` = não precisa de troco. Pergunte "Vai precisar de troco? Para quanto?" |
 
-Exemplo: `{"modalidade": "delivery", "endereco": "Rua Jacarandá, 200, ap. 12 — Morumbi", "horario": "hoje às 20h"}`.
+Exemplos: `{"modalidade": "delivery", "endereco": "Rua Jacarandá, 200, ap. 12 — Morumbi", "horario": "hoje às 20h"}`; `{"forma_pagamento": "pix"}`; `{"forma_pagamento": "dinheiro", "troco_para": 100}`.
+
+A forma de pagamento é conferida contra a lista da unidade na hora e de novo no fechamento. O troco é comparado com o total já com a modalidade da mesma chamada (a taxa de entrega conta). Recusa desfaz a chamada inteira.
 
 ### 8. `fechar_pedido`
 
@@ -253,13 +269,16 @@ Retorno (HTTP 201). O número do pedido vem na raiz (`numero`) e em `pedido.nume
        "preco_unitario": 55.0, "subtotal": 55.0, "observacao": null, "alcoolico": true}
     ],
     "subtotal": 327.0, "taxa_entrega": null, "total": 327.0, "tem_alcoolico": true,
-    "motivo": null, "cliente_nome": "Ana Souza", "criado_em": "2026-10-10T16:29:00Z", "decidido_em": null
+    "motivo": null, "cliente_nome": "Ana Souza", "criado_em": "2026-10-10T16:29:00Z", "decidido_em": null,
+    "pagamento": {"forma": "dinheiro", "rotulo": "Dinheiro", "troco_para": 350.0, "troco": 23.0}
   },
   "carrinho": {"...": "vazio: o carrinho foi fechado"}
 }
 ```
 
 Depois de fechado, o pedido não muda. Se o cliente quiser outra coisa, `adicionar_item` abre um carrinho novo (outro pedido).
+
+PAG1: sem forma de pagamento, `fechar_pedido` recusa com `pagamento_nao_informado`. `pedido.pagamento` traz forma, rótulo, `troco_para` e `troco` (`null` nos pedidos anteriores ao PAG1). O pedido só registra **como** o cliente vai pagar; o gateway não cobra nem confirma pagamento.
 
 ### 9. `consultar_pedido`
 
@@ -358,7 +377,7 @@ Erros (mesmo envelope das outras Skills): sem chave ou chave inválida 401; chav
 
 A resposta não traz identificador interno, WhatsApp de pedidos nem dados de auditoria. O pacote de cada turno continua trazendo o bloco `unidades` resumido; esta Skill serve para o detalhe (agenda dos próximos dias e situação na hora da pergunta).
 
-Os blocos `entrega`, `retirada` e `pagamentos` existem desde o G4-a (11/10/2026), só informativos: o carrinho ainda não calcula taxa por bairro/CEP nem confere pagamento (isso é o G4-b, junto com a Skill nova `consultar_entrega`, contrato em `docs/ESPEC_GESTAO.md` 11.11, e a troca de `abaixo_do_minimo` por `abaixo_minimo`).
+Os blocos `entrega`, `retirada` e `pagamentos` existem desde o G4-a (11/10/2026). Desde o PAG1 (29/10/2026), `pagamentos` é a lista que `definir_entrega` aceita em `forma_pagamento`. Para o lançamento, a taxa cobrada no pedido é só a fixa da unidade (`taxa_entrega`): o carrinho ainda não calcula taxa por bairro/CEP (isso é o G4-b, junto com a Skill nova `consultar_entrega`, contrato em `docs/ESPEC_GESTAO.md` 11.11, e a troca de `abaixo_do_minimo` por `abaixo_minimo`).
 
 ---
 
@@ -368,8 +387,9 @@ Os blocos `entrega`, `retirada` e `pagamentos` existem desde o G4-a (11/10/2026)
 2. Um carrinho é de uma unidade só.
 3. O preço é sempre o do catálogo: copiado quando o item entra e conferido de novo ao fechar.
 4. Carrinho com bebida alcoólica só fecha com `maioridade_confirmada = true`.
-5. Entrega exige endereço; `pedido_minimo` e `aceita_retirada` da unidade são respeitados.
-6. O pedido só é visto e cancelado pela conversa que o fez, e só antes de a unidade decidir.
+5. Entrega exige endereço; `pedido_minimo`, `aceita_retirada` e `delivery` (`delivery_ativo`) da unidade são respeitados.
+6. O pedido só fecha com uma forma de pagamento aceita pela unidade; troco só em dinheiro e acima do total.
+7. O pedido só é visto e cancelado pela conversa que o fez, e só antes de a unidade decidir.
 
 ## O que acontece depois de `fechar_pedido` (sem ação do agente)
 
@@ -384,8 +404,9 @@ Os blocos `entrega`, `retirada` e `pagamentos` existem desde o G4-a (11/10/2026)
 - Se o cliente não disse a unidade, pergunte antes de montar o pedido.
 - Item com `preco` nulo: não diga valor e não adicione. Transfira com `acao = transferir_humano` e `motivo = pedido_para_confirmar`.
 - Com bebida alcoólica no carrinho (`tem_alcoolico = true`), pergunte: "Você confirma que tem 18 anos ou mais?". Só depois da confirmação chame `definir_entrega` com `maioridade_confirmada: true`. Se o cliente negar, remova as bebidas.
-- Antes de `fechar_pedido`, leia o resumo e peça a confirmação do cliente.
-- Campo nulo em `unidades` (taxa, área de entrega, formas de pagamento, pedido mínimo): diga que a unidade confirma no retorno do pré-pedido.
+- Pergunte a forma de pagamento oferecendo só as de `carrinho.formas_aceitas` (pelo rótulo) e registre com `definir_entrega` (`forma_pagamento` com o código). Em dinheiro, pergunte se precisa de troco e para quanto (`troco_para`). Não diga que o pagamento foi feito ou confirmado: a unidade recebe na entrega ou na retirada.
+- Antes de `fechar_pedido`, leia o resumo e peça a confirmação do cliente. O resumo inclui a forma de pagamento (e o troco, se houver).
+- Campo nulo em `unidades` (taxa, área de entrega, pedido mínimo): diga que a unidade confirma no retorno do pré-pedido. Formas de pagamento vazias: o pedido não fecha; transfira para a equipe.
 - **Nunca diga que o pedido foi fechado, registrado ou enviado sem `fechar_pedido` ter devolvido `ok: true` com `numero` neste turno.** Se o gateway receber esse anúncio sem o fechamento, refaz o turno com `aviso_do_gateway` no pacote e, se repetir, não envia a sua resposta.
 - Carrinho com `horario_vencido: true`: o horário guardado já passou. Pergunte outro horário antes de fechar; não repita o horário antigo ao cliente.
 - Não marque horário que o cliente não disse. Unidade fechada agora: ofereça os horários a partir de `proxima_abertura` e espere a escolha.

@@ -52,6 +52,10 @@ class Entrega(Estrito):
     agendado_para:str|None=Field(None,max_length=40)
     observacao:str|None=Field(None,max_length=500)
     maioridade_confirmada:bool|None=None
+    # PAG1: código de uma das formas aceitas da unidade (info_unidades.pagamentos / carrinho.formas_aceitas); null tira.
+    forma_pagamento:str|None=Field(None,pattern=r'^[a-z0-9_]{1,40}$')
+    # Valor que o cliente vai entregar em dinheiro, para o troco; null = não precisa de troco.
+    troco_para:float|None=Field(None,gt=0,le=100000)
 
 
 class Fechar(Estrito):
@@ -152,7 +156,7 @@ async def entrega(request:Request,conversation_id:str,dados:Entrega,ctx=Depends(
     t=await conversa_da_chave(request,ctx,conversation_id)
     enviados=dados.model_dump(include=dados.model_fields_set)
     # Só os nomes dos campos informados: endereço e observação não ficam no registro.
-    request.state.skill_ref={k:enviados.get(k) for k in ('unidade','modalidade','agendado_para') if k in enviados}
+    request.state.skill_ref={k:enviados.get(k) for k in ('unidade','modalidade','agendado_para','forma_pagamento') if k in enviados}
     r=await escrever(request,t,conversation_id,lambda c: servico.entrega(c,t,conversation_id,enviados),
         'definir_entrega',{'detalhe':', '.join(sorted(enviados))})
     # DISP1: com o horário novo, algum item do carrinho deixou de ser servido? O agente avisa o cliente na hora, não só no fechamento.
@@ -168,7 +172,8 @@ def resumo_evento(p):
     r=servico.retrato_pedido(p)
     return {'numero':r['numero'],'status':r['status'],'conversation_id':r['conversation_id'],'unidade':r['unidade'],'modalidade':r['modalidade'],
             'itens':[{'codigo':i['codigo'],'nome':i['nome'],'quantidade':i['quantidade'],'preco_unitario':i['preco_unitario']} for i in r['itens']],
-            'subtotal':r['subtotal'],'taxa_entrega':r['taxa_entrega'],'total':r['total'],'tem_alcoolico':r['tem_alcoolico']}
+            'subtotal':r['subtotal'],'taxa_entrega':r['taxa_entrega'],'total':r['total'],'tem_alcoolico':r['tem_alcoolico'],
+            'forma_pagamento':(r['pagamento'] or {}).get('forma')}
 
 
 @router.post('/api/v1/pedidos',status_code=201)

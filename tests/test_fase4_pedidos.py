@@ -31,7 +31,10 @@ async def montar(conn,client,app):
     async def conversa(usuario):
         return (await client.post('/admin/v1/tenants/bykoji/agentes/bykoji_atendimento/simular',json={'canal_id':can,'identificador':usuario,'texto':'oi','message_id':'m-'+usuario})).json()['conversation_id']
     assert (await client.post('/admin/v1/tenants/bykoji/catalogo/importar',params={'simulacao':'false'},content=CSV.encode())).json()['aplicado']
-    assert (await client.post('/admin/v1/tenants/bykoji/unidades',json={'nome':'Pátio Guedala','codigo':'patio_guedala'})).status_code==201
+    r=await client.post('/admin/v1/tenants/bykoji/unidades',json={'nome':'Pátio Guedala','codigo':'patio_guedala'});assert r.status_code==201
+    # PAG1: formas de pagamento da unidade (o pedido exige uma delas).
+    assert (await client.put(f'/admin/v1/tenants/bykoji/unidades/{r.json()["id"]}/pagamentos',
+                             json={'itens':[{'codigo':'pix'},{'codigo':'dinheiro','aceita_troco':True}]})).status_code==200
     def segredo(r): return next(v for k,v in r.json().items() if isinstance(v,str) and k in ('chave','api_key','valor','segredo','key'))
     k=segredo(await client.post('/admin/v1/tenants/bykoji/api-keys',json={'nome':'skills','escopos':['ferramentas:catalogo','ferramentas:pedidos']}))
     outra=segredo(await client.post('/admin/v1/tenants/bykoji/api-keys',json={'nome':'so-catalogo','escopos':['ferramentas:catalogo']}))
@@ -42,8 +45,17 @@ async def montar(conn,client,app):
         import re
         m=re.fullmatch(r'/carrinho/([^/]+)/itens',caminho)
         if m: await conn.execute("INSERT INTO catalogo_vistos(tenant_id,conversation_id,item_id) SELECT 'bykoji',$1,id FROM catalogo_itens WHERE tenant_id='bykoji' ON CONFLICT DO NOTHING",m.group(1))
-    async def api(metodo,caminho,chave=k,buscado=True,**kw):
+    async def api(metodo,caminho,chave=k,buscado=True,pagamento=True,**kw):
         if metodo=='POST' and buscado: await visto(caminho)
+        # PAG1: definir_entrega com a modalidade e sem forma de pagamento leva Pix, para os testes que não são de pagamento
+        # fecharem o pedido. A regra em si é testada em tests/test_pag1.py (pagamento=False).
+        if pagamento and metodo=='PUT' and caminho.endswith('/entrega') and 'modalidade' in (kw.get('json') or {}) and 'forma_pagamento' not in kw['json'] \
+                and (kw['json'].get('unidade') or await conn.fetchval("SELECT unidade FROM carrinhos WHERE status='aberto' AND conversation_id=$1",caminho.split('/')[2])):
+            # Unidade criada pelo teste sem formas ganha Pix (a do cenário já tem Pix e dinheiro).
+            await conn.execute("""INSERT INTO unidade_pagamentos(tenant_id,unidade_id,codigo,rotulo,aceita_troco,ativo,ordem)
+                SELECT u.tenant_id,u.id,'pix','Pix',false,true,0 FROM tenant_unidades u WHERE u.tenant_id='bykoji'
+                AND NOT EXISTS (SELECT 1 FROM unidade_pagamentos p WHERE p.tenant_id=u.tenant_id AND p.unidade_id=u.id)""")
+            kw['json']={**kw['json'],'forma_pagamento':'pix'}
         return await client.request(metodo,'/api/v1'+caminho,headers={'X-API-Key':chave,'Authorization':''},**kw)
     return conversa,ids,api,outra
 
@@ -60,7 +72,7 @@ def test_carrinho_regras_de_item_unidade_e_total():
             c=await conversa('cliente1');base=f'/carrinho/{c}'
             # Carrinho vazio: nada criado, diz o que falta.
             r=(await api('GET',base)).json()['carrinho']
-            assert (r['itens'],r['subtotal'],r['total'],r['pode_fechar'],r['faltando'])==([],None,None,False,['itens','modalidade'])
+            assert (r['itens'],r['subtotal'],r['total'],r['pode_fechar'],r['faltando'])==([],None,None,False,['itens','modalidade','pagamento'])
             assert await conn.fetchval('SELECT count(*) FROM carrinhos')==0
             # Adiciona: toda escrita devolve o carrinho completo; o preço vem do catálogo.
             r=await api('POST',base+'/itens',json={'item_id':ids['GUE-0001'],'quantidade':2});assert r.status_code==200,r.text
@@ -116,7 +128,7 @@ def test_fechar_pedido_exigencias_alcool_minimo_e_preco_do_banco():
             r=await fechar();assert (r.status_code,motivo(r))==(422,'carrinho_vazio')
             await api('POST',base+'/itens',json={'item_id':ids['GUE-0002']})
             await api('POST',base+'/itens',json={'item_id':ids['GUE-0004'],'quantidade':2})      # cerveja
-            r=await fechar();assert (r.status_code,motivo(r))==(422,'falta_modalidade') and r.json()['carrinho']['faltando']==['modalidade','maioridade_confirmada']
+            r=await fechar();assert (r.status_code,motivo(r))==(422,'falta_modalidade') and r.json()['carrinho']['faltando']==['modalidade','maioridade_confirmada','pagamento']
             # Delivery sem endereço → 422.
             k=(await api('PUT',base+'/entrega',json={'modalidade':'delivery'})).json()['carrinho'];assert k['faltando']==['endereco','maioridade_confirmada']
             r=await fechar();assert (r.status_code,motivo(r))==(422,'falta_endereco')

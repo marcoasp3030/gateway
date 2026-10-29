@@ -203,8 +203,11 @@
        "endereco": null,
        "faltando": [
         "itens",
-        "modalidade"
+        "modalidade",
+        "pagamento"
        ],
+       "forma_pagamento": null,
+       "formas_aceitas": [],
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -214,12 +217,15 @@
        "modalidade": null,
        "numero_itens": 0,
        "observacao": null,
+       "pagamento_rotulo": null,
        "pedido_minimo": null,
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
        "tem_alcoolico": false,
        "total": null,
+       "troco": null,
+       "troco_para": null,
        "unidade": null
       },
       "carrinho_expirado": false,
@@ -391,7 +397,21 @@
       "conversation_id": "bykoji:can_<id>:5511900000001",
       "endereco": null,
       "faltando": [
-       "modalidade"
+       "modalidade",
+       "pagamento"
+      ],
+      "forma_pagamento": null,
+      "formas_aceitas": [
+       {
+        "aceita_troco": false,
+        "codigo": "pix",
+        "rotulo": "Pix"
+       },
+       {
+        "aceita_troco": true,
+        "codigo": "dinheiro",
+        "rotulo": "Dinheiro"
+       }
       ],
       "horario": null,
       "horario_aviso": null,
@@ -418,12 +438,15 @@
       "modalidade": null,
       "numero_itens": 2,
       "observacao": null,
+      "pagamento_rotulo": null,
       "pedido_minimo": null,
       "pode_fechar": false,
       "subtotal": 68.0,
       "taxa_entrega": null,
       "tem_alcoolico": false,
       "total": 68.0,
+      "troco": null,
+      "troco_para": null,
       "unidade": "patio_guedala"
      },
      "ok": true
@@ -736,8 +759,11 @@
        "endereco": null,
        "faltando": [
         "itens",
-        "modalidade"
+        "modalidade",
+        "pagamento"
        ],
+       "forma_pagamento": null,
+       "formas_aceitas": [],
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -747,12 +773,15 @@
        "modalidade": null,
        "numero_itens": 0,
        "observacao": null,
+       "pagamento_rotulo": null,
        "pedido_minimo": null,
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
        "tem_alcoolico": false,
        "total": null,
+       "troco": null,
+       "troco_para": null,
        "unidade": null
       },
       "carrinho_expirado": false,
@@ -1076,8 +1105,11 @@
        "endereco": null,
        "faltando": [
         "itens",
-        "modalidade"
+        "modalidade",
+        "pagamento"
        ],
+       "forma_pagamento": null,
+       "formas_aceitas": [],
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -1087,12 +1119,15 @@
        "modalidade": null,
        "numero_itens": 0,
        "observacao": null,
+       "pagamento_rotulo": null,
        "pedido_minimo": null,
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
        "tem_alcoolico": false,
        "total": null,
+       "troco": null,
+       "troco_para": null,
        "unidade": null
       },
       "carrinho_expirado": false,
@@ -1518,7 +1553,21 @@
        "endereco": null,
        "faltando": [
         "modalidade",
-        "maioridade_confirmada"
+        "maioridade_confirmada",
+        "pagamento"
+       ],
+       "forma_pagamento": null,
+       "formas_aceitas": [
+        {
+         "aceita_troco": false,
+         "codigo": "pix",
+         "rotulo": "Pix"
+        },
+        {
+         "aceita_troco": true,
+         "codigo": "dinheiro",
+         "rotulo": "Dinheiro"
+        }
        ],
        "horario": null,
        "horario_aviso": null,
@@ -1560,12 +1609,15 @@
        "modalidade": null,
        "numero_itens": 2,
        "observacao": null,
+       "pagamento_rotulo": null,
        "pedido_minimo": null,
        "pode_fechar": false,
        "subtotal": 89.0,
        "taxa_entrega": null,
        "tem_alcoolico": true,
        "total": 89.0,
+       "troco": null,
+       "troco_para": null,
        "unidade": "patio_guedala"
       },
       "carrinho_expirado": false,
@@ -1966,8 +2018,11 @@
        "endereco": null,
        "faltando": [
         "itens",
-        "modalidade"
+        "modalidade",
+        "pagamento"
        ],
+       "forma_pagamento": null,
+       "formas_aceitas": [],
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -1977,12 +2032,15 @@
        "modalidade": null,
        "numero_itens": 0,
        "observacao": null,
+       "pagamento_rotulo": null,
        "pedido_minimo": null,
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
        "tem_alcoolico": false,
        "total": null,
+       "troco": null,
+       "troco_para": null,
        "unidade": null
       },
       "carrinho_expirado": false,
@@ -2507,8 +2565,11 @@
        "endereco": null,
        "faltando": [
         "itens",
-        "modalidade"
+        "modalidade",
+        "pagamento"
        ],
+       "forma_pagamento": null,
+       "formas_aceitas": [],
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -2518,12 +2579,15 @@
        "modalidade": null,
        "numero_itens": 0,
        "observacao": null,
+       "pagamento_rotulo": null,
        "pedido_minimo": null,
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
        "tem_alcoolico": false,
        "total": null,
+       "troco": null,
+       "troco_para": null,
        "unidade": null
       },
       "carrinho_expirado": true,
@@ -2691,8 +2755,11 @@
       "endereco": null,
       "faltando": [
        "itens",
-       "modalidade"
+       "modalidade",
+       "pagamento"
       ],
+      "forma_pagamento": null,
+      "formas_aceitas": [],
       "horario": null,
       "horario_aviso": null,
       "horario_vencido": false,
@@ -2702,12 +2769,15 @@
       "modalidade": null,
       "numero_itens": 0,
       "observacao": null,
+      "pagamento_rotulo": null,
       "pedido_minimo": null,
       "pode_fechar": false,
       "subtotal": null,
       "taxa_entrega": null,
       "tem_alcoolico": false,
       "total": null,
+      "troco": null,
+      "troco_para": null,
       "unidade": null
      },
      "ok": true
@@ -2941,8 +3011,11 @@
        "endereco": null,
        "faltando": [
         "itens",
-        "modalidade"
+        "modalidade",
+        "pagamento"
        ],
+       "forma_pagamento": null,
+       "formas_aceitas": [],
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -2952,12 +3025,15 @@
        "modalidade": null,
        "numero_itens": 0,
        "observacao": null,
+       "pagamento_rotulo": null,
        "pedido_minimo": null,
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
        "tem_alcoolico": false,
        "total": null,
+       "troco": null,
+       "troco_para": null,
        "unidade": null
       },
       "carrinho_expirado": false,
@@ -3108,7 +3184,21 @@
       "conversation_id": "bykoji:can_<id>:55119000000017",
       "endereco": null,
       "faltando": [
-       "modalidade"
+       "modalidade",
+       "pagamento"
+      ],
+      "forma_pagamento": null,
+      "formas_aceitas": [
+       {
+        "aceita_troco": false,
+        "codigo": "pix",
+        "rotulo": "Pix"
+       },
+       {
+        "aceita_troco": true,
+        "codigo": "dinheiro",
+        "rotulo": "Dinheiro"
+       }
       ],
       "horario": null,
       "horario_aviso": null,
@@ -3135,12 +3225,15 @@
       "modalidade": null,
       "numero_itens": 1,
       "observacao": null,
+      "pagamento_rotulo": null,
       "pedido_minimo": null,
       "pode_fechar": false,
       "subtotal": 150.0,
       "taxa_entrega": null,
       "tem_alcoolico": false,
       "total": 150.0,
+      "troco": null,
+      "troco_para": null,
       "unidade": "patio_guedala"
      },
      "ok": true
@@ -3202,7 +3295,7 @@
       "skill": "adicionar_item"
      },
      {
-      "detalhe": "horario, modalidade, unidade",
+      "detalhe": "forma_pagamento, horario, modalidade, unidade",
       "ha_segundos": "<variavel>",
       "item": null,
       "quantidade": null,
@@ -3398,8 +3491,11 @@
        "endereco": null,
        "faltando": [
         "itens",
-        "modalidade"
+        "modalidade",
+        "pagamento"
        ],
+       "forma_pagamento": null,
+       "formas_aceitas": [],
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -3409,12 +3505,15 @@
        "modalidade": null,
        "numero_itens": 0,
        "observacao": null,
+       "pagamento_rotulo": null,
        "pedido_minimo": null,
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
        "tem_alcoolico": false,
        "total": null,
+       "troco": null,
+       "troco_para": null,
        "unidade": null
       },
       "carrinho_expirado": false,
@@ -3671,6 +3770,12 @@
       "motivo": null,
       "numero": "<numero>",
       "observacao": null,
+      "pagamento": {
+       "forma": "pix",
+       "rotulo": "Pix",
+       "troco": null,
+       "troco_para": null
+      },
       "previsao_ate": null,
       "previsao_min": null,
       "status": "confirmado",
@@ -3791,7 +3896,7 @@
     "erro": null,
     "referencia": "<numero>",
     "status": "pendente",
-    "texto": "🍱 NOVO PEDIDO <numero>\n\nUnidade: Pátio Guedala\nCliente: (sem nome)\nTelefone: 5511900000001\n\n2× Edamame (R$ 34,00) = R$ 68,00\n─────────────────\nSubtotal: R$ 68,00\nTaxa de entrega: não se aplica\nTotal: R$ 68,00\n\nModalidade: Retirada\nHorário: hoje às 14h\n\nPara confirmar, responda: OK <numero>\nPara recusar, responda: NÃO <numero> motivo",
+    "texto": "🍱 NOVO PEDIDO <numero>\n\nUnidade: Pátio Guedala\nCliente: (sem nome)\nTelefone: 5511900000001\n\n2× Edamame (R$ 34,00) = R$ 68,00\n─────────────────\nSubtotal: R$ 68,00\nTaxa de entrega: não se aplica\nTotal: R$ 68,00\nPagamento: Pix\n\nModalidade: Retirada\nHorário: hoje às 14h\n\nPara confirmar, responda: OK <numero>\nPara recusar, responda: NÃO <numero> motivo",
     "tipo": "pedido_unidade"
    }
   ],
@@ -3824,7 +3929,7 @@
       "skill": "adicionar_item"
      },
      {
-      "detalhe": "horario, modalidade, unidade",
+      "detalhe": "forma_pagamento, horario, modalidade, unidade",
       "ha_segundos": "<variavel>",
       "item": null,
       "quantidade": null,
@@ -4011,6 +4116,19 @@
        "de_atendimento_anterior": false,
        "endereco": null,
        "faltando": [],
+       "forma_pagamento": "pix",
+       "formas_aceitas": [
+        {
+         "aceita_troco": false,
+         "codigo": "pix",
+         "rotulo": "Pix"
+        },
+        {
+         "aceita_troco": true,
+         "codigo": "dinheiro",
+         "rotulo": "Dinheiro"
+        }
+       ],
        "horario": "hoje às 14h",
        "horario_aviso": null,
        "horario_vencido": false,
@@ -4036,12 +4154,15 @@
        "modalidade": "retirada",
        "numero_itens": 2,
        "observacao": null,
+       "pagamento_rotulo": "Pix",
        "pedido_minimo": null,
        "pode_fechar": true,
        "subtotal": 68.0,
        "taxa_entrega": null,
        "tem_alcoolico": false,
        "total": 68.0,
+       "troco": null,
+       "troco_para": null,
        "unidade": "patio_guedala"
       },
       "carrinho_expirado": false,
@@ -4234,8 +4355,11 @@
       "endereco": null,
       "faltando": [
        "itens",
-       "modalidade"
+       "modalidade",
+       "pagamento"
       ],
+      "forma_pagamento": null,
+      "formas_aceitas": [],
       "horario": null,
       "horario_aviso": null,
       "horario_vencido": false,
@@ -4245,12 +4369,15 @@
       "modalidade": null,
       "numero_itens": 0,
       "observacao": null,
+      "pagamento_rotulo": null,
       "pedido_minimo": null,
       "pode_fechar": false,
       "subtotal": null,
       "taxa_entrega": null,
       "tem_alcoolico": false,
       "total": null,
+      "troco": null,
+      "troco_para": null,
       "unidade": null
      },
      "numero": "<numero>",
@@ -4283,6 +4410,12 @@
       "motivo": null,
       "numero": "<numero>",
       "observacao": null,
+      "pagamento": {
+       "forma": "pix",
+       "rotulo": "Pix",
+       "troco": null,
+       "troco_para": null
+      },
       "previsao_min": null,
       "status": "aguardando_loja",
       "subtotal": 68.0,
@@ -4538,8 +4671,11 @@
        "endereco": null,
        "faltando": [
         "itens",
-        "modalidade"
+        "modalidade",
+        "pagamento"
        ],
+       "forma_pagamento": null,
+       "formas_aceitas": [],
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -4549,12 +4685,15 @@
        "modalidade": null,
        "numero_itens": 0,
        "observacao": null,
+       "pagamento_rotulo": null,
        "pedido_minimo": null,
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
        "tem_alcoolico": false,
        "total": null,
+       "troco": null,
+       "troco_para": null,
        "unidade": null
       },
       "carrinho_expirado": false,
@@ -4821,7 +4960,20 @@
        "formas_pagamento": null,
        "itens_no_cardapio": 4,
        "nome": "Pátio Guedala",
-       "pagamentos": [],
+       "pagamentos": [
+        {
+         "aceita_troco": false,
+         "codigo": "pix",
+         "instrucoes": null,
+         "rotulo": "Pix"
+        },
+        {
+         "aceita_troco": true,
+         "codigo": "dinheiro",
+         "instrucoes": null,
+         "rotulo": "Dinheiro"
+        }
+       ],
        "pedido_minimo": null,
        "regras": null,
        "retirada": {
@@ -4874,7 +5026,7 @@
     "erro": null,
     "referencia": "<numero>",
     "status": "simulado",
-    "texto": "🍱 NOVO PEDIDO <numero>\n\nUnidade: Pátio Guedala\nCliente: (sem nome)\nTelefone: 5511900000001\n\n2× Edamame (R$ 34,00) = R$ 68,00\n─────────────────\nSubtotal: R$ 68,00\nTaxa de entrega: não se aplica\nTotal: R$ 68,00\n\nModalidade: Retirada\nHorário: hoje às 14h\n\nPara confirmar, responda: OK <numero>\nPara recusar, responda: NÃO <numero> motivo",
+    "texto": "🍱 NOVO PEDIDO <numero>\n\nUnidade: Pátio Guedala\nCliente: (sem nome)\nTelefone: 5511900000001\n\n2× Edamame (R$ 34,00) = R$ 68,00\n─────────────────\nSubtotal: R$ 68,00\nTaxa de entrega: não se aplica\nTotal: R$ 68,00\nPagamento: Pix\n\nModalidade: Retirada\nHorário: hoje às 14h\n\nPara confirmar, responda: OK <numero>\nPara recusar, responda: NÃO <numero> motivo",
     "tipo": "pedido_unidade"
    },
    {
@@ -5559,6 +5711,7 @@
    },
    {
     "campos": [
+     "forma_pagamento",
      "horario",
      "modalidade",
      "unidade"
@@ -5996,7 +6149,21 @@
        "de_atendimento_anterior": false,
        "endereco": null,
        "faltando": [
-        "modalidade"
+        "modalidade",
+        "pagamento"
+       ],
+       "forma_pagamento": null,
+       "formas_aceitas": [
+        {
+         "aceita_troco": false,
+         "codigo": "pix",
+         "rotulo": "Pix"
+        },
+        {
+         "aceita_troco": true,
+         "codigo": "dinheiro",
+         "rotulo": "Dinheiro"
+        }
        ],
        "horario": null,
        "horario_aviso": null,
@@ -6023,12 +6190,15 @@
        "modalidade": null,
        "numero_itens": 2,
        "observacao": null,
+       "pagamento_rotulo": null,
        "pedido_minimo": null,
        "pode_fechar": false,
        "subtotal": 68.0,
        "taxa_entrega": null,
        "tem_alcoolico": false,
        "total": 68.0,
+       "troco": null,
+       "troco_para": null,
        "unidade": "patio_guedala"
       },
       "carrinho_expirado": false,
@@ -6211,6 +6381,19 @@
       "conversation_id": "bykoji:can_<id>:5511900000001",
       "endereco": null,
       "faltando": [],
+      "forma_pagamento": "pix",
+      "formas_aceitas": [
+       {
+        "aceita_troco": false,
+        "codigo": "pix",
+        "rotulo": "Pix"
+       },
+       {
+        "aceita_troco": true,
+        "codigo": "dinheiro",
+        "rotulo": "Dinheiro"
+       }
+      ],
       "horario": "hoje às 14h",
       "horario_aviso": null,
       "horario_vencido": false,
@@ -6236,12 +6419,15 @@
       "modalidade": "retirada",
       "numero_itens": 2,
       "observacao": null,
+      "pagamento_rotulo": "Pix",
       "pedido_minimo": null,
       "pode_fechar": true,
       "subtotal": 68.0,
       "taxa_entrega": null,
       "tem_alcoolico": false,
       "total": 68.0,
+      "troco": null,
+      "troco_para": null,
       "unidade": "patio_guedala"
      },
      "itens_indisponiveis": [],
@@ -6258,6 +6444,19 @@
       "conversation_id": "bykoji:can_<id>:5511900000001",
       "endereco": null,
       "faltando": [],
+      "forma_pagamento": "pix",
+      "formas_aceitas": [
+       {
+        "aceita_troco": false,
+        "codigo": "pix",
+        "rotulo": "Pix"
+       },
+       {
+        "aceita_troco": true,
+        "codigo": "dinheiro",
+        "rotulo": "Dinheiro"
+       }
+      ],
       "horario": "hoje às 14h",
       "horario_aviso": null,
       "horario_vencido": false,
@@ -6283,12 +6482,15 @@
       "modalidade": "retirada",
       "numero_itens": 2,
       "observacao": null,
+      "pagamento_rotulo": "Pix",
       "pedido_minimo": null,
       "pode_fechar": true,
       "subtotal": 68.0,
       "taxa_entrega": null,
       "tem_alcoolico": false,
       "total": 68.0,
+      "troco": null,
+      "troco_para": null,
       "unidade": "patio_guedala"
      },
      "ok": true
@@ -6410,7 +6612,20 @@
        "formas_pagamento": null,
        "itens_no_cardapio": 4,
        "nome": "Pátio Guedala",
-       "pagamentos": [],
+       "pagamentos": [
+        {
+         "aceita_troco": false,
+         "codigo": "pix",
+         "instrucoes": null,
+         "rotulo": "Pix"
+        },
+        {
+         "aceita_troco": true,
+         "codigo": "dinheiro",
+         "instrucoes": null,
+         "rotulo": "Dinheiro"
+        }
+       ],
        "pedido_minimo": null,
        "regras": null,
        "retirada": {
@@ -6679,8 +6894,11 @@
        "endereco": null,
        "faltando": [
         "itens",
-        "modalidade"
+        "modalidade",
+        "pagamento"
        ],
+       "forma_pagamento": null,
+       "formas_aceitas": [],
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -6690,12 +6908,15 @@
        "modalidade": null,
        "numero_itens": 0,
        "observacao": null,
+       "pagamento_rotulo": null,
        "pedido_minimo": null,
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
        "tem_alcoolico": false,
        "total": null,
+       "troco": null,
+       "troco_para": null,
        "unidade": null
       },
       "carrinho_expirado": false,
@@ -6899,7 +7120,7 @@
       "skill": "adicionar_item"
      },
      {
-      "detalhe": "horario, modalidade, unidade",
+      "detalhe": "forma_pagamento, horario, modalidade, unidade",
       "ha_segundos": "<variavel>",
       "item": null,
       "quantidade": null,
@@ -7095,8 +7316,11 @@
        "endereco": null,
        "faltando": [
         "itens",
-        "modalidade"
+        "modalidade",
+        "pagamento"
        ],
+       "forma_pagamento": null,
+       "formas_aceitas": [],
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -7106,12 +7330,15 @@
        "modalidade": null,
        "numero_itens": 0,
        "observacao": null,
+       "pagamento_rotulo": null,
        "pedido_minimo": null,
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
        "tem_alcoolico": false,
        "total": null,
+       "troco": null,
+       "troco_para": null,
        "unidade": null
       },
       "carrinho_expirado": false,
@@ -7637,8 +7864,11 @@
        "endereco": null,
        "faltando": [
         "itens",
-        "modalidade"
+        "modalidade",
+        "pagamento"
        ],
+       "forma_pagamento": null,
+       "formas_aceitas": [],
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -7648,12 +7878,15 @@
        "modalidade": null,
        "numero_itens": 0,
        "observacao": null,
+       "pagamento_rotulo": null,
        "pedido_minimo": null,
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
        "tem_alcoolico": false,
        "total": null,
+       "troco": null,
+       "troco_para": null,
        "unidade": null
       },
       "carrinho_expirado": false,
@@ -7859,7 +8092,7 @@
       "skill": "adicionar_item"
      },
      {
-      "detalhe": "horario, modalidade, unidade",
+      "detalhe": "forma_pagamento, horario, modalidade, unidade",
       "ha_segundos": "<variavel>",
       "item": null,
       "quantidade": null,
@@ -8055,8 +8288,11 @@
        "endereco": null,
        "faltando": [
         "itens",
-        "modalidade"
+        "modalidade",
+        "pagamento"
        ],
+       "forma_pagamento": null,
+       "formas_aceitas": [],
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -8066,12 +8302,15 @@
        "modalidade": null,
        "numero_itens": 0,
        "observacao": null,
+       "pagamento_rotulo": null,
        "pedido_minimo": null,
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
        "tem_alcoolico": false,
        "total": null,
+       "troco": null,
+       "troco_para": null,
        "unidade": null
       },
       "carrinho_expirado": false,
@@ -8531,8 +8770,11 @@
        "endereco": null,
        "faltando": [
         "itens",
-        "modalidade"
+        "modalidade",
+        "pagamento"
        ],
+       "forma_pagamento": null,
+       "formas_aceitas": [],
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -8542,12 +8784,15 @@
        "modalidade": null,
        "numero_itens": 0,
        "observacao": null,
+       "pagamento_rotulo": null,
        "pedido_minimo": null,
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
        "tem_alcoolico": false,
        "total": null,
+       "troco": null,
+       "troco_para": null,
        "unidade": null
       },
       "carrinho_expirado": false,
@@ -8699,8 +8944,11 @@
       "endereco": null,
       "faltando": [
        "itens",
-       "modalidade"
+       "modalidade",
+       "pagamento"
       ],
+      "forma_pagamento": null,
+      "formas_aceitas": [],
       "horario": null,
       "horario_aviso": null,
       "horario_vencido": false,
@@ -8710,12 +8958,15 @@
       "modalidade": null,
       "numero_itens": 0,
       "observacao": null,
+      "pagamento_rotulo": null,
       "pedido_minimo": null,
       "pode_fechar": false,
       "subtotal": null,
       "taxa_entrega": null,
       "tem_alcoolico": false,
       "total": null,
+      "troco": null,
+      "troco_para": null,
       "unidade": null
      },
      "erro": {
@@ -8972,8 +9223,11 @@
        "endereco": null,
        "faltando": [
         "itens",
-        "modalidade"
+        "modalidade",
+        "pagamento"
        ],
+       "forma_pagamento": null,
+       "formas_aceitas": [],
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -8983,12 +9237,15 @@
        "modalidade": null,
        "numero_itens": 0,
        "observacao": null,
+       "pagamento_rotulo": null,
        "pedido_minimo": null,
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
        "tem_alcoolico": false,
        "total": null,
+       "troco": null,
+       "troco_para": null,
        "unidade": null
       },
       "carrinho_expirado": false,
@@ -9312,8 +9569,11 @@
        "endereco": null,
        "faltando": [
         "itens",
-        "modalidade"
+        "modalidade",
+        "pagamento"
        ],
+       "forma_pagamento": null,
+       "formas_aceitas": [],
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -9323,12 +9583,15 @@
        "modalidade": null,
        "numero_itens": 0,
        "observacao": null,
+       "pagamento_rotulo": null,
        "pedido_minimo": null,
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
        "tem_alcoolico": false,
        "total": null,
+       "troco": null,
+       "troco_para": null,
        "unidade": null
       },
       "carrinho_expirado": false,
@@ -9716,8 +9979,11 @@
        "endereco": null,
        "faltando": [
         "itens",
-        "modalidade"
+        "modalidade",
+        "pagamento"
        ],
+       "forma_pagamento": null,
+       "formas_aceitas": [],
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -9727,12 +9993,15 @@
        "modalidade": null,
        "numero_itens": 0,
        "observacao": null,
+       "pagamento_rotulo": null,
        "pedido_minimo": null,
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
        "tem_alcoolico": false,
        "total": null,
+       "troco": null,
+       "troco_para": null,
        "unidade": null
       },
       "carrinho_expirado": false,
@@ -10071,7 +10340,21 @@
        "endereco": null,
        "faltando": [
         "modalidade",
-        "maioridade_confirmada"
+        "maioridade_confirmada",
+        "pagamento"
+       ],
+       "forma_pagamento": null,
+       "formas_aceitas": [
+        {
+         "aceita_troco": false,
+         "codigo": "pix",
+         "rotulo": "Pix"
+        },
+        {
+         "aceita_troco": true,
+         "codigo": "dinheiro",
+         "rotulo": "Dinheiro"
+        }
        ],
        "horario": null,
        "horario_aviso": null,
@@ -10098,12 +10381,15 @@
        "modalidade": null,
        "numero_itens": 1,
        "observacao": null,
+       "pagamento_rotulo": null,
        "pedido_minimo": null,
        "pode_fechar": false,
        "subtotal": 55.0,
        "taxa_entrega": null,
        "tem_alcoolico": true,
        "total": 55.0,
+       "troco": null,
+       "troco_para": null,
        "unidade": "patio_guedala"
       },
       "carrinho_expirado": false,
@@ -10260,7 +10546,21 @@
       "endereco": null,
       "faltando": [
        "modalidade",
-       "maioridade_confirmada"
+       "maioridade_confirmada",
+       "pagamento"
+      ],
+      "forma_pagamento": null,
+      "formas_aceitas": [
+       {
+        "aceita_troco": false,
+        "codigo": "pix",
+        "rotulo": "Pix"
+       },
+       {
+        "aceita_troco": true,
+        "codigo": "dinheiro",
+        "rotulo": "Dinheiro"
+       }
       ],
       "horario": null,
       "horario_aviso": null,
@@ -10287,12 +10587,15 @@
       "modalidade": null,
       "numero_itens": 1,
       "observacao": null,
+      "pagamento_rotulo": null,
       "pedido_minimo": null,
       "pode_fechar": false,
       "subtotal": 55.0,
       "taxa_entrega": null,
       "tem_alcoolico": true,
       "total": 55.0,
+      "troco": null,
+      "troco_para": null,
       "unidade": "patio_guedala"
      },
      "ok": true
@@ -10309,7 +10612,21 @@
       "endereco": null,
       "faltando": [
        "modalidade",
-       "maioridade_confirmada"
+       "maioridade_confirmada",
+       "pagamento"
+      ],
+      "forma_pagamento": null,
+      "formas_aceitas": [
+       {
+        "aceita_troco": false,
+        "codigo": "pix",
+        "rotulo": "Pix"
+       },
+       {
+        "aceita_troco": true,
+        "codigo": "dinheiro",
+        "rotulo": "Dinheiro"
+       }
       ],
       "horario": null,
       "horario_aviso": null,
@@ -10351,12 +10668,15 @@
       "modalidade": null,
       "numero_itens": 2,
       "observacao": null,
+      "pagamento_rotulo": null,
       "pedido_minimo": null,
       "pode_fechar": false,
       "subtotal": 89.0,
       "taxa_entrega": null,
       "tem_alcoolico": true,
       "total": 89.0,
+      "troco": null,
+      "troco_para": null,
       "unidade": "patio_guedala"
      },
      "ok": true

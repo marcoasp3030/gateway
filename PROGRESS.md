@@ -1446,3 +1446,18 @@ PY
   - No item do catálogo, o supervisor muda só a disponibilidade.
   - Cancelar pedido que a unidade já confirmou exige supervisor.
 - **Testes:** `tests/test_papel1a.py`. Os testes antigos foram ajustados à matriz; o membro perde as rotas de supervisor.
+
+## PAG1: forma de pagamento e troco no pedido — 2026-10-29
+
+- **Pagamento no pedido.** `definir_entrega` recebe `forma_pagamento`, que precisa ser o código de uma forma ativa da unidade (`unidade_pagamentos`), e `troco_para`, aceito só na forma com troco (dinheiro) e maior que o total.
+  - `fechar_pedido` recusa sem forma (`pagamento_nao_informado`) e confere de novo a forma e o troco.
+  - Motivos novos: `forma_pagamento_invalida`, `troco_so_em_dinheiro`, `troco_menor_que_total`, `delivery_indisponivel`.
+- **Onde aparece.**
+  - Carrinho: `forma_pagamento`, `pagamento_rotulo`, `troco_para`, `troco` e `formas_aceitas`; `faltando` ganha `pagamento` e `troco`.
+  - Pedido: `pagamento {forma, rotulo, troco_para, troco}`, devolvido ao agente e ao painel.
+  - Aviso NOVO PEDIDO: linha "Pagamento:".
+  - Evento `pedido.criado`: `forma_pagamento`.
+- **Entrega no lançamento.** Continuam valendo a taxa fixa por unidade, o pedido mínimo e a área como texto. A unidade com `delivery_ativo = false` agora recusa a entrega.
+- **Migração 054.** Contrato em `docs/SKILLS.md`; especificação em `docs/ESPEC_PAG1.md`.
+- **Testes.** Os novos estão em `tests/test_pag1.py`. Os cenários de teste cadastram Pix e dinheiro e completam a entrega com Pix. O retrato do By Koji (`tests/fixtures/multi1b_retrato.json`) foi regravado; a diferença está só nos campos de pagamento.
+- **Para o lançamento.** As 4 unidades do By Koji ainda não têm formas de pagamento cadastradas, e sem elas nenhum pedido fecha.

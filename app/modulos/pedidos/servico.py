@@ -41,6 +41,12 @@ RECUSAS={
  'opcoes_abaixo_do_minimo':('opcoes','Faltam escolhas no grupo indicado (veja grupo.minimo). Pergunte ao cliente o que falta e chame de novo.'),
  'opcao_inexistente':('opcoes','Esta opção não existe neste item (ou saiu do cardápio). Use só grupo_id e opcao_id devolvidos por buscar_catalogo.'),
  'opcao_repetida':('opcoes','Esta opção não pode ser escolhida mais de uma vez neste grupo.'),
+ # PAG1: forma de pagamento (da lista da unidade) e troco. Os detalhes trazem formas_aceitas [{codigo, rotulo, aceita_troco}].
+ 'pagamento_nao_informado':('forma_pagamento','Falta a forma de pagamento. Pergunte ao cliente uma das formas_aceitas (detalhes) e chame definir_entrega com forma_pagamento.'),
+ 'forma_pagamento_invalida':('forma_pagamento','Esta forma de pagamento não é aceita nesta unidade. Ofereça uma das formas_aceitas (detalhes). Lista vazia: a unidade não tem formas cadastradas; transfira para a equipe (motivo pedido_para_confirmar).'),
+ 'troco_so_em_dinheiro':('troco_para','Troco só existe no pagamento em dinheiro (com troco aceito pela unidade). Não envie troco_para em outra forma.'),
+ 'troco_menor_que_total':('troco_para','O valor para troco precisa ser maior que o total do pedido (veja total nos detalhes). Pergunte de novo ao cliente; se ele não precisa de troco, envie troco_para null.'),
+ 'delivery_indisponivel':('modalidade','Esta unidade não faz entrega. Ofereça retirada.'),
 }
 
 
@@ -91,7 +97,9 @@ async def retrato(conn,tenant,conversa):
         return {'conversation_id':conversa,'unidade':None,'modalidade':None,'endereco':None,'horario':None,
                 'agendado_para':None,'horario_vencido':False,'horario_aviso':None,'observacao':None,
                 'maioridade_confirmada':False,'itens':[],'numero_itens':0,'subtotal':None,'taxa_entrega':None,'total':None,
-                'pedido_minimo':None,'tem_alcoolico':False,'itens_indisponiveis':[],'faltando':['itens','modalidade'],'pode_fechar':False,'atualizado_em':None}
+                'pedido_minimo':None,'tem_alcoolico':False,'itens_indisponiveis':[],
+                'forma_pagamento':None,'pagamento_rotulo':None,'troco_para':None,'troco':None,'formas_aceitas':[],
+                'faltando':['itens','modalidade','pagamento'],'pode_fechar':False,'atualizado_em':None}
     ls=await linhas(conn,tenant,c['id'])
     fora=await indisponiveis(conn,tenant,conversa,ls);fora_por_linha={f['id']:f for f in fora}
     itens=[{'id':l['id'],'item_id':l['item_id'],'codigo':l['codigo'],'nome':l['nome'],'categoria':l['categoria'],
@@ -118,6 +126,11 @@ async def retrato(conn,tenant,conversa):
     aviso=await aviso_do_horario(conn,tenant,u,fuso,quando)
     if passou or aviso: faltando.append('horario')
     if fora: faltando.append('item_indisponivel')
+    # PAG1: forma de pagamento da lista da unidade (a que saiu da lista volta a faltar) e troco acima do total.
+    formas=await formas_aceitas(conn,tenant,c['unidade']);forma=next((f for f in formas if f['codigo']==c['forma_pagamento']),None)
+    total=subtotal+(taxa or 0) if subtotal is not None else None
+    if forma is None: faltando.append('pagamento')
+    elif c['troco_para'] is not None and total is not None and c['troco_para']<=total: faltando.append('troco')
     return {'conversation_id':conversa,'unidade':c['unidade'],'modalidade':c['modalidade'],'endereco':c['endereco'],'horario':c['horario'],
             'agendado_para':agendamento.iso(quando,fuso),'horario_vencido':passou,'horario_aviso':aviso,
             'observacao':c['observacao'],'maioridade_confirmada':c['maioridade_confirmada'],'itens':itens,
@@ -126,6 +139,9 @@ async def retrato(conn,tenant,conversa):
             'pedido_minimo':dinheiro(u['pedido_minimo']) if u else None,'tem_alcoolico':tem_alcool,
             # Itens que não são servidos no dia e horário do pedido, com o motivo e quando são servidos (vazia = nenhum).
             'itens_indisponiveis':fora,
+            'forma_pagamento':c['forma_pagamento'],'pagamento_rotulo':forma['rotulo'] if forma else None,'troco_para':dinheiro(c['troco_para']),
+            'troco':dinheiro(c['troco_para']-total) if c['troco_para'] is not None and total is not None and c['troco_para']>total else None,
+            'formas_aceitas':formas,
             'faltando':faltando,'pode_fechar':not faltando,
             # Última alteração do carrinho (item ou entrega): diz se ele é desta conversa ou antigo.
             'atualizado_em':c['atualizado_em'].isoformat(timespec='seconds')}
@@ -331,7 +347,7 @@ async def esvaziar(conn,tenant,conversa):
         await conn.execute('DELETE FROM carrinho_itens WHERE tenant_id=$1 AND carrinho_id=$2',tenant,c['id'])
         # Volta ao estado inicial completo: nada do pedido anterior (retirada, endereço, horário…) fica para o agente presumir.
         await conn.execute("""UPDATE carrinhos SET unidade=NULL,modalidade=NULL,endereco=NULL,horario=NULL,agendado_para=NULL,observacao=NULL,
-            maioridade_confirmada=false,atualizado_em=now() WHERE tenant_id=$1 AND id=$2""",tenant,c['id'])
+            maioridade_confirmada=false,forma_pagamento=NULL,troco_para=NULL,atualizado_em=now() WHERE tenant_id=$1 AND id=$2""",tenant,c['id'])
 
 
 async def entrega(conn,tenant,conversa,dados):
@@ -342,10 +358,15 @@ async def entrega(conn,tenant,conversa,dados):
         if not await unidade_da_empresa(conn,tenant,dados['unidade']): raise Recusa('unidade_inexistente',404)
         if await conn.fetchval('SELECT EXISTS(SELECT 1 FROM carrinho_itens WHERE tenant_id=$1 AND carrinho_id=$2)',tenant,c['id']):
             raise Recusa('unidade_diferente',detalhes={'unidade_do_carrinho':c['unidade'],'unidade_do_item':dados['unidade']})
-        await conn.execute('UPDATE carrinhos SET unidade=$3 WHERE tenant_id=$1 AND id=$2',tenant,c['id'],dados['unidade'])
+        # PAG1: a forma de pagamento é da lista da unidade; com outra unidade, é escolhida de novo.
+        await conn.execute('UPDATE carrinhos SET unidade=$3,forma_pagamento=NULL,troco_para=NULL WHERE tenant_id=$1 AND id=$2',tenant,c['id'],dados['unidade'])
+        c=await aberto(conn,tenant,conversa)
     if dados.get('modalidade')=='retirada':
         u=await unidade_da_empresa(conn,tenant,dados.get('unidade') or c['unidade'])
         if u and u['aceita_retirada'] is False: raise Recusa('retirada_indisponivel')
+    if dados.get('modalidade')=='delivery':
+        u=await unidade_da_empresa(conn,tenant,dados.get('unidade') or c['unidade'])
+        if u and u['delivery_ativo'] is False: raise Recusa('delivery_indisponivel')
     if 'horario' in dados or 'agendado_para' in dados:
         await _agendar(conn,tenant,c,dados)
     for campo in ('modalidade','endereco','observacao'):
@@ -354,7 +375,47 @@ async def entrega(conn,tenant,conversa,dados):
             await conn.execute(f'UPDATE carrinhos SET {campo}=$3 WHERE tenant_id=$1 AND id=$2',tenant,c['id'],valor)
     if dados.get('maioridade_confirmada') is not None:
         await conn.execute('UPDATE carrinhos SET maioridade_confirmada=$3 WHERE tenant_id=$1 AND id=$2',tenant,c['id'],bool(dados['maioridade_confirmada']))
+    # Por último: o troco é comparado com o total já com a modalidade (e a taxa) desta mesma chamada. Recusa desfaz tudo.
+    if 'forma_pagamento' in dados or 'troco_para' in dados:
+        await _pagamento(conn,tenant,c,dados)
     await tocar(conn,tenant,c['id'])
+
+
+async def formas_aceitas(conn,tenant,codigo_unidade):
+    """PAG1: formas de pagamento ativas da unidade, na ordem dela (vazia = não cadastradas)."""
+    if not codigo_unidade: return []
+    return [dict(r) for r in await conn.fetch('''SELECT p.codigo,p.rotulo,p.aceita_troco FROM unidade_pagamentos p
+        JOIN tenant_unidades u ON u.tenant_id=p.tenant_id AND u.id=p.unidade_id
+        WHERE p.tenant_id=$1 AND u.codigo=$2 AND p.ativo ORDER BY p.ordem,p.id''',tenant,codigo_unidade)]
+
+
+async def _total(conn,tenant,c):
+    """Total do carrinho como no retrato (subtotal + taxa fixa na entrega), ou None sem itens."""
+    subtotal=await conn.fetchval('SELECT sum(preco_unitario*quantidade) FROM carrinho_itens WHERE tenant_id=$1 AND carrinho_id=$2',tenant,c['id'])
+    if subtotal is None: return None
+    u=await unidade_da_empresa(conn,tenant,c['unidade'])
+    return subtotal+((u['taxa_entrega'] or 0) if u and c['modalidade']=='delivery' else 0)
+
+
+async def _pagamento(conn,tenant,c,dados):
+    """PAG1: forma de pagamento (código da lista da unidade; null tira) e troco (só dinheiro com troco aceito; maior que o total;
+    null = não precisa). Trocar para outra forma tira o troco. Recusa sem mudar nada."""
+    c=await aberto(conn,tenant,c['conversation_id'])
+    formas=await formas_aceitas(conn,tenant,c['unidade'])
+    forma=c['forma_pagamento']
+    if 'forma_pagamento' in dados:
+        forma=dados['forma_pagamento']
+        if forma is not None and forma not in [f['codigo'] for f in formas]:
+            raise Recusa('forma_pagamento_invalida',detalhes={'formas_aceitas':formas})
+    troco=c['troco_para'] if forma==c['forma_pagamento'] else None
+    if 'troco_para' in dados: troco=dados['troco_para']
+    if troco is not None:
+        troco=Decimal(str(troco)).quantize(Decimal('0.01'))
+        if not any(f['codigo']==forma and f['aceita_troco'] for f in formas):
+            raise Recusa('troco_so_em_dinheiro',detalhes={'formas_aceitas':formas})
+        total=await _total(conn,tenant,c)
+        if total is not None and troco<=total: raise Recusa('troco_menor_que_total',detalhes={'total':dinheiro(total)})
+    await conn.execute('UPDATE carrinhos SET forma_pagamento=$3,troco_para=$4 WHERE tenant_id=$1 AND id=$2',tenant,c['id'],forma,troco)
 
 
 async def _agendar(conn,tenant,c,dados):
@@ -410,7 +471,16 @@ def retrato_pedido(p):
             'subtotal':dinheiro(p['subtotal']),'taxa_entrega':dinheiro(p['taxa_entrega']),'total':dinheiro(p['total']),
             'tem_alcoolico':p['tem_alcoolico'],'motivo':p['motivo'],'cliente_nome':p['cliente_nome'],
             'criado_em':p['criado_em'],'decidido_em':p['decidido_em'],
-            'previsao_min':p.get('previsao_min'),'atualizado_em':p['atualizado_em']}
+            'previsao_min':p.get('previsao_min'),'atualizado_em':p['atualizado_em'],
+            # PAG1: null nos pedidos de antes do PAG1.
+            'pagamento':_pagamento_do_pedido(p)}
+
+
+def _pagamento_do_pedido(p):
+    if not p.get('forma_pagamento'): return None
+    troco_para=p.get('troco_para')
+    return {'forma':p['forma_pagamento'],'rotulo':p.get('pagamento_rotulo') or p['forma_pagamento'],'troco_para':dinheiro(troco_para),
+            'troco':dinheiro(troco_para-p['total']) if troco_para is not None and p['total'] is not None else None}
 
 
 # Ciclo do pedido (PED1). Só anda para frente; pronto_retirada e saiu_entrega ocupam a mesma etapa, cada um na sua modalidade.
@@ -573,6 +643,7 @@ async def fechar(conn,tenant,conversa):
     if tem_alcool and not c['maioridade_confirmada']: raise Recusa('falta_maioridade')
     u=await unidade_da_empresa(conn,tenant,c['unidade'])
     if c['modalidade']=='retirada' and u and u['aceita_retirada'] is False: raise Recusa('retirada_indisponivel')
+    if c['modalidade']=='delivery' and u and u['delivery_ativo'] is False: raise Recusa('delivery_indisponivel')
     subtotal=sum((l['preco_unitario']*l['quantidade'] for l in ls),Decimal('0'))
     if u and u['pedido_minimo'] is not None and subtotal<u['pedido_minimo']: raise Recusa('abaixo_do_minimo')
     agendado=await conferir_horario(conn,tenant,c,u)
@@ -587,6 +658,14 @@ async def fechar(conn,tenant,conversa):
     fora=await indisponiveis(conn,tenant,conversa,ls)
     if fora: raise Recusa('item_indisponivel',detalhes={'itens':fora,'resumo':fora[0]['resumo'],'motivo_indisponivel':fora[0]['motivo'],'data_referencia':fora[0]['data_referencia']})
     taxa=u['taxa_entrega'] if u and c['modalidade']=='delivery' else None
+    # PAG1: forma de pagamento obrigatória, ainda aceita pela unidade; troco acima do total final.
+    formas=await formas_aceitas(conn,tenant,c['unidade'])
+    if not c['forma_pagamento']: raise Recusa('pagamento_nao_informado',detalhes={'formas_aceitas':formas})
+    forma=next((f for f in formas if f['codigo']==c['forma_pagamento']),None)
+    if forma is None: raise Recusa('forma_pagamento_invalida',detalhes={'formas_aceitas':formas})
+    if c['troco_para'] is not None:
+        if not forma['aceita_troco']: raise Recusa('troco_so_em_dinheiro',detalhes={'formas_aceitas':formas})
+        if c['troco_para']<=subtotal+(taxa or 0): raise Recusa('troco_menor_que_total',detalhes={'total':dinheiro(subtotal+(taxa or 0))})
     itens=[{'item_id':l['item_id'],'codigo':l['codigo'],'nome':l['nome'],'categoria':l['categoria'],'quantidade':l['quantidade'],
             'preco_unitario':dinheiro(l['preco_unitario']),'subtotal':dinheiro(l['preco_unitario']*l['quantidade']),
             'observacao':l['observacao'],'alcoolico':l['alcoolico'],
@@ -596,11 +675,12 @@ async def fechar(conn,tenant,conversa):
     nome,_=await nome_da_conversa(conn,tenant,conversa)
     origem,canal=await origem_e_canal(conn,tenant,conversa)
     p=await conn.fetchrow('''INSERT INTO pedidos(tenant_id,numero,conversation_id,carrinho_id,unidade,modalidade,endereco,horario,observacao,
-        itens,subtotal,taxa_entrega,total,cliente_nome,cliente_telefone,tem_alcoolico,maioridade_confirmada,agendado_para,origem,canal)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *''',
+        itens,subtotal,taxa_entrega,total,cliente_nome,cliente_telefone,tem_alcoolico,maioridade_confirmada,agendado_para,origem,canal,
+        forma_pagamento,pagamento_rotulo,troco_para)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) RETURNING *''',
         tenant,await _numero(conn,tenant),conversa,c['id'],c['unidade'],c['modalidade'],c['endereco'] if c['modalidade']=='delivery' else None,
         c['horario'],c['observacao'],json.dumps(itens,ensure_ascii=False),subtotal,taxa,subtotal+(taxa or 0),nome,conv['telefone'],
-        tem_alcool,bool(c['maioridade_confirmada']),agendado,origem,canal)
+        tem_alcool,bool(c['maioridade_confirmada']),agendado,origem,canal,forma['codigo'],forma['rotulo'],c['troco_para'])
     await conn.execute("UPDATE carrinhos SET status='fechado',atualizado_em=now() WHERE tenant_id=$1 AND id=$2",tenant,c['id'])
     await registrar_evento(conn,tenant,p['id'],None,'aguardando_loja','agente','agente')
     return p

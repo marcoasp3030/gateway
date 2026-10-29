@@ -167,7 +167,8 @@ def test_esvaziar_e_expirar_devolvem_o_carrinho_ao_estado_inicial_completo(tmp_p
             async with c:
                 conversa,ids,api,_=await montar_pedidos(pool,c,app)
                 INICIAL=dict(unidade=None,modalidade=None,endereco=None,horario=None,observacao=None,maioridade_confirmada=False,itens=[],
-                             numero_itens=0,subtotal=None,taxa_entrega=None,total=None,faltando=['itens','modalidade'],pode_fechar=False)
+                             numero_itens=0,subtotal=None,taxa_entrega=None,total=None,faltando=['itens','modalidade','pagamento'],pode_fechar=False,
+                             forma_pagamento=None,troco_para=None)   # PAG1: o pagamento também volta ao começo
                 async def carrinho(conv): return (await api('GET',f'/carrinho/{conv}')).json()['carrinho']
                 async def montar_cheio(conv):
                     assert (await api('POST',f'/carrinho/{conv}/itens',json={'item_id':ids['GUE-0001'],'quantidade':2})).status_code==200
@@ -181,7 +182,7 @@ def test_esvaziar_e_expirar_devolvem_o_carrinho_ao_estado_inicial_completo(tmp_p
                 k=await carrinho(c1);assert {campo:k[campo] for campo in INICIAL}==INICIAL
                 # Pode recomeçar em outra unidade/modalidade sem herança.
                 assert (await api('POST',f'/carrinho/{c1}/itens',json={'item_id':ids['GUE-0001'],'quantidade':1})).status_code==200
-                k=await carrinho(c1);assert (k['modalidade'],k['endereco'],k['faltando'])==(None,None,['modalidade'])
+                k=await carrinho(c1);assert (k['modalidade'],k['endereco'],k['faltando'])==(None,None,['modalidade','pagamento'])
                 # 2) Expiração: o carrinho que o agente vê depois é o inicial; os dados antigos ficam só no arquivado.
                 c2=await conversa('z2');await montar_cheio(c2)
                 await pool.execute("UPDATE carrinhos SET atualizado_em=now()-interval '7 hours' WHERE conversation_id=$1",c2)

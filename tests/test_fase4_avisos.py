@@ -68,6 +68,13 @@ async def montar(conn,client,app,monkeypatch,whatsapp=UNIDADE):
         if m: await conn.execute("INSERT INTO catalogo_vistos(tenant_id,conversation_id,item_id) SELECT 'bykoji',$1,id FROM catalogo_itens WHERE tenant_id='bykoji' ON CONFLICT DO NOTHING",m.group(1))
     async def api(metodo,caminho,**kw):
         if metodo=='POST': await visto(caminho)
+        # PAG1: como em test_fase4_pedidos.montar, a entrega sem forma de pagamento leva Pix (regra testada em tests/test_pag1.py).
+        if metodo=='PUT' and caminho.endswith('/entrega') and 'modalidade' in (kw.get('json') or {}) and 'forma_pagamento' not in kw['json'] \
+                and (kw['json'].get('unidade') or await conn.fetchval("SELECT unidade FROM carrinhos WHERE status='aberto' AND conversation_id=$1",caminho.split('/')[2])):
+            await conn.execute("""INSERT INTO unidade_pagamentos(tenant_id,unidade_id,codigo,rotulo,aceita_troco,ativo,ordem)
+                SELECT u.tenant_id,u.id,'pix','Pix',false,true,0 FROM tenant_unidades u WHERE u.tenant_id='bykoji'
+                AND NOT EXISTS (SELECT 1 FROM unidade_pagamentos p WHERE p.tenant_id=u.tenant_id AND p.unidade_id=u.id)""")
+            kw['json']={**kw['json'],'forma_pagamento':'pix'}
         return await client.request(metodo,'/api/v1'+caminho,headers={'X-API-Key':chave,'Authorization':''},**kw)
     async def pedido(telefone=CLIENTE):
         conv=(await webhook(telefone,'oi'))['conversation_id']
