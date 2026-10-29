@@ -13,6 +13,7 @@ from nucleo.configuracao import Configuracoes,PADROES
 from nucleo import atendimento as A,horarios,expediente
 from nucleo.atendimento import COMPORTAMENTOS
 from .modelos import Comportamento
+from nucleo.telefone import MENSAGEM as MENSAGEM_TELEFONE
 from .servico import auditar
 
 router=APIRouter(prefix='/admin/v1',dependencies=[Depends(painel)])
@@ -74,12 +75,12 @@ def validar_comportamentos(dados):
     if not isinstance(dados,dict): return {},[{'campo':'comportamentos','motivo':'tipo'}]
     erros=[{'campo':'comportamentos.'+str(c)[:40],'motivo':'so_plataforma' if c in A.SO_PLATAFORMA else 'campo_desconhecido'} for c in dados if c not in COMPORTAMENTOS]
     conhecidos={c:v for c,v in dados.items() if c in COMPORTAMENTOS}
-    # Telefone de alerta: aceita "+55 (11) 94728-1513"; guarda só os dígitos.
-    if isinstance(conhecidos.get('transbordo_alerta'),str): conhecidos['transbordo_alerta']=''.join(c for c in conhecidos['transbordo_alerta'] if c.isdigit())
+    # Telefone de alerta: aceita "+55 (11) 91234-5678" ou "11912345678"; guarda 55 + DDD + número (TEL1, no modelo).
     try: limpo=Comportamento.model_validate(conhecidos).model_dump(include=set(conhecidos))
     except ValidationError as exc:
         ruins={str(e['loc'][0]) for e in exc.errors() if e.get('loc')}
-        erros+=[{'campo':'comportamentos.'+c,'motivo':'valor'} for c in sorted(ruins)]
+        telefones={str(e['loc'][0]) for e in exc.errors() if e.get('loc') and e.get('type')=='telefone_br'}
+        erros+=[{'campo':'comportamentos.'+c,'motivo':'valor',**({'mensagem':MENSAGEM_TELEFONE} if c in telefones else {})} for c in sorted(ruins)]
         limpo={c:v for c,v in conhecidos.items() if c not in ruins}
     for campo,(grupo,tipo,minimo,maximo,opcoes,disponivel) in COMPORTAMENTOS.items():
         valor=limpo.get(campo)

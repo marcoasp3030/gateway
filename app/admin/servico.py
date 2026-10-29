@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from nucleo.banco import Repositorio, registro
 from nucleo.configuracao import Configuracoes, COMPORTAMENTO
 from nucleo.autenticacao import hash_chave
+from nucleo.telefone import MENSAGEM as MENSAGEM_TELEFONE, contato_do_piloto, telefone_br
 from seguranca import validar_formato_url
 from .modelos import Tenant, Agente, Canal, Chave, Comportamento
 
@@ -45,8 +46,8 @@ def validar(modelo, dados):
     try:
         result = modelo.model_validate(dados).model_dump(exclude_unset=True)
     except ValidationError as exc:
-        from erros_api import campo_validacao
-        raise HTTPException(400,{"campo":campo_validacao(exc.errors())}) from None
+        from erros_api import campo_validacao, mensagem_validacao
+        raise HTTPException(400,{"campo":campo_validacao(exc.errors()),"mensagem":mensagem_validacao(exc.errors())}) from None
     for campo in OBRIGATORIOS.get(modelo.__name__, ()):
         if campo in result and result[campo] is None:
             raise HTTPException(400,{"campo":campo})
@@ -125,11 +126,11 @@ class Administracao:
     async def checar_agente(self,repo,tenant,agente):
         cfg = await Configuracoes(repo).efetiva(tenant['id'],agente['id'])
         if cfg['max_wait_s'] < cfg['debounce_s']: raise HTTPException(400,'max_wait_s menor que debounce_s')
-        # Piloto: telefone (8 a 16 dígitos) ou, para o canal api (ARQ1), um identificador com letras ("teste-marco-01").
+        # Piloto: telefone com 55 (TEL1) ou, para o canal api (ARQ1), um identificador com letras ("teste-marco-01").
         for contato in cfg['contatos_permitidos'] or []:
-            if not (re.fullmatch(r'\d{8,16}',contato) or (re.fullmatch(r'[A-Za-z0-9_@+.-]{3,100}',contato) and not contato.isdigit())):
-                raise HTTPException(400,'Telefone inválido')
-        if cfg.get('alerta_telefone') and not re.fullmatch(r'\d{8,16}',cfg['alerta_telefone']): raise HTTPException(400,'Telefone inválido')
+            if contato_do_piloto(contato)!=contato: raise HTTPException(400,{'campo':'contatos_permitidos','mensagem':MENSAGEM_TELEFONE})
+        if cfg.get('alerta_telefone') and telefone_br(cfg['alerta_telefone'])!=cfg['alerta_telefone']:
+            raise HTTPException(400,{'campo':'alerta_telefone','mensagem':MENSAGEM_TELEFONE})
         if cfg['agente_mode']=='live':
             if agente['provedor']!='skyone' or not agente['skyone_webhook_url']:
                 raise HTTPException(400,'Provedor/URL live inválidos')

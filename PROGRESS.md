@@ -1461,3 +1461,15 @@ PY
 - **Migração 054.** Contrato em `docs/SKILLS.md`; especificação em `docs/ESPEC_PAG1.md`.
 - **Testes.** Os novos estão em `tests/test_pag1.py`. Os cenários de teste cadastram Pix e dinheiro e completam a entrega com Pix. O retrato do By Koji (`tests/fixtures/multi1b_retrato.json`) foi regravado; a diferença está só nos campos de pagamento.
 - **Para o lançamento.** As 4 unidades do By Koji ainda não têm formas de pagamento cadastradas, e sem elas nenhum pedido fecha.
+
+## TEL1: telefone do piloto e dos alertas sempre com 55 — 2026-10-29
+
+- **Motivo.** O piloto compara o número exatamente como chega do WhatsApp (55 + DDD + número). Um número gravado sem o 55 nunca casava, e o contato não era atendido.
+- **Regra** (`app/nucleo/telefone.py`), para `contatos_permitidos`, `alerta_telefone`, `transbordo_alerta` e `whatsapp_alerta_transbordo`:
+  - tira espaços, traços, parênteses e `+`;
+  - 10 ou 11 dígitos ganham o 55; 12 ou 13 começando com 55 ficam;
+  - fora disso, 400 com "Use DDD + número, ex.: 11912345678" e `detalhes.campo`.
+  - Na lista do piloto, número repetido entra uma vez; identificador com letras (canal api, ARQ1) fica como está.
+- **Onde vale.** Ficha do agente, `PUT /config`, empresa (`whatsapp_alerta_transbordo`) e rascunho do atendimento (lá a mensagem vem em `campos[].mensagem`). `alerta_telefone` vazio continua limpando o campo.
+- **Migração 055.** Aplica a regra aos valores já gravados e tira repetidos da lista do piloto. Valor fora da regra fica como está.
+- **Testes.** `tests/test_tel1.py`. `test_cfg1c` e `test_gestao_g2` foram ajustados: a regra anterior do alerta de transbordo exigia o 55 e conferia o formato do número brasileiro.

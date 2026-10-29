@@ -11,7 +11,7 @@ import redis.asyncio as aioredis
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from erros_api import resposta as resposta_erro, resposta_integridade, campo_validacao, CAMPOS_LEGADOS
+from erros_api import resposta as resposta_erro, resposta_integridade, campo_validacao, mensagem_validacao, CAMPOS_LEGADOS
 from fastapi.responses import JSONResponse
 import migrar
 import limites
@@ -218,9 +218,10 @@ def criar_app(infra,db=None,redis=None):
         codigo='CREDENTIAL_REJECTED' if exc.status_code==502 and exc.detail=='credencial do Skyone recusada' else None
         campo=exc.detail.get('campo') if isinstance(exc.detail,dict) else None
         if isinstance(exc.detail,str): campo=CAMPOS_LEGADOS.get(exc.detail,campo)
-        return resposta_erro(exc.status_code,codigo,campo,exc.headers,exc.detail.get('motivo') if isinstance(exc.detail,dict) else None)
+        detalhe=exc.detail if isinstance(exc.detail,dict) else {}
+        return resposta_erro(exc.status_code,codigo,campo,exc.headers,detalhe.get('motivo'),detalhe.get('mensagem'))
     @app.exception_handler(RequestValidationError)
-    async def validacao(request,exc): return resposta_erro(400,campo=campo_validacao(exc.errors()))
+    async def validacao(request,exc): return resposta_erro(400,campo=campo_validacao(exc.errors()),mensagem=mensagem_validacao(exc.errors()))
     @app.exception_handler(ValueError)
     async def invalido(request,exc): return resposta_erro(400)
     @app.exception_handler(asyncpg.PostgresError)

@@ -14,7 +14,7 @@ MENSAGENS={
  'UNAVAILABLE':'Serviço temporariamente indisponível.'}
 
 
-def resposta(status,codigo=None,campo=None,headers=None,motivo=None):
+def resposta(status,codigo=None,campo=None,headers=None,motivo=None,mensagem=None):
     codigo=codigo or {400:'VALIDATION_ERROR',401:'UNAUTHORIZED',403:'FORBIDDEN',404:'NOT_FOUND',
       405:'NOT_IMPLEMENTED',409:'CONFLICT',413:'VALIDATION_ERROR',422:'VALIDATION_ERROR',
       429:'RATE_LIMITED',501:'NOT_IMPLEMENTED',502:'UPSTREAM_ERROR'}.get(status,'UNAVAILABLE')
@@ -23,7 +23,8 @@ def resposta(status,codigo=None,campo=None,headers=None,motivo=None):
     detalhes=({'campo':campo or 'corpo'} if codigo=='VALIDATION_ERROR'
               else {'campo':campo} if codigo=='CONFLICT' and campo else {})
     if motivo and codigo=='VALIDATION_ERROR': detalhes['motivo']=str(motivo)[:60]
-    mensagem='O corpo da requisição excede o tamanho permitido.' if status==413 else MENSAGENS[codigo]
+    # Mensagem própria só de texto fixo do gateway (TEL1), nunca com o valor enviado.
+    mensagem='O corpo da requisição excede o tamanho permitido.' if status==413 else (mensagem if mensagem and codigo=='VALIDATION_ERROR' else MENSAGENS[codigo])
     return JSONResponse({'erro':{'codigo':codigo,'mensagem':mensagem,'detalhes':detalhes}},status_code=status,
                         headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',**(headers or {})})
 
@@ -40,6 +41,12 @@ def campos_conhecidos():
                    'ate','indefinida','data','fechado','faixas','fuso','dias','entidade',
                    'delivery_ativo','taxa_modo','frete_gratis_acima','tempo_entrega_min','tempo_retirada_min','taxa_entrega','pedido_minimo'))
     return campos
+
+
+def mensagem_validacao(errors):
+    """Texto fixo de um erro de validação com mensagem própria (TEL1: telefone fora da regra)."""
+    from nucleo.telefone import MENSAGEM
+    return MENSAGEM if any(e.get('type')=='telefone_br' for e in errors) else None
 
 
 def campo_validacao(errors):

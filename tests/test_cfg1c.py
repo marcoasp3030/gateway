@@ -211,11 +211,14 @@ def test_T1_telefone_de_alerta_horario_da_equipe_e_transferencia_sem_pausa(monke
             alertas=lambda: conn.fetch("SELECT destino,texto FROM avisos_internos WHERE tipo='transbordo' ORDER BY id")
             # O provedor informa o número da própria instância em cada evento; o gateway guarda.
             await webhook('5511900000009','oi');proprio=await conn.fetchval('SELECT numero_instancia FROM tenant_canais WHERE id=$1',canal);assert proprio and proprio.isdigit()
-            # Telefone de alerta: celular e fixo brasileiros, com ou sem máscara; outro país, curto demais e o número da instância são recusados.
+            # Telefone de alerta: com ou sem máscara e sem o 55 (TEL1 completa); fora de DDD + número e o número da instância são recusados.
             async def rascunho(valor): return await client.put(E_+'/rascunho',json={'comportamentos':{'transbordo_alerta':valor}},headers=ADMIN)
             r=await rascunho('+55 (11) 90000-0060');assert r.status_code==200 and r.json()['rascunho']['comportamentos']['transbordo_alerta']==ALERTA
+            r=await rascunho('(11) 90000-0060');assert r.status_code==200 and r.json()['rascunho']['comportamentos']['transbordo_alerta']==ALERTA
             assert (await rascunho('55 11 3333-4444')).status_code==200
-            for ruim in ('14155552671','5511900000','55119000000601','5501900000060'): assert (await rascunho(ruim)).status_code==400,ruim
+            for ruim in ('900000060','55119000000601','4411900000060','11 9000-006a'):
+                r=await rascunho(ruim);assert r.status_code==400,ruim
+                assert r.json()['erro']['detalhes']['campos']==[{'campo':'comportamentos.transbordo_alerta','motivo':'valor','mensagem':'Use DDD + número, ex.: 11912345678'}]
             r=await rascunho(proprio);assert r.status_code==400 and r.json()['erro']['detalhes']['campos']==[{'campo':'comportamentos.transbordo_alerta','motivo':'numero_da_instancia'}]
             await rascunho(ALERTA);assert (await client.post(E_+'/publicar',json={'baseado_em':0},headers=ADMIN)).status_code==200
             # Dentro do horário (unidade sem horário = equipe disponível): pausa, marca aguardando e alerta, com telefone inteiro (destino interno).

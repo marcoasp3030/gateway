@@ -1,6 +1,15 @@
 from datetime import datetime
 from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic_core import PydanticCustomError
+from nucleo.telefone import MENSAGEM as MENSAGEM_TELEFONE, lista_do_piloto, telefone_br
+
+
+def _telefone(valor):
+    if valor is None: return None
+    numero=telefone_br(valor)
+    if numero is None: raise PydanticCustomError('telefone_br',MENSAGEM_TELEFONE)
+    return numero
 
 
 class Estrito(BaseModel):
@@ -16,10 +25,14 @@ class Tenant(Estrito):
     retencao_dias: int | None = Field(None,gt=0)
     tenant_teste: bool | None = None
     status: Literal['ativo','suspenso'] | None = None
-    # Fase 4: número que recebe o alerta quando uma conversa fica aguardando atendente (nulo = desligado).
-    whatsapp_alerta_transbordo: str | None = Field(None,pattern=r'^\d{10,15}$')
+    # Fase 4: número que recebe o alerta quando uma conversa fica aguardando atendente (nulo = desligado). TEL1: 55 + DDD + número.
+    whatsapp_alerta_transbordo: str | None = None
     # CFG1-a: segmento da empresa (id de um modelo de agente); dele vêm os padrões de perfil e comportamento.
     segmento: str | None = Field(None,pattern=r'^[a-z0-9_]{3,40}$')
+
+    @field_validator('whatsapp_alerta_transbordo',mode='before')
+    @classmethod
+    def _alerta(cls, valor): return _telefone(valor)
 
 
 class Comportamento(Estrito):
@@ -58,7 +71,7 @@ class Comportamento(Estrito):
     fora_do_horario: Literal['atender','so_avisar'] | None = None
     fora_do_horario_mensagem: str | None = Field(None,min_length=1,max_length=500)
     fora_do_horario_aceita_agendado: bool | None = None
-    transbordo_alerta: str | None = Field(None,pattern=r'^55[1-9]\d(9\d{8}|[2-8]\d{7})$')
+    transbordo_alerta: str | None = None
     transbordo_horario_equipe: dict | None = None
     transbordo_fora_do_horario: str | None = Field(None,min_length=1,max_length=500)
     # SOL1
@@ -74,6 +87,23 @@ class Comportamento(Estrito):
     follow_up_fora_unidade: Literal['cancelar','adiar_abertura'] | None = None
     follow_up_limite_dia: int | None = Field(None,ge=0,le=5)
     skyone_dominios_permitidos: list[str] | None = None
+
+    # TEL1: lista do piloto e telefones de alerta sempre com 55 (tira espaços, traços, parênteses e +; 10 ou 11 dígitos ganham o 55).
+    @field_validator('transbordo_alerta',mode='before')
+    @classmethod
+    def _transbordo(cls, valor): return _telefone(valor)
+
+    @field_validator('alerta_telefone',mode='before')
+    @classmethod
+    def _alerta(cls, valor): return None if isinstance(valor,str) and not valor.strip() else _telefone(valor)
+
+    @field_validator('contatos_permitidos',mode='before')
+    @classmethod
+    def _piloto(cls, valor):
+        if not isinstance(valor,list): return valor
+        lista=lista_do_piloto(valor)
+        if lista is None: raise PydanticCustomError('telefone_br',MENSAGEM_TELEFONE)
+        return lista
 
     @field_validator('follow_up_janela')
     @classmethod
