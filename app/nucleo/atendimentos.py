@@ -52,7 +52,7 @@ async def encerrar(conn,tenant,conversa,motivo,desfecho=None,actor='sistema'):
     """Encerra o atendimento aberto da conversa (o primeiro encerramento vale) e marca a conversa como encerrada, como antes.
     Devolve o atendimento encerrado, ou None se não havia um aberto."""
     if motivo not in MOTIVOS_ENCERRAMENTO: raise ValueError('motivo de encerramento inválido')
-    await conn.execute("""UPDATE conversas SET encerrada_em=now(),desfecho=$3,atualizado_em=now()
+    await conn.execute("""UPDATE conversas SET encerrada_em=now(),desfecho=$3,atualizado_em=now(),atribuida_a=NULL,atribuida_em=NULL
         WHERE tenant_id=$1 AND conversation_id=$2 AND encerrada_em IS NULL""",tenant,conversa,desfecho)
     a=await conn.fetchrow("""UPDATE atendimentos SET estado='encerrado',encerrado_em=now(),motivo_encerramento=$3,desfecho=$4
         WHERE tenant_id=$1 AND conversation_id=$2 AND estado='aberto' RETURNING *""",tenant,conversa,motivo,desfecho)

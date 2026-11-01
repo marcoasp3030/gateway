@@ -1,0 +1,111 @@
+# Ambiente de desenvolvimento na máquina local. Produção segue em docker-compose.yml e scripts/implantar.sh.
+# Antes da primeira subida: docker network create --internal luxbrain_gateway_proxy
+# O código é montado no container: salvar um arquivo em app/ reinicia o gateway sozinho.
+name: gateway-local
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--requirepass", "${REDIS_PASSWORD}"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping"]
+      interval: 5s
+      retries: 10
+
+  # As migrações nunca rodam no startup do gateway: esta etapa aplica as pendentes a cada subida.
+  migracoes:
+    build: ./app
+    image: gateway-local-app
+    command: ["python", "/app/migrar.py", "--apply"]
+    restart: "no"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    volumes:
+      - ./app:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Com FILA_DURAVEL=off, o processo do gateway também agenda e processa. Workers não são necessários aqui.
+  gateway:
+    build: ./app
+    image: gateway-local-app
+    restart: unless-stopped
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--no-date-header", "--reload"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      # Trava local: nada sai para WhatsApp nem para o agente real, mesmo que o .env mude.
+      SEND_MODE: dry
+      SKYONE_MODE: mock
+      REGISTRAR_WEBHOOK_UAZAPI: "off"
+    ports:
+      - "127.0.0.1:8100:8000"
+    volumes:
+      - ./app:/app
+      - arquivos:/dados/arquivos
+    networks:
+      default:
+      leitor:
+      painel:
+        aliases:
+          - luxbrain-gateway
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      migracoes:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  leitor:
+    build: ./leitor
+    image: gateway-local-leitor
+    restart: unless-stopped
+    environment:
+      LEITOR_TOKEN: ${LEITOR_TOKEN}
+    networks:
+      - leitor
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8090/saude',timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  pgdata:
+  redisdata:
+  arquivos:
+
+networks:
+  leitor:
+    internal: true
+  painel:
+    external: true
+    name: luxbrain_gateway_proxy

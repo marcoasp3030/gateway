@@ -78,7 +78,7 @@ def test_migracao_055_normaliza_os_gravados_sem_repetir(tmp_path):
             alerta_telefone='11988887777',transbordo_alerta='5511977776666' WHERE id=$1""",a)
         await conn.execute("UPDATE tenant_config SET contatos_permitidos=ARRAY['+55 (11) 91234-5678'],transbordo_alerta='1133334444' WHERE tenant_id='alpha'")
         await conn.execute("UPDATE tenants SET whatsapp_alerta_transbordo='11900000010' WHERE id='alpha'")
-        assert await migrar.aplicar(conn)==['055_telefone_com_55.sql']
+        assert (await migrar.aplicar(conn))[0]=='055_telefone_com_55.sql'
         r=await conn.fetchrow('SELECT contatos_permitidos,alerta_telefone,transbordo_alerta FROM agentes WHERE id=$1',a)
         # Fora da regra (9 dígitos; fixo começando com 7) fica como estava: a migração não inventa número.
         assert dict(r)=={'contatos_permitidos':['5511912345678','teste-marco-01','552133334444','912345678','1177776666'],

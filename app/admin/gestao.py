@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import Field, field_validator
 from .modelos import Estrito
 from .servico import auditar
-from nucleo.autenticacao import painel, exigir_admin
+from nucleo.autenticacao import painel, exigir_admin, pode
 from nucleo.banco import Repositorio
 from nucleo.configuracao import Configuracoes
 from nucleo.contatos import exibicao, canal_info
@@ -44,6 +44,8 @@ def conferir_provedor_real(agente, empresa):
 
 class Pausa(Estrito):
     minutos: int = Field(default=60, ge=1, le=10080, strict=True)
+    # Tomar a conversa de quem está com ela: só com pedido explícito.
+    transferir: bool = False
 
 
 class MensagemHumana(Estrito):
@@ -128,8 +130,8 @@ async def refazer_webhook(request: Request, tenant: str, canal: str, actor=Depen
 async def conversas(request: Request, tenant: str, agente: str | None = None, canal: str | None = None,
                     status: Literal['ativa','pausada'] | None = None, busca: str | None = None,
                     aguardando: bool | None = None, estado: str | None = None,
-                    ordem: Literal['id','recentes'] = 'id',
-                    desde: datetime | None = None, limite: int = 50, cursor: str | None = None):
+                    ordem: Literal['id','recentes'] = 'id', minhas: bool = False, conversa: str | None = None,
+                    desde: datetime | None = None, limite: int = 50, cursor: str | None = None, actor=Depends(painel)):
     repo = Repositorio(request.app.state.db)
     if not await repo.tenant(tenant): raise HTTPException(404, 'TENANT_NOT_FOUND')
     if agente: await exigir(request, tenant, 'agentes', agente)
@@ -149,6 +151,7 @@ async def conversas(request: Request, tenant: str, agente: str | None = None, ca
     rows = await request.app.state.db.fetch(f'''SELECT c.conversation_id,c.agente_id,c.canal_id,c.canal,c.nome,
         c.telefone,c.bot_pausado_ate,c.atualizado_em,c.aguardando_atendente_desde,c.aguardando_motivo,
         c.encerrada_em,c.desfecho,c.limitado_ate,c.contato_id,c.simulada,
+        CASE WHEN {ATRIBUIDA_VIGENTE} THEN c.atribuida_a END AS atribuida_a,CASE WHEN {ATRIBUIDA_VIGENTE} THEN c.atribuida_em END AS atribuida_em,
         CASE WHEN c.bot_pausado_ate>now() THEN 'pausada' ELSE 'ativa' END AS status,
         {ESTADO_SQL} AS estado,
         m.conteudo AS ultima_mensagem,m.enviada_em AS ultima_em,m.direcao AS ultima_direcao,m.origem AS ultima_origem,m.tipo AS ultima_tipo,
@@ -175,8 +178,10 @@ async def conversas(request: Request, tenant: str, agente: str | None = None, ca
         AND ($12::timestamptz IS NULL OR (c.atualizado_em,c.conversation_id)<($12,$13::text))
         AND ($9::boolean IS NULL OR (c.aguardando_atendente_desde IS NOT NULL)=$9)
         AND ($10::text[] IS NULL OR {ESTADO_SQL}=ANY($10))
+        AND ($14::text IS NULL OR ({ATRIBUIDA_VIGENTE} AND c.atribuida_a=$14))
+        AND ($15::text IS NULL OR c.conversation_id=$15)
         ORDER BY {'c.atualizado_em DESC,c.conversation_id DESC' if ordem == 'recentes' else 'c.conversation_id'} LIMIT $8''',
-        tenant, agente, canal, status, busca, desde, cursor, limite+1, aguardando, estados, ordem, apos_em, apos_id)
+        tenant, agente, canal, status, busca, desde, cursor, limite+1, aguardando, estados, ordem, apos_em, apos_id, actor if minhas else None, conversa)
     proximo = None
     if len(rows) > limite:
         r = rows[limite-1]
@@ -202,11 +207,15 @@ async def conversas(request: Request, tenant: str, agente: str | None = None, ca
     # FUP1-a: follow-up agendado na conversa (estado e quando vence), ou nulo.
     from nucleo import follow_up
     agendados = await follow_up.das_conversas(request.app.state.db, tenant, [i['conversation_id'] for i in itens])
-    for i in itens: i['follow_up'] = agendados.get(i['conversation_id'])
+    for i in itens:
+        i['follow_up'] = agendados.get(i['conversation_id'])
+        i['atribuida_minha'] = i['atribuida_a'] == actor
     return {'itens': itens, 'proximo_cursor': proximo}
 
 
 ESTADOS = ('encerrada','aguardando_atendente','atendente','bot')
+# O responsável só vale com a pausa do agente em dia e a conversa aberta; depois disso ninguém fica preso à conversa.
+ATRIBUIDA_VIGENTE = "(c.atribuida_a IS NOT NULL AND c.bot_pausado_ate>now() AND c.encerrada_em IS NULL)"
 # Um estado só, nesta ordem de precedência (docs/ESPEC_PED1.md, seção 6.2).
 ESTADO_SQL = """(CASE WHEN c.encerrada_em IS NOT NULL THEN 'encerrada'
     WHEN c.aguardando_atendente_desde IS NOT NULL THEN 'aguardando_atendente'
@@ -233,6 +242,7 @@ def conversa_do_painel(r, resumo=None, nomes_das_unidades=None):
         'texto': linha['ultima_mensagem'], 'em': linha['ultima_em'], 'direcao': linha['ultima_direcao'],
         'origem': linha['ultima_origem'], 'tipo': linha['ultima_tipo']}
     return {**base, 'contato_id': linha['contato_id'], **nomes,
+            'atribuida_a': linha.get('atribuida_a'), 'atribuida_em': linha.get('atribuida_em'),
             'canal_info': canal_info(linha['canal_id'], linha['canal_tipo'], linha['canal_nome'], linha['tenant_teste'], linha['simulada']),
             'unidade_preferida': linha['unidade_preferida'],
             'unidade_preferida_nome': linha['unidade_preferida_nome'] or linha['unidade_preferida'],
@@ -244,15 +254,23 @@ def conversa_do_painel(r, resumo=None, nomes_das_unidades=None):
                  'encerrado_em': linha['at_encerrado_em'], 'motivo_encerramento': linha['at_motivo_encerramento']}, linha)}
 
 
-async def pausar(request, tenant, conv, minutos, actor, acao):
+async def pausar(request, tenant, conv, minutos, actor, acao, transferir=False):
     async with request.app.state.db.acquire() as conn, conn.transaction():
         await conn.execute('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', conv)
-        # Atendente agiu (assumir, devolver, responder): sai de "aguardando atendente".
+        # Dentro da trava: dois atendentes ao mesmo tempo não passam juntos. Tomar a conversa de alguém é sempre pedido explícito.
+        if minutos is not None and await conn.fetchval(f"""SELECT EXISTS(SELECT 1 FROM conversas c WHERE c.tenant_id=$1
+                AND c.conversation_id=$2 AND {ATRIBUIDA_VIGENTE} AND c.atribuida_a<>$3)""", tenant, conv, actor):
+            if not transferir: raise HTTPException(409, {'campo': 'atribuida'})
+            # ESPEC_USUARIOS1: transferir fica a partir de supervisor.
+            if not pode(request, 'supervisor'): raise HTTPException(403, 'FORBIDDEN')
+        # Atendente agiu (assumir, devolver, responder): sai de "aguardando atendente" e vira o responsável.
         row = await conn.fetchrow('''UPDATE conversas SET bot_pausado_ate=
             CASE WHEN $3::integer IS NULL THEN NULL ELSE now()+make_interval(mins=>$3) END,
             aguardando_atendente_desde=NULL,aguardando_motivo=NULL,
+            atribuida_em=CASE WHEN $3::integer IS NULL THEN NULL WHEN atribuida_a IS NOT DISTINCT FROM $4 THEN COALESCE(atribuida_em,now()) ELSE now() END,
+            atribuida_a=CASE WHEN $3::integer IS NULL THEN NULL ELSE $4 END,
             atualizado_em=now() WHERE tenant_id=$1 AND conversation_id=$2
-            RETURNING bot_pausado_ate,agente_id''', tenant, conv, minutos)
+            RETURNING bot_pausado_ate,agente_id''', tenant, conv, minutos, actor)
         if not row: raise HTTPException(404, 'NOT_FOUND')
         # FUP1-a: atendente assumiu (ou respondeu) → o follow-up agendado sai.
         if minutos is not None:
@@ -264,8 +282,31 @@ async def pausar(request, tenant, conv, minutos, actor, acao):
 
 @router.post('/tenants/{tenant}/conversas/{conv}/assumir')
 async def assumir(request: Request, tenant: str, conv: str, body: Pausa | None = None, actor=Depends(painel)):
-    row = await pausar(request, tenant, conv, (body or Pausa()).minutos, actor, 'conversa.assumida')
+    corpo = body or Pausa()
+    row = await pausar(request, tenant, conv, corpo.minutos, actor, 'conversa.assumida', corpo.transferir)
     return {'ok': True, 'bot_pausado_ate': row['bot_pausado_ate']}
+
+
+class Atribuicao(Estrito):
+    para: str = Field(min_length=3, max_length=200)
+
+
+@router.post('/tenants/{tenant}/conversas/{conv}/atribuir')
+async def atribuir(request: Request, tenant: str, conv: str, body: Atribuicao, actor=Depends(painel)):
+    """Passa a conversa para um colega, a partir de supervisor. Quem confere se `para` é da empresa é o painel."""
+    conversa = await exigir(request, tenant, 'conversas', conv)
+    cfg = await request.app.state.configuracoes.efetiva(tenant, conversa['agente_id'])
+    async with request.app.state.db.acquire() as conn, conn.transaction():
+        await conn.execute('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', conv)
+        if await conn.fetchval('SELECT encerrada_em FROM conversas WHERE tenant_id=$1 AND conversation_id=$2', tenant, conv):
+            raise HTTPException(409, {'campo': 'encerrada'})
+        await conn.execute('''UPDATE conversas SET atribuida_a=$3,atribuida_em=now(),aguardando_atendente_desde=NULL,aguardando_motivo=NULL,
+            bot_pausado_ate=GREATEST(bot_pausado_ate,now()+make_interval(mins=>$4)),atualizado_em=now()
+            WHERE tenant_id=$1 AND conversation_id=$2''', tenant, conv, body.para, cfg['pause_minutes'])
+        from nucleo import follow_up
+        await follow_up.cancelar(conn, tenant, conv, 'com_atendente', actor)
+        await auditar(conn, tenant, actor, 'conversa.atribuida', conv, {'para': body.para})
+    return {'ok': True, 'atribuida_a': body.para}
 
 
 @router.post('/tenants/{tenant}/conversas/{conv}/devolver')

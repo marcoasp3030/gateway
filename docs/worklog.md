@@ -1,3 +1,9 @@
+## [2026-11-01] — Respostas rápidas, responsável da conversa e notas internas
+- **Autor:** Claude Code
+- **Arquivos alterados:** `app/admin/respostas_rapidas.py`, `app/admin/notas.py`, `app/admin/gestao.py`, `app/admin/contatos.py`, `app/nucleo/atendimentos.py`, `app/nucleo/permissoes.py`, migrações 056 e 057, testes
+- **Resumo das mudanças:** Respostas rápidas por empresa (equipe) e por pessoa. Responsável da conversa com conflito dentro da trava; transferir a partir de supervisor. Notas em tabela própria, fora de `mensagens`, na exportação e apagadas na anonimização. Retrato do By Koji ganhou só os 3 campos novos da lista de conversas.
+- **Pendências / TODO:** implantar com `sh scripts/implantar.sh` antes do painel.
+
 # Worklog — gateway
 
 ## [2026-11-01 01:18] — Push completo do gateway para o GitHub

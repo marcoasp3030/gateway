@@ -79,12 +79,13 @@ async def exportar(request:Request,tenant_id:str,cid:str,actor=Depends(painel)):
         ids=[r['conversation_id'] for r in convs]
         msgs=await c.fetch('SELECT * FROM mensagens WHERE tenant_id=$1 AND conversation_id=ANY($2::text[]) ORDER BY id',tenant_id,ids)
         turnos=await c.fetch('SELECT * FROM turnos WHERE tenant_id=$1 AND conversation_id=ANY($2::text[]) ORDER BY id',tenant_id,ids)
+        notas=await c.fetch('SELECT * FROM conversa_notas WHERE tenant_id=$1 AND conversation_id=ANY($2::text[]) ORDER BY id',tenant_id,ids)
         identificadores=ids+[v for v in (ct['telefone'],ct['email']) if v]
         bruto=[r for r in await c.fetch('SELECT id,fonte,payload,recebido_em,contato_id FROM webhook_raw WHERE tenant_id=$1',tenant_id) if r['contato_id']==cid or contem(str(r['payload']),identificadores)]
         entregas=[dict(r) for r in await c.fetch('SELECT id,evento,corpo,status,tentativas,criado_em FROM webhook_entregas WHERE tenant_id=$1',tenant_id) if contem(r['corpo'],identificadores)]
         auditoria=await c.fetch('SELECT * FROM audit_log WHERE tenant_id=$1 AND (alvo=$2 OR alvo=ANY($3::text[])) ORDER BY id',tenant_id,cid,ids)
         await auditar(c,tenant_id,actor,'contato.exportado',cid)
-    return {'contato':ct,'conversas':[dict(r) for r in convs],'mensagens':[registro(r) for r in msgs],'turnos':[registro(r) for r in turnos],'webhook_raw':[registro(r) for r in bruto],'entregas':entregas,'auditoria':[registro(r) for r in auditoria],'pedidos':[]}
+    return {'contato':ct,'conversas':[dict(r) for r in convs],'mensagens':[registro(r) for r in msgs],'turnos':[registro(r) for r in turnos],'notas':[registro(r) for r in notas],'webhook_raw':[registro(r) for r in bruto],'entregas':entregas,'auditoria':[registro(r) for r in auditoria],'pedidos':[]}
 
 @router.delete('/tenants/{tenant_id}/contatos/{cid}')
 async def anonimizar(request:Request,tenant_id:str,cid:str,body:Confirmacao,actor=Depends(painel)):
@@ -104,10 +105,12 @@ async def anonimizar(request:Request,tenant_id:str,cid:str,body:Confirmacao,acto
                 locks.append((key,token))
                 new=f'{t}:{conv["canal_id"]}:anon_{uuid.uuid4().hex}'
                 ident.append(old)
+                # Notas são texto livre da equipe e podem citar o cliente: saem inteiras, não viram "[anonimizado]".
+                await c.execute('DELETE FROM conversa_notas WHERE tenant_id=$1 AND conversation_id=$2',t,old)
                 await c.execute("UPDATE mensagens SET conversation_id=$3,conteudo='[anonimizado]',message_id=NULL,evento=NULL,meta=NULL,processada_em=now() WHERE tenant_id=$1 AND conversation_id=$2",t,old,new)
                 await c.execute('UPDATE turnos SET conversation_id=$3,resposta=NULL,erro=NULL WHERE tenant_id=$1 AND conversation_id=$2',t,old,new)
                 await c.execute('UPDATE agente_callbacks SET conversation_id=$3 WHERE tenant_id=$1 AND conversation_id=$2',t,old,new)
-                await c.execute('UPDATE conversas SET conversation_id=$3,telefone=NULL,nome=NULL,unidade_preferida=NULL,bot_pausado_ate=NULL WHERE tenant_id=$1 AND conversation_id=$2',t,old,new)
+                await c.execute('UPDATE conversas SET conversation_id=$3,telefone=NULL,nome=NULL,unidade_preferida=NULL,bot_pausado_ate=NULL,atribuida_a=NULL,atribuida_em=NULL WHERE tenant_id=$1 AND conversation_id=$2',t,old,new)
                 await c.execute("UPDATE audit_log SET alvo=$3,dados='{}'::jsonb WHERE tenant_id=$1 AND alvo=$2",t,old,new)
                 # O que os módulos guardam da conversa (pedidos: carrinho, pedido e eventos) também perde os dados pessoais.
                 from modulos import ganchos

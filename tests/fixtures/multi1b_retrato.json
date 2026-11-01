@@ -5099,6 +5099,9 @@
      "motivo_encerramento": null,
      "numero": 1
     },
+    "atribuida_a": null,
+    "atribuida_em": null,
+    "atribuida_minha": false,
     "atualizado_em": "<variavel>",
     "bot_pausado_ate": null,
     "canal": "api",
@@ -5158,6 +5161,9 @@
      "motivo_encerramento": null,
      "numero": 1
     },
+    "atribuida_a": null,
+    "atribuida_em": null,
+    "atribuida_minha": false,
     "atualizado_em": "<variavel>",
     "bot_pausado_ate": "<agora-do-banco>",
     "canal": "api",
@@ -5214,6 +5220,9 @@
      "motivo_encerramento": null,
      "numero": 1
     },
+    "atribuida_a": null,
+    "atribuida_em": null,
+    "atribuida_minha": false,
     "atualizado_em": "<variavel>",
     "bot_pausado_ate": null,
     "canal": "api",
@@ -5275,6 +5284,9 @@
      "motivo_encerramento": null,
      "numero": 1
     },
+    "atribuida_a": null,
+    "atribuida_em": null,
+    "atribuida_minha": false,
     "atualizado_em": "<variavel>",
     "bot_pausado_ate": null,
     "canal": "api",
@@ -5331,6 +5343,9 @@
      "motivo_encerramento": null,
      "numero": 1
     },
+    "atribuida_a": null,
+    "atribuida_em": null,
+    "atribuida_minha": false,
     "atualizado_em": "<variavel>",
     "bot_pausado_ate": "<agora-do-banco>",
     "canal": "api",
@@ -5387,6 +5402,9 @@
      "motivo_encerramento": null,
      "numero": 1
     },
+    "atribuida_a": null,
+    "atribuida_em": null,
+    "atribuida_minha": false,
     "atualizado_em": "<variavel>",
     "bot_pausado_ate": "<agora-do-banco>",
     "canal": "api",
@@ -5443,6 +5461,9 @@
      "motivo_encerramento": null,
      "numero": 1
     },
+    "atribuida_a": null,
+    "atribuida_em": null,
+    "atribuida_minha": false,
     "atualizado_em": "<variavel>",
     "bot_pausado_ate": null,
     "canal": "api",
@@ -5499,6 +5520,9 @@
      "motivo_encerramento": null,
      "numero": 1
     },
+    "atribuida_a": null,
+    "atribuida_em": null,
+    "atribuida_minha": false,
     "atualizado_em": "<variavel>",
     "bot_pausado_ate": null,
     "canal": "api",
@@ -5555,6 +5579,9 @@
      "motivo_encerramento": null,
      "numero": 1
     },
+    "atribuida_a": null,
+    "atribuida_em": null,
+    "atribuida_minha": false,
     "atualizado_em": "<variavel>",
     "bot_pausado_ate": null,
     "canal": "api",
