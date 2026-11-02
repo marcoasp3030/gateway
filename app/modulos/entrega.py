@@ -31,6 +31,65 @@ def cep_limpo(valor):
     return v.replace('-','') if re.fullmatch(r'\d{5}-?\d{3}',v) else None
 
 
+def cep_no_endereco(endereco):
+    """Último CEP escrito no endereço (o CEP costuma vir no fim), ou None."""
+    achados=re.findall(r'(?<!\d)\d{5}-?\d{3}(?!\d)',endereco or '')
+    return achados[-1].replace('-','') if achados else None
+
+
+def bairro_no_endereco(endereco,linhas):
+    """Linha de bairro citada no endereço em texto: o agente manda o endereço inteiro. Vale a citação mais longa ("Vila Nova Mariana"
+    antes de "Vila Mariana"); dois bairros diferentes citados não decidem nada, e o agente pergunta."""
+    texto=f' {nome_busca(endereco or "")} '
+    achados={}
+    for l in linhas:
+        if l['tipo']!='bairro': continue
+        for nome in (l['bairro_busca'],*(l['apelidos_busca'] or [])):
+            if nome and f' {nome} ' in texto: achados[nome]=l
+    longos=[n for n in achados if not any(n!=o and f' {n} ' in f' {o} ' for o in achados)]
+    linhas_achadas={achados[n]['id'] for n in longos}
+    return achados[longos[0]] if len(linhas_achadas)==1 else None
+
+
+def _do_bairro(bairro,linhas):
+    alvo=nome_busca(bairro or '')
+    if not alvo: return None
+    return next((l for l in linhas if l['tipo']=='bairro' and (l['bairro_busca']==alvo or alvo in (l['apelidos_busca'] or []))),None)
+
+
+def _da_faixa(cep,linhas):
+    return next((l for l in linhas if l['tipo']=='cep' and l['cep_inicio']<=cep<=l['cep_fim']),None)
+
+
+def calcular_taxa(u,linhas,bairro=None,cep=None,endereco=None,bairro_confirmado=False,subtotal=None):
+    """Taxa da entrega de uma unidade (ESPEC_GESTAO 11.4 e 11.11). `linhas` são as de unidade_taxas; as inativas não contam.
+    Devolve atende, motivo, taxa, origem, pedir, e o bairro e o CEP reconhecidos. Sem modo por área: valor fixo, como sempre foi."""
+    def saida(atende,taxa=None,origem=None,motivo=None,pedir=None,nome=None,codigo=None):
+        frete=u['frete_gratis_acima']
+        if atende and taxa is not None and frete is not None and subtotal is not None and subtotal>=frete: taxa,origem=0,'frete_gratis'
+        return {'atende':atende,'motivo':motivo,'taxa':taxa,'origem':origem,'pedir':pedir,'bairro':nome or (bairro or '').strip() or None,'cep':codigo}
+    codigo=cep_limpo(cep) or cep_no_endereco(endereco)
+    if u['delivery_ativo'] is False: return saida(False,motivo='delivery_indisponivel',codigo=codigo)
+    ativas=[l for l in linhas if l['ativo']];modo=u['taxa_modo']
+    faixas=[l for l in ativas if l['tipo']=='cep'];bairros=[l for l in ativas if l['tipo']=='bairro']
+    # Modo por área sem linhas ativas (aviso modo_sem_linhas): não dá para recusar ninguém; vale o valor fixo, se houver.
+    if modo not in ('bairro','cep') or not (bairros if modo=='bairro' else faixas):
+        fixa=u['taxa_entrega']
+        return saida(True,fixa,'fixa' if fixa is not None else 'a_confirmar',codigo=codigo)
+    def pela_faixa():
+        l=_da_faixa(codigo,faixas)
+        return saida(True,l['taxa'],'cep',codigo=codigo) if l else saida(False,motivo='fora_area',codigo=codigo)
+    if modo=='cep':
+        return pela_faixa() if codigo else saida(False,motivo='falta_cep',pedir='cep')
+    l=_do_bairro(bairro,bairros) or (bairro_no_endereco(endereco,bairros) if not (bairro or '').strip() else None)
+    if l:
+        if l['atendido']: return saida(True,l['taxa'],'bairro',nome=l['bairro'],codigo=codigo)
+        return saida(False,motivo='fora_area',nome=l['bairro'],codigo=codigo)
+    if faixas: return pela_faixa() if codigo else saida(False,motivo='bairro_nao_reconhecido',pedir='cep')
+    if bairro_confirmado and (bairro or '').strip(): return saida(True,None,'a_confirmar',codigo=codigo)
+    return saida(False,motivo='bairro_nao_reconhecido',pedir='confirmar_bairro',codigo=codigo)
+
+
 def _taxa(valor):
     if isinstance(valor,bool) or not isinstance(valor,(int,float)): return None,'tipo'
     if not 0<=valor<=TAXA_MAX: return None,'taxa_invalida'

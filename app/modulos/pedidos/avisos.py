@@ -15,6 +15,13 @@ def reais(valor):
     return 'R$ '+re.sub(r'(?<=\d)(?=(\d{3})+$)','.',inteiro)+','+centavos
 
 
+def _taxa_do_aviso(p):
+    if p['modalidade']!='delivery': return 'não se aplica'
+    if p.get('frete_gratis'): return 'grátis'
+    if p['taxa_entrega'] is None: return 'a confirmar com o cliente'
+    return reais(p['taxa_entrega'])
+
+
 def texto_pedido_unidade(p,itens,nome_unidade):
     linhas=[f'🍱 NOVO PEDIDO {p["numero"]}','',f'Unidade: {nome_unidade}',f'Cliente: {p["cliente_nome"] or "(sem nome)"}',
             f'Telefone: {p["cliente_telefone"] or "(não informado)"}','']
@@ -24,7 +31,7 @@ def texto_pedido_unidade(p,itens,nome_unidade):
         for o in i.get('opcoes') or []:
             linhas.append(f'   + {(str(o["quantidade"])+"× ") if o["quantidade"]>1 else ""}{o["opcao"]} ({o["grupo"]})'+(f' +{reais(o["preco_extra"])}' if o['preco_extra'] else ''))
         if i.get('observacao'): linhas.append(f'   obs.: {i["observacao"]}')
-    linhas+=['─────────────────',f'Subtotal: {reais(p["subtotal"])}',f'Taxa de entrega: {reais(p["taxa_entrega"]) if p["modalidade"]=="delivery" else "não se aplica"}',
+    linhas+=['─────────────────',f'Subtotal: {reais(p["subtotal"])}',f'Taxa de entrega: {_taxa_do_aviso(p)}',
              f'Total: {reais(p["total"])}']
     # PAG1: forma de pagamento e troco (pedidos de antes do PAG1 não têm).
     if p.get('forma_pagamento'):

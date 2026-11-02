@@ -60,6 +60,7 @@ services:
       SEND_MODE: dry
       SKYONE_MODE: mock
       REGISTRAR_WEBHOOK_UAZAPI: "off"
+      PAINEL_PUBLIC_URL: http://localhost:8080
     ports:
       - "127.0.0.1:8100:8000"
     volumes:

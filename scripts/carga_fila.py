@@ -20,13 +20,22 @@ async def pedir(c,metodo,url,ok=(200,201),**kw):
     return r.json()
 
 
+MODELO='carga_generico'
+
+
+async def garantir_modelo(c):
+    """Modelo próprio da carga: o assistente_generico não aceita agentes novos desde o MULTI1-a."""
+    await pedir(c,'POST','/admin/v1/modelos-agente',ok=(201,409),json={'id':MODELO,'nome':'Genérico de teste','tipo':'interno',
+        'segmento':'geral','modulos_permitidos':[],'comportamento_padrao':{'send_mode':'dry','agente_mode':'mock','modo_piloto':True}})
+
+
 async def preparar(c,tenant,debounce,limite=100):
     """Empresa, agente mock/dry e canal API de carga (reaproveita se já existirem)."""
     if (await c.get(f'{BASE}/{tenant}')).status_code==404:
         await pedir(c,'POST',BASE,json={'id':tenant,'nome':'[carga] '+tenant,'tenant_teste':True})
     agentes=(await pedir(c,'GET',f'{BASE}/{tenant}/agentes'))['itens']
     agente=agentes[0]['id'] if agentes else (await pedir(c,'POST',f'{BASE}/{tenant}/agentes',
-        json={'nome':'[carga] agente simulado','modelo_id':'assistente_generico'}))['id']
+        json={'nome':'[carga] agente simulado','modelo_id':MODELO}))['id']
     # Limites por empresa/agente no teto: quem limita é a capacidade dos workers.
     await pedir(c,'PATCH',f'{BASE}/{tenant}/agentes/{agente}',json={'status':'ativo','modo_piloto':False,
         'agente_mode':'mock','send_mode':'dry','debounce_s':debounce,'max_wait_s':debounce,
@@ -92,21 +101,27 @@ async def main():
     p.add_argument('--timeout',type=float,default=600)
     p.add_argument('--limite',type=int,default=100,help='max_lotes_simultaneos e max_concorrencia das empresas de carga')
     p.add_argument('--rotulo',default='carga')
+    p.add_argument('--dominante',type=int,default=0,help='conversas da primeira empresa; as outras dividem o restante')
     a=p.parse_args()
     if os.getenv('CARGA_ISOLADA')!='1': raise SystemExit('Só roda na pilha isolada (scripts/carga_fila.sh)')
-    if not 1<=a.conversas<=2000 or not 1<=a.tenants<=10: p.error('Conversas 1–2000; empresas 1–10')
+    if not 1<=a.conversas<=5000 or not 1<=a.tenants<=100: p.error('Conversas 1–5000; empresas 1–100')
     rodada=uuid.uuid4().hex[:8]
     db=await asyncpg.create_pool(os.environ['DATABASE_URL'],min_size=1,max_size=2)
     cabecalhos={'Authorization':'Bearer '+(os.environ.get('PANEL_PLATFORM_KEY') or os.environ['PANEL_SERVICE_KEY']),'X-Actor':'carga','X-Role':'plataforma'}
     async with httpx.AsyncClient(base_url=a.url,headers=cabecalhos,timeout=30,
                                  limits=httpx.Limits(max_connections=60)) as c:
+        await garantir_modelo(c)
         alvos=[]
         for i in range(a.tenants):
-            t=f'carga_{chr(97+i)}'
+            t=f'carga_{i:03d}'
             alvos.append((t,*await preparar(c,t,a.debounce,a.limite)))
         sem=asyncio.Semaphore(50);inicio=time.monotonic()
         aviso(f'[{a.rotulo}] rodada {rodada}: enviando {a.conversas} conversas em {a.tenants} empresas')
-        feitos=await asyncio.gather(*(enviar(c,sem,*alvos[i%a.tenants],f'carga-{rodada}-{i:04d}',a.timeout)
+        # Com --dominante, as outras empresas entram intercaladas: a grande não pode segurá-las.
+        def alvo(i):
+            if not a.dominante: return alvos[i%a.tenants]
+            return alvos[1+i%(a.tenants-1)] if i%2 and i<2*(a.conversas-a.dominante) else alvos[0]
+        feitos=await asyncio.gather(*(enviar(c,sem,*alvo(i),f'carga-{rodada}-{i:04d}',a.timeout)
                                       for i in range(a.conversas)))
         convs=[f[0] for f in feitos];recebidas_s=round(time.monotonic()-inicio,1)
         aviso(f'[{a.rotulo}] recebidas em {recebidas_s} s; aguardando o processamento')
@@ -120,6 +135,10 @@ async def main():
         duracao=round(time.monotonic()-inicio,1)
         await asyncio.sleep(1)
         r=dict(await db.fetchrow(RELATORIO,convs))
+    outras=None
+    if a.dominante:
+        outras=await db.fetchrow("""SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY espera_ms) p50,percentile_cont(0.95) WITHIN GROUP (ORDER BY espera_ms) p95,max(espera_ms) m
+            FROM turnos WHERE etapa='concluido' AND conversation_id=ANY($1::text[]) AND tenant_id<>$2""",convs,alvos[0][0])
     await db.close()
     seg=lambda ms: None if ms is None else round(float(ms)/1000,2)
     fila=lambda ms: None if ms is None else round(max(0.0,float(ms)/1000-a.debounce),2)
@@ -135,6 +154,7 @@ async def main():
         'agente_mediana_s':seg(r['agente_p50']),
         'detalhe':{k:int(r[k]) for k in ('entradas','respostas','turnos_concluidos','turnos_refeitos',
             'turnos_em_aberto','turnos_com_erro','partes_incertas','partes_presas')}}
+    if outras: saida['espera_das_outras_empresas_s']={k:fila(outras[k]) for k in ('p50','p95','m')}
     print(json.dumps(saida,ensure_ascii=False,indent=2))
     return 0 if completo and not perdidas and not duplicadas and len(set(convs))==a.conversas else 1
 

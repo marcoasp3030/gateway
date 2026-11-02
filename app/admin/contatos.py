@@ -80,12 +80,14 @@ async def exportar(request:Request,tenant_id:str,cid:str,actor=Depends(painel)):
         msgs=await c.fetch('SELECT * FROM mensagens WHERE tenant_id=$1 AND conversation_id=ANY($2::text[]) ORDER BY id',tenant_id,ids)
         turnos=await c.fetch('SELECT * FROM turnos WHERE tenant_id=$1 AND conversation_id=ANY($2::text[]) ORDER BY id',tenant_id,ids)
         notas=await c.fetch('SELECT * FROM conversa_notas WHERE tenant_id=$1 AND conversation_id=ANY($2::text[]) ORDER BY id',tenant_id,ids)
+        etiquetas=await c.fetch('''SELECT ce.conversation_id,e.nome,ce.aplicada_em FROM conversa_etiquetas ce JOIN etiquetas e ON e.id=ce.etiqueta_id
+            WHERE ce.tenant_id=$1 AND ce.conversation_id=ANY($2::text[]) ORDER BY e.nome''',tenant_id,ids)
         identificadores=ids+[v for v in (ct['telefone'],ct['email']) if v]
         bruto=[r for r in await c.fetch('SELECT id,fonte,payload,recebido_em,contato_id FROM webhook_raw WHERE tenant_id=$1',tenant_id) if r['contato_id']==cid or contem(str(r['payload']),identificadores)]
         entregas=[dict(r) for r in await c.fetch('SELECT id,evento,corpo,status,tentativas,criado_em FROM webhook_entregas WHERE tenant_id=$1',tenant_id) if contem(r['corpo'],identificadores)]
         auditoria=await c.fetch('SELECT * FROM audit_log WHERE tenant_id=$1 AND (alvo=$2 OR alvo=ANY($3::text[])) ORDER BY id',tenant_id,cid,ids)
         await auditar(c,tenant_id,actor,'contato.exportado',cid)
-    return {'contato':ct,'conversas':[dict(r) for r in convs],'mensagens':[registro(r) for r in msgs],'turnos':[registro(r) for r in turnos],'notas':[registro(r) for r in notas],'webhook_raw':[registro(r) for r in bruto],'entregas':entregas,'auditoria':[registro(r) for r in auditoria],'pedidos':[]}
+    return {'contato':ct,'conversas':[dict(r) for r in convs],'mensagens':[registro(r) for r in msgs],'turnos':[registro(r) for r in turnos],'notas':[registro(r) for r in notas],'etiquetas':[registro(r) for r in etiquetas],'webhook_raw':[registro(r) for r in bruto],'entregas':entregas,'auditoria':[registro(r) for r in auditoria],'pedidos':[]}
 
 @router.delete('/tenants/{tenant_id}/contatos/{cid}')
 async def anonimizar(request:Request,tenant_id:str,cid:str,body:Confirmacao,actor=Depends(painel)):
@@ -107,6 +109,8 @@ async def anonimizar(request:Request,tenant_id:str,cid:str,body:Confirmacao,acto
                 ident.append(old)
                 # Notas são texto livre da equipe e podem citar o cliente: saem inteiras, não viram "[anonimizado]".
                 await c.execute('DELETE FROM conversa_notas WHERE tenant_id=$1 AND conversation_id=$2',t,old)
+                # Etiqueta classifica a pessoa ("reclamação", "VIP"): sai junto. As esperas ficam, só com tempos, e seguem o novo identificador.
+                await c.execute('DELETE FROM conversa_etiquetas WHERE tenant_id=$1 AND conversation_id=$2',t,old)
                 await c.execute("UPDATE mensagens SET conversation_id=$3,conteudo='[anonimizado]',message_id=NULL,evento=NULL,meta=NULL,processada_em=now() WHERE tenant_id=$1 AND conversation_id=$2",t,old,new)
                 await c.execute('UPDATE turnos SET conversation_id=$3,resposta=NULL,erro=NULL WHERE tenant_id=$1 AND conversation_id=$2',t,old,new)
                 await c.execute('UPDATE agente_callbacks SET conversation_id=$3 WHERE tenant_id=$1 AND conversation_id=$2',t,old,new)

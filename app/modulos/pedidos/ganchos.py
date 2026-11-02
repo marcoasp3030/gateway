@@ -93,11 +93,13 @@ async def resumo_das_conversas(db,tenant,conversas):
 async def anonimizar(conn,tenant,antiga,nova):
     """LGPD: carrinho e pedido acompanham a troca do identificador (ON UPDATE CASCADE); saem endereço, observações (a geral e a de
     cada item, LGPD1) e dados do cliente. O registro curto das Skills (sem endereço nem observação) passa para o identificador novo."""
-    await conn.execute('UPDATE carrinhos SET endereco=NULL,observacao=NULL WHERE tenant_id=$1 AND conversation_id=$2',tenant,nova)
+    # O link do cardápio abre esta conversa: não sobrevive à anonimização.
+    await conn.execute('DELETE FROM cardapio_links WHERE tenant_id=$1 AND conversation_id=$2',tenant,nova)
+    await conn.execute('UPDATE carrinhos SET endereco=NULL,bairro=NULL,cep=NULL,observacao=NULL WHERE tenant_id=$1 AND conversation_id=$2',tenant,nova)
     await conn.execute('UPDATE carrinho_itens SET observacao=NULL WHERE tenant_id=$1 AND carrinho_id IN '
                        '(SELECT id FROM carrinhos WHERE tenant_id=$1 AND conversation_id=$2)',tenant,nova)
     # Cada item do pedido continua com o campo "observacao", vazio.
-    await conn.execute("""UPDATE pedidos SET endereco=NULL,observacao=NULL,cliente_nome=NULL,cliente_telefone=NULL,
+    await conn.execute("""UPDATE pedidos SET endereco=NULL,bairro=NULL,cep=NULL,observacao=NULL,cliente_nome=NULL,cliente_telefone=NULL,
         itens=(SELECT coalesce(jsonb_agg(CASE WHEN jsonb_typeof(i)='object' AND i ? 'observacao' THEN i||'{"observacao":null}'::jsonb ELSE i END ORDER BY n),'[]'::jsonb)
                FROM jsonb_array_elements(itens) WITH ORDINALITY AS x(i,n))
         WHERE tenant_id=$1 AND conversation_id=$2""",tenant,nova)

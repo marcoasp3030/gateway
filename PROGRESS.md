@@ -1474,3 +1474,11 @@ PY
 - **Onde vale.** Ficha do agente, `PUT /config`, empresa (`whatsapp_alerta_transbordo`) e rascunho do atendimento (lá a mensagem vem em `campos[].mensagem`). `alerta_telefone` vazio continua limpando o campo.
 - **Migração 055.** Aplica a regra aos valores já gravados e tira repetidos da lista do piloto. Valor fora da regra fica como está.
 - **Testes.** `tests/test_tel1.py`. `test_cfg1c` e `test_gestao_g2` foram ajustados: o alerta de transbordo passa a aceitar o número sem o 55, e o fixo fica restrito a começar com 2 a 5 (antes, de 2 a 8).
+
+## G4-b: taxa por bairro ou CEP e bairro não atendido — 2026-11-02
+
+- **Regra.** `calcular_taxa` (`app/modulos/entrega.py`) decide a taxa no carrinho, no fechamento, no cardápio público e na Skill `consultar_entrega`. Sem modo por área, vale o valor fixo de antes.
+- **Recusas.** `fora_area`, `bairro_nao_reconhecido`, `falta_cep` e `cep_invalido`, com o que o agente deve pedir ou oferecer.
+- **Bairro fora da lista.** Sem faixa de CEP, o cliente confirma e o pedido segue com taxa a confirmar. A confirmação vale só para aquele bairro.
+- **Migração 061.** Bairro, CEP e confirmação em `carrinhos`; bairro, CEP, origem da taxa e frete grátis em `pedidos`.
+- **Testes.** `tests/test_g4b_taxa.py`. Suíte completa com 415 aprovados.

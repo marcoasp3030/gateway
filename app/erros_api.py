@@ -39,7 +39,8 @@ def campos_conhecidos():
                    'desfechos','followups_padrao','skyone_fluxo_modelo','ativo','config','modelo_versao',
                    'item_id','quantidade','observacao','unidade','modalidade','endereco','horario','maioridade_confirmada','motivo','numero',
                    'ate','indefinida','data','fechado','faixas','fuso','dias','entidade',
-                   'delivery_ativo','taxa_modo','frete_gratis_acima','tempo_entrega_min','tempo_retirada_min','taxa_entrega','pedido_minimo'))
+                   'delivery_ativo','taxa_modo','frete_gratis_acima','tempo_entrega_min','tempo_retirada_min','taxa_entrega','pedido_minimo',
+                   'logo_id','banner_id','bairro','cep'))
     return campos
 
 

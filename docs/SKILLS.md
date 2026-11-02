@@ -48,6 +48,8 @@ A cada turno o gateway envia, sem o agente pedir:
 - Em `unidades`, **nulo significa "não informado"**: o agente não afirma nada sobre o campo e diz que a unidade confirma no retorno do pré-pedido.
 - Por isso o agente não precisa chamar `ver_carrinho` no início de cada turno: o carrinho já vem no pacote.
 
+- `link_cardapio`: link do cardápio interativo desta conversa, pronto para enviar. Fica nulo sem catálogo ou sem `PAINEL_PUBLIC_URL`. Quando o cliente pedir o cardápio, envie esse link; não monte o endereço. Vale 24 horas e, depois de um pedido, o pacote seguinte já traz outro. O pedido feito pela página aparece em `ultimo_pedido`, como qualquer outro.
+
 ## Formato das respostas
 
 **Sucesso em qualquer escrita** — sempre o carrinho completo atualizado:
@@ -129,6 +131,10 @@ A cada turno o gateway envia, sem o agente pedir:
 | `troco_so_em_dinheiro` | 422 | `troco_para` só com a forma que aceita troco (`dinheiro`). Não envie troco em Pix ou cartão |
 | `troco_menor_que_total` | 422 | O valor para troco precisa ser maior que `detalhes.total`. Pergunte de novo; se o cliente não precisa de troco, envie `troco_para: null` |
 | `delivery_indisponivel` | 422 | A unidade não faz entrega: oferece retirada |
+| `fora_area` | 422 | O endereço está fora da área da unidade: avisa o cliente e, se `detalhes.aceita_retirada`, oferece retirada |
+| `bairro_nao_reconhecido` | 422 | O bairro não está na lista. `detalhes.pedir = "cep"`: pede o CEP. `"confirmar_bairro"`: confirma a grafia uma vez e reenvia com `bairro_confirmado: true`; a taxa fica a confirmar pela unidade |
+| `falta_cep` | 422 | A unidade cobra por CEP: pede o CEP e chama `definir_entrega` com `cep` |
+| `cep_invalido` | 422 | CEP sem 8 dígitos: pede de novo |
 
 Outros erros: 401 (chave ausente ou inválida), 403 (chave sem o escopo), 404 (conversa inexistente), 400 (campo inválido; `detalhes.campo` diz qual).
 
@@ -223,6 +229,12 @@ Exemplo: `{"item_id": 1027, "quantidade": 2, "observacao": "sem cebola", "opcoes
 **Descrição para o agente:** Remove todos os itens. Use quando o cliente quiser recomeçar ou trocar de unidade. Depois disso o carrinho volta ao estado inicial completo: sem unidade, modalidade, endereço, horário, observação nem maioridade confirmada. **Pergunte tudo de novo**; não presuma entrega ou retirada do pedido anterior.
 
 `DELETE /api/v1/carrinho/{conversation_id}`
+
+### Taxa de entrega por área (G4-b, 02/11/2026)
+
+Com `entrega.precisa_de` em `info_unidades` igual a `bairro` ou `cep`, a taxa depende do endereço. `definir_entrega` aceita `bairro`, `cep` e `bairro_confirmado`. Sem eles, o gateway procura o bairro e o CEP no texto de `endereco`, então o agente que manda só o endereço continua funcionando. O carrinho devolve `taxa_entrega`, `taxa_origem` (`fixa`, `bairro`, `cep`, `frete_gratis`, `a_confirmar`) e `frete_gratis`. Taxa `a_confirmar` não soma no total: diga que a unidade confirma.
+
+**Skill `consultar_entrega`:** `GET /api/v1/entrega?conversation_id=&unidade=&bairro=&cep=`, escopo `ferramentas:catalogo`. Responde se a unidade entrega ali e quanto custa, sem mexer no carrinho. Use quando o cliente perguntar "vocês entregam em...?". Contrato em `docs/ESPEC_GESTAO.md`, seção 11.11.
 
 ### 7. `definir_entrega`
 

@@ -5,6 +5,7 @@ import json,secrets
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 from nucleo.contatos import nome_da_conversa
+from modulos.entrega import calcular_taxa,cep_limpo,nome_busca
 from . import agendamento
 
 MAX_LINHAS=50
@@ -47,6 +48,11 @@ RECUSAS={
  'troco_so_em_dinheiro':('troco_para','Troco só existe no pagamento em dinheiro (com troco aceito pela unidade). Não envie troco_para em outra forma.'),
  'troco_menor_que_total':('troco_para','O valor para troco precisa ser maior que o total do pedido (veja total nos detalhes). Pergunte de novo ao cliente; se ele não precisa de troco, envie troco_para null.'),
  'delivery_indisponivel':('modalidade','Esta unidade não faz entrega. Ofereça retirada.'),
+ # G4-b: taxa por área. Os detalhes trazem modo, aceita_retirada e pedir.
+ 'fora_area':('endereco','Este endereço está fora da área de entrega da unidade. Diga isso ao cliente e, se detalhes.aceita_retirada, ofereça retirada.'),
+ 'bairro_nao_reconhecido':('bairro','Este bairro não está na lista da unidade. Se detalhes.pedir for "cep", peça o CEP. Se for "confirmar_bairro", confirme a grafia uma vez e reenvie com bairro_confirmado: true: a taxa fica a confirmar pela unidade.'),
+ 'falta_cep':('cep','Esta unidade calcula a taxa pelo CEP. Peça o CEP ao cliente e chame definir_entrega com cep.'),
+ 'cep_invalido':('cep','CEP inválido. Peça os 8 dígitos ao cliente.'),
 }
 
 
@@ -68,6 +74,28 @@ async def travar(conn,tenant,conversa):
 async def unidade_da_empresa(conn,tenant,codigo):
     if not codigo: return None
     return await conn.fetchrow('SELECT * FROM tenant_unidades WHERE tenant_id=$1 AND codigo=$2 AND ativo',tenant,codigo)
+
+
+FALTA_DA_AREA={'fora_area':'fora_area','bairro_nao_reconhecido':'bairro','falta_cep':'cep'}
+
+
+async def entrega_da_unidade(conn,tenant,u,bairro=None,cep=None,endereco=None,bairro_confirmado=False,subtotal=None):
+    """Taxa e área da unidade para este endereço (modulos/entrega.py). Também serve à consulta, sem carrinho."""
+    linhas=await conn.fetch('SELECT * FROM unidade_taxas WHERE tenant_id=$1 AND unidade_id=$2 ORDER BY ordem,id',tenant,u['id'])
+    return calcular_taxa(u,linhas,bairro,cep,endereco,bairro_confirmado,subtotal)
+
+
+async def entrega_do_carrinho(conn,tenant,u,c,subtotal):
+    """Taxa do carrinho. Fora de entrega, ou sem unidade, não há taxa nem o que recusar."""
+    if not u or c['modalidade']!='delivery':
+        return {'atende':True,'motivo':None,'taxa':None,'origem':None,'pedir':None,'bairro':None,'cep':None}
+    return await entrega_da_unidade(conn,tenant,u,c['bairro'],c['cep'],c['endereco'],c['bairro_confirmado'],subtotal)
+
+
+def recusar_entrega(e,u):
+    """Recusa com o que o agente precisa para decidir o que oferecer."""
+    if not e['atende']:
+        raise Recusa(e['motivo'],detalhes={'modo':u['taxa_modo'],'aceita_retirada':u['aceita_retirada'] is not False,'pedir':e['pedir']})
 
 
 async def aberto(conn,tenant,conversa,criar=False):
@@ -97,6 +125,7 @@ async def retrato(conn,tenant,conversa):
         return {'conversation_id':conversa,'unidade':None,'modalidade':None,'endereco':None,'horario':None,
                 'agendado_para':None,'horario_vencido':False,'horario_aviso':None,'observacao':None,
                 'maioridade_confirmada':False,'itens':[],'numero_itens':0,'subtotal':None,'taxa_entrega':None,'total':None,
+                'bairro':None,'cep':None,'taxa_origem':None,'frete_gratis':False,
                 'pedido_minimo':None,'tem_alcoolico':False,'itens_indisponiveis':[],
                 'forma_pagamento':None,'pagamento_rotulo':None,'troco_para':None,'troco':None,'formas_aceitas':[],
                 'faltando':['itens','modalidade','pagamento'],'pode_fechar':False,'atualizado_em':None}
@@ -111,13 +140,14 @@ async def retrato(conn,tenant,conversa):
             'disponivel':l['id'] not in fora_por_linha} for l in ls]
     subtotal=sum((l['preco_unitario']*l['quantidade'] for l in ls),Decimal('0')) if ls else None
     u=await unidade_da_empresa(conn,tenant,c['unidade'])
-    # Taxa só entra quando é entrega e a unidade tem taxa cadastrada; senão fica nula (a unidade confirma no retorno).
-    taxa=u['taxa_entrega'] if u and c['modalidade']=='delivery' else None
+    # Taxa só entra quando é entrega e se sabe o valor; senão fica nula (a unidade confirma no retorno).
+    area=await entrega_do_carrinho(conn,tenant,u,c,subtotal);taxa=area['taxa']
     tem_alcool=any(l['alcoolico'] for l in ls)
     faltando=[]
     if not ls: faltando.append('itens')
     if not c['modalidade']: faltando.append('modalidade')
     if c['modalidade']=='delivery' and not (c['endereco'] or '').strip(): faltando.append('endereco')
+    elif area['motivo'] in FALTA_DA_AREA: faltando.append(FALTA_DA_AREA[area['motivo']])
     if tem_alcool and not c['maioridade_confirmada']: faltando.append('maioridade_confirmada')
     # PED2: horário marcado que já passou não fecha pedido; o agente pergunta outro.
     fuso=await fuso_da_unidade(conn,tenant,u);quando=agendamento.do_carrinho(c,fuso);passou=agendamento.vencido(quando)
@@ -134,6 +164,7 @@ async def retrato(conn,tenant,conversa):
     return {'conversation_id':conversa,'unidade':c['unidade'],'modalidade':c['modalidade'],'endereco':c['endereco'],'horario':c['horario'],
             'agendado_para':agendamento.iso(quando,fuso),'horario_vencido':passou,'horario_aviso':aviso,
             'observacao':c['observacao'],'maioridade_confirmada':c['maioridade_confirmada'],'itens':itens,
+            'bairro':c['bairro'],'cep':c['cep'],'taxa_origem':area['origem'],'frete_gratis':area['origem']=='frete_gratis',
             'numero_itens':sum(l['quantidade'] for l in ls),'subtotal':dinheiro(subtotal),'taxa_entrega':dinheiro(taxa),
             'total':dinheiro(subtotal+(taxa or 0)) if subtotal is not None else None,
             'pedido_minimo':dinheiro(u['pedido_minimo']) if u else None,'tem_alcoolico':tem_alcool,
@@ -346,8 +377,21 @@ async def esvaziar(conn,tenant,conversa):
     if c:
         await conn.execute('DELETE FROM carrinho_itens WHERE tenant_id=$1 AND carrinho_id=$2',tenant,c['id'])
         # Volta ao estado inicial completo: nada do pedido anterior (retirada, endereço, horário…) fica para o agente presumir.
-        await conn.execute("""UPDATE carrinhos SET unidade=NULL,modalidade=NULL,endereco=NULL,horario=NULL,agendado_para=NULL,observacao=NULL,
+        await conn.execute("""UPDATE carrinhos SET unidade=NULL,modalidade=NULL,endereco=NULL,bairro=NULL,cep=NULL,bairro_confirmado=false,horario=NULL,agendado_para=NULL,observacao=NULL,
             maioridade_confirmada=false,forma_pagamento=NULL,troco_para=NULL,atualizado_em=now() WHERE tenant_id=$1 AND id=$2""",tenant,c['id'])
+
+
+async def substituir_itens(conn,tenant,conversa):
+    """Cardápio interativo: a página manda a lista inteira. Tira os itens e a unidade, mas guarda o que o cliente já disse na
+    conversa (endereço, horário ainda válido). Horário que passou sai aqui: a página não tem como pedir outro."""
+    await travar(conn,tenant,conversa)
+    c=await aberto(conn,tenant,conversa)
+    if not c: return
+    await conn.execute('DELETE FROM carrinho_itens WHERE tenant_id=$1 AND carrinho_id=$2',tenant,c['id'])
+    u=await unidade_da_empresa(conn,tenant,c['unidade'])
+    vencido=agendamento.vencido(agendamento.do_carrinho(c,await fuso_da_unidade(conn,tenant,u)))
+    await conn.execute(f"""UPDATE carrinhos SET unidade=NULL,forma_pagamento=NULL,troco_para=NULL{',horario=NULL,agendado_para=NULL' if vencido else ''}
+        WHERE tenant_id=$1 AND id=$2""",tenant,c['id'])
 
 
 async def entrega(conn,tenant,conversa,dados):
@@ -369,12 +413,30 @@ async def entrega(conn,tenant,conversa,dados):
         if u and u['delivery_ativo'] is False: raise Recusa('delivery_indisponivel')
     if 'horario' in dados or 'agendado_para' in dados:
         await _agendar(conn,tenant,c,dados)
+    # Endereço novo sem bairro e CEP: os de antes eram do endereço antigo.
+    if 'endereco' in dados and not {'bairro','cep'}&set(dados):
+        await conn.execute('UPDATE carrinhos SET bairro=NULL,cep=NULL,bairro_confirmado=false WHERE tenant_id=$1 AND id=$2',tenant,c['id'])
+    if dados.get('cep') and not cep_limpo(dados['cep']): raise Recusa('cep_invalido')
+    if 'cep' in dados:
+        await conn.execute('UPDATE carrinhos SET cep=$3 WHERE tenant_id=$1 AND id=$2',tenant,c['id'],cep_limpo(dados['cep'] or ''))
+    if 'bairro' in dados:
+        novo=(dados['bairro'] or '').strip() or None
+        await conn.execute('UPDATE carrinhos SET bairro=$3 WHERE tenant_id=$1 AND id=$2',tenant,c['id'],novo)
+        # A confirmação é daquele bairro: com outro, a grafia volta a ser conferida.
+        if nome_busca(novo or '')!=nome_busca(c['bairro'] or ''):
+            await conn.execute('UPDATE carrinhos SET bairro_confirmado=false WHERE tenant_id=$1 AND id=$2',tenant,c['id'])
+    if 'bairro_confirmado' in dados:
+        await conn.execute('UPDATE carrinhos SET bairro_confirmado=$3 WHERE tenant_id=$1 AND id=$2',tenant,c['id'],bool(dados['bairro_confirmado']))
     for campo in ('modalidade','endereco','observacao'):
         if campo in dados:
             valor=(dados[campo] or '').strip() or None if isinstance(dados[campo],str) or dados[campo] is None else dados[campo]
             await conn.execute(f'UPDATE carrinhos SET {campo}=$3 WHERE tenant_id=$1 AND id=$2',tenant,c['id'],valor)
     if dados.get('maioridade_confirmada') is not None:
         await conn.execute('UPDATE carrinhos SET maioridade_confirmada=$3 WHERE tenant_id=$1 AND id=$2',tenant,c['id'],bool(dados['maioridade_confirmada']))
+    # Área conferida na hora, com o endereço já gravado: o cliente sabe antes de escolher mais nada. Recusa desfaz tudo.
+    if {'endereco','bairro','cep'}&set(dados) or dados.get('modalidade')=='delivery':
+        atual=await aberto(conn,tenant,conversa);u=await unidade_da_empresa(conn,tenant,atual['unidade'])
+        if u and (atual['endereco'] or atual['bairro'] or atual['cep']): recusar_entrega(await entrega_do_carrinho(conn,tenant,u,atual,None),u)
     # Por último: o troco é comparado com o total já com a modalidade (e a taxa) desta mesma chamada. Recusa desfaz tudo.
     if 'forma_pagamento' in dados or 'troco_para' in dados:
         await _pagamento(conn,tenant,c,dados)
@@ -390,11 +452,11 @@ async def formas_aceitas(conn,tenant,codigo_unidade):
 
 
 async def _total(conn,tenant,c):
-    """Total do carrinho como no retrato (subtotal + taxa fixa na entrega), ou None sem itens."""
+    """Total do carrinho como no retrato (subtotal + taxa da entrega), ou None sem itens."""
     subtotal=await conn.fetchval('SELECT sum(preco_unitario*quantidade) FROM carrinho_itens WHERE tenant_id=$1 AND carrinho_id=$2',tenant,c['id'])
     if subtotal is None: return None
     u=await unidade_da_empresa(conn,tenant,c['unidade'])
-    return subtotal+((u['taxa_entrega'] or 0) if u and c['modalidade']=='delivery' else 0)
+    return subtotal+((await entrega_do_carrinho(conn,tenant,u,c,subtotal))['taxa'] or 0)
 
 
 async def _pagamento(conn,tenant,c,dados):
@@ -466,6 +528,7 @@ def retrato_pedido(p):
     itens=json.loads(p['itens']) if isinstance(p['itens'],str) else p['itens']
     return {'numero':p['numero'],'status':p['status'],'conversation_id':p['conversation_id'],'unidade':p['unidade'],'modalidade':p['modalidade'],
             'endereco':p['endereco'],'horario':p['horario'],
+            'bairro':p.get('bairro'),'cep':p.get('cep'),'taxa_origem':p.get('taxa_origem'),'frete_gratis':bool(p.get('frete_gratis')),
             'agendado_para':p['agendado_para'].isoformat(timespec='seconds') if p.get('agendado_para') else None,
             'observacao':p['observacao'],'itens':itens,
             'subtotal':dinheiro(p['subtotal']),'taxa_entrega':dinheiro(p['taxa_entrega']),'total':dinheiro(p['total']),
@@ -645,6 +708,8 @@ async def fechar(conn,tenant,conversa):
     if c['modalidade']=='retirada' and u and u['aceita_retirada'] is False: raise Recusa('retirada_indisponivel')
     if c['modalidade']=='delivery' and u and u['delivery_ativo'] is False: raise Recusa('delivery_indisponivel')
     subtotal=sum((l['preco_unitario']*l['quantidade'] for l in ls),Decimal('0'))
+    area=await entrega_do_carrinho(conn,tenant,u,c,subtotal)
+    if u: recusar_entrega(area,u)
     if u and u['pedido_minimo'] is not None and subtotal<u['pedido_minimo']: raise Recusa('abaixo_do_minimo')
     agendado=await conferir_horario(conn,tenant,c,u)
     # Análise de comportamento (26/10): pedido para já com a unidade fechada (horário, exceção ou pausa) não fecha, qualquer que seja o
@@ -657,7 +722,7 @@ async def fechar(conn,tenant,conversa):
     # DISP1: confere de novo se cada item é servido no dia e horário do pedido.
     fora=await indisponiveis(conn,tenant,conversa,ls)
     if fora: raise Recusa('item_indisponivel',detalhes={'itens':fora,'resumo':fora[0]['resumo'],'motivo_indisponivel':fora[0]['motivo'],'data_referencia':fora[0]['data_referencia']})
-    taxa=u['taxa_entrega'] if u and c['modalidade']=='delivery' else None
+    taxa=area['taxa']
     # PAG1: forma de pagamento obrigatória, ainda aceita pela unidade; troco acima do total final.
     formas=await formas_aceitas(conn,tenant,c['unidade'])
     if not c['forma_pagamento']: raise Recusa('pagamento_nao_informado',detalhes={'formas_aceitas':formas})
@@ -676,11 +741,12 @@ async def fechar(conn,tenant,conversa):
     origem,canal=await origem_e_canal(conn,tenant,conversa)
     p=await conn.fetchrow('''INSERT INTO pedidos(tenant_id,numero,conversation_id,carrinho_id,unidade,modalidade,endereco,horario,observacao,
         itens,subtotal,taxa_entrega,total,cliente_nome,cliente_telefone,tem_alcoolico,maioridade_confirmada,agendado_para,origem,canal,
-        forma_pagamento,pagamento_rotulo,troco_para)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) RETURNING *''',
+        forma_pagamento,pagamento_rotulo,troco_para,bairro,cep,taxa_origem,frete_gratis)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27) RETURNING *''',
         tenant,await _numero(conn,tenant),conversa,c['id'],c['unidade'],c['modalidade'],c['endereco'] if c['modalidade']=='delivery' else None,
         c['horario'],c['observacao'],json.dumps(itens,ensure_ascii=False),subtotal,taxa,subtotal+(taxa or 0),nome,conv['telefone'],
-        tem_alcool,bool(c['maioridade_confirmada']),agendado,origem,canal,forma['codigo'],forma['rotulo'],c['troco_para'])
+        tem_alcool,bool(c['maioridade_confirmada']),agendado,origem,canal,forma['codigo'],forma['rotulo'],c['troco_para'],
+        area['bairro'],area['cep'],area['origem'],area['origem']=='frete_gratis')
     await conn.execute("UPDATE carrinhos SET status='fechado',atualizado_em=now() WHERE tenant_id=$1 AND id=$2",tenant,c['id'])
     await registrar_evento(conn,tenant,p['id'],None,'aguardando_loja','agente','agente')
     return p
@@ -785,7 +851,12 @@ async def contexto(repo,tenant,conversa):
     antigos=await expirado(conn,tenant,conversa)
     p=await conn.fetchrow('SELECT numero,status,total,criado_em FROM pedidos WHERE tenant_id=$1 AND conversation_id=$2 ORDER BY id DESC LIMIT 1',tenant,conversa)
     recentes=await ultimos(conn,tenant,conversa) if p else []
-    return {'carrinho':carrinho,
+    # Cardápio interativo: link pronto para o agente mandar quando o cliente pedir o cardápio (nulo sem catálogo ou sem endereço público).
+    from .cardapio import garantir_link
+    link=None
+    if await conn.fetchval('SELECT EXISTS(SELECT 1 FROM catalogo_itens WHERE tenant_id=$1 AND ativo LIMIT 1)',tenant):
+        link,_=await garantir_link(conn,tenant,conversa)
+    return {'carrinho':carrinho,'link_cardapio':link,
             # true = o carrinho antigo foi arquivado por tempo; itens_expirados diz o que havia, para o agente oferecer refazer.
             'carrinho_expirado':antigos is not None,'itens_expirados':antigos or [],
             'ultimo_pedido':{'numero':p['numero'],'status':p['status'],'status_descricao':DESCRICAO[p['status']],'total':dinheiro(p['total']),

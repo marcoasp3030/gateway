@@ -269,13 +269,3 @@ def test_info_unidades_entrega_retirada_pagamentos_e_pacote_sem_mudanca():
                             'formas_pagamento','taxa_entrega','pedido_minimo','area_entrega','aceita_retirada','regras','horarios','tem_cardapio','itens_no_cardapio'}
             assert u3
     banco(cenario)
-
-
-def test_carrinho_nao_usa_o_cadastro_novo_no_G4a():
-    """G4-a não muda nada para o cliente: com modo por bairro e frete grátis cadastrados, o carrinho continua cobrando a taxa
-    única de sempre e não pede bairro. Desde o PAG1, as formas de pagamento (unidade_pagamentos) e o delivery_ativo valem no carrinho."""
-    from modulos.pedidos import servico
-    import inspect
-    fonte=inspect.getsource(servico)
-    for nome in ('unidade_taxas','taxa_modo','frete_gratis_acima','tempo_entrega_min'):
-        assert nome not in fonte,nome

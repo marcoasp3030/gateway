@@ -16,7 +16,7 @@ T='bykoji'
 ADMIN={'X-Actor':'ana','X-Role':'admin'}
 ALMOCO={'dias_semana':['seg','ter','qua','qui','sex'],'exceto_feriado':True,'horario':[['11:30','15:00']]}
 RESUMO='segunda a sexta, 11h30–15h, exceto feriados'
-CAMPOS={'item_id','codigo','unidade','categoria','nome','descricao','preco','alcoolico','delivery','tipo','observacao','ativo','atualizado_em',
+CAMPOS={'qtd_opcoes','item_id','codigo','unidade','categoria','nome','descricao','preco','alcoolico','delivery','tipo','observacao','ativo','atualizado_em',
         'disponibilidade','disponivel_agora','indisponivel_motivo','data_referencia',
         # CAT3-a
         'categoria_id','posicao','prato','esgotado_ate','esgotado_motivo','arquivado_em','arquivado'}

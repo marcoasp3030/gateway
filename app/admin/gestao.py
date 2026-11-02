@@ -1,5 +1,7 @@
 """Operações do painel sobre agentes, canais e atendimento humano."""
 import asyncio
+import base64
+import json
 import secrets
 import time
 import uuid
@@ -130,7 +132,7 @@ async def refazer_webhook(request: Request, tenant: str, canal: str, actor=Depen
 async def conversas(request: Request, tenant: str, agente: str | None = None, canal: str | None = None,
                     status: Literal['ativa','pausada'] | None = None, busca: str | None = None,
                     aguardando: bool | None = None, estado: str | None = None,
-                    ordem: Literal['id','recentes'] = 'id', minhas: bool = False, conversa: str | None = None,
+                    ordem: Literal['id','recentes'] = 'id', minhas: bool = False, conversa: str | None = None, etiqueta: int | None = None,
                     desde: datetime | None = None, limite: int = 50, cursor: str | None = None, actor=Depends(painel)):
     repo = Repositorio(request.app.state.db)
     if not await repo.tenant(tenant): raise HTTPException(404, 'TENANT_NOT_FOUND')
@@ -180,8 +182,9 @@ async def conversas(request: Request, tenant: str, agente: str | None = None, ca
         AND ($10::text[] IS NULL OR {ESTADO_SQL}=ANY($10))
         AND ($14::text IS NULL OR ({ATRIBUIDA_VIGENTE} AND c.atribuida_a=$14))
         AND ($15::text IS NULL OR c.conversation_id=$15)
+        AND ($16::bigint IS NULL OR EXISTS(SELECT 1 FROM conversa_etiquetas ce WHERE ce.tenant_id=c.tenant_id AND ce.conversation_id=c.conversation_id AND ce.etiqueta_id=$16))
         ORDER BY {'c.atualizado_em DESC,c.conversation_id DESC' if ordem == 'recentes' else 'c.conversation_id'} LIMIT $8''',
-        tenant, agente, canal, status, busca, desde, cursor, limite+1, aguardando, estados, ordem, apos_em, apos_id, actor if minhas else None, conversa)
+        tenant, agente, canal, status, busca, desde, cursor, limite+1, aguardando, estados, ordem, apos_em, apos_id, actor if minhas else None, conversa, etiqueta)
     proximo = None
     if len(rows) > limite:
         r = rows[limite-1]
@@ -207,9 +210,12 @@ async def conversas(request: Request, tenant: str, agente: str | None = None, ca
     # FUP1-a: follow-up agendado na conversa (estado e quando vence), ou nulo.
     from nucleo import follow_up
     agendados = await follow_up.das_conversas(request.app.state.db, tenant, [i['conversation_id'] for i in itens])
+    from .etiquetas import das_conversas
+    etiquetas = await das_conversas(request.app.state.db, tenant, [i['conversation_id'] for i in itens])
     for i in itens:
         i['follow_up'] = agendados.get(i['conversation_id'])
         i['atribuida_minha'] = i['atribuida_a'] == actor
+        i['etiquetas'] = etiquetas.get(i['conversation_id'], [])
     return {'itens': itens, 'proximo_cursor': proximo}
 
 
@@ -254,6 +260,13 @@ def conversa_do_painel(r, resumo=None, nomes_das_unidades=None):
                  'encerrado_em': linha['at_encerrado_em'], 'motivo_encerramento': linha['at_motivo_encerramento']}, linha)}
 
 
+async def registrar_espera(conn, tenant, conv, atendente):
+    """Guarda quanto a conversa aguardou antes de sair da fila: depois do UPDATE seguinte o dado some de `conversas`."""
+    await conn.execute('''INSERT INTO conversa_esperas(tenant_id,conversation_id,inicio,motivo,atendente)
+        SELECT tenant_id,conversation_id,aguardando_atendente_desde,aguardando_motivo,$3 FROM conversas
+        WHERE tenant_id=$1 AND conversation_id=$2 AND aguardando_atendente_desde IS NOT NULL''', tenant, conv, atendente)
+
+
 async def pausar(request, tenant, conv, minutos, actor, acao, transferir=False):
     async with request.app.state.db.acquire() as conn, conn.transaction():
         await conn.execute('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', conv)
@@ -263,6 +276,7 @@ async def pausar(request, tenant, conv, minutos, actor, acao, transferir=False):
             if not transferir: raise HTTPException(409, {'campo': 'atribuida'})
             # ESPEC_USUARIOS1: transferir fica a partir de supervisor.
             if not pode(request, 'supervisor'): raise HTTPException(403, 'FORBIDDEN')
+        await registrar_espera(conn, tenant, conv, actor if minutos is not None else None)
         # Atendente agiu (assumir, devolver, responder): sai de "aguardando atendente" e vira o responsável.
         row = await conn.fetchrow('''UPDATE conversas SET bot_pausado_ate=
             CASE WHEN $3::integer IS NULL THEN NULL ELSE now()+make_interval(mins=>$3) END,
@@ -300,6 +314,7 @@ async def atribuir(request: Request, tenant: str, conv: str, body: Atribuicao, a
         await conn.execute('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', conv)
         if await conn.fetchval('SELECT encerrada_em FROM conversas WHERE tenant_id=$1 AND conversation_id=$2', tenant, conv):
             raise HTTPException(409, {'campo': 'encerrada'})
+        await registrar_espera(conn, tenant, conv, body.para)
         await conn.execute('''UPDATE conversas SET atribuida_a=$3,atribuida_em=now(),aguardando_atendente_desde=NULL,aguardando_motivo=NULL,
             bot_pausado_ate=GREATEST(bot_pausado_ate,now()+make_interval(mins=>$4)),atualizado_em=now()
             WHERE tenant_id=$1 AND conversation_id=$2''', tenant, conv, body.para, cfg['pause_minutes'])
@@ -339,8 +354,66 @@ async def mensagem(request: Request, tenant: str, conv: str, body: MensagemHuman
             if cfg['send_mode']=='live':
                 if canal['tipo']!='uazapi': raise HTTPException(501, 'Envio deste canal não implementado')
                 marca = uazapi.marca_do_envio(canal['id'], await uazapi.enviar(state.http, state.cofre, tenant, canal, conversa['telefone'], body.texto))
-            msgid = await conn.fetchval("INSERT INTO mensagens(tenant_id,conversation_id,direcao,origem,conteudo,processada_em,message_id,meta) VALUES ($1,$2,'saida','humano',$3,now(),$4,$5::jsonb) RETURNING id",tenant,conv,body.texto,*marca)
+            msgid = await conn.fetchval("INSERT INTO mensagens(tenant_id,conversation_id,direcao,origem,conteudo,processada_em,message_id,meta,autor) VALUES ($1,$2,'saida','humano',$3,now(),$4,$5::jsonb,$6) RETURNING id",tenant,conv,body.texto,*marca, actor)
             await auditar(conn, tenant, actor, 'mensagem.humana', conv)
+    except HTTPException:
+        raise
+    except Exception:
+        async with state.db.acquire() as conn, conn.transaction():
+            await auditar(conn, tenant, actor, 'mensagem.humana_falhou', conv)
+        raise HTTPException(502, 'UPSTREAM_ERROR: envio humano falhou') from None
+    return {'ok': True, 'mensagem_id': msgid, 'origem': 'humano', 'send_mode': cfg['send_mode']}
+
+
+FORMATOS_ENVIO = {b'%PDF': ('document', 'documento', 'application/pdf'), b'\xff\xd8\xff': ('image', 'imagem', 'image/jpeg'),
+                  b'\x89PNG': ('image', 'imagem', 'image/png')}
+MAX_ENVIO_BYTES = 10*1024*1024
+
+
+class Midia(Estrito):
+    nome: str = Field(min_length=1, max_length=120)
+    conteudo: str = Field(min_length=4, max_length=15_000_000)
+    legenda: str | None = Field(default=None, max_length=1000)
+
+
+def conferir_arquivo(body):
+    """O formato sai dos bytes do arquivo, não do nome. Devolve (tipo do provedor, tipo da mensagem, mimetype, tamanho)."""
+    try: bruto = base64.b64decode(body.conteudo, validate=True)
+    except ValueError: raise HTTPException(400, {'campo': 'conteudo'}) from None
+    if len(bruto) > MAX_ENVIO_BYTES: raise HTTPException(413, 'arquivo grande demais')
+    for inicio, formato in FORMATOS_ENVIO.items():
+        if bruto.startswith(inicio): return (*formato, len(bruto))
+    raise HTTPException(400, {'campo': 'conteudo', 'motivo': 'formato'})
+
+
+@router.post('/tenants/{tenant}/conversas/{conv}/midia', status_code=201)
+async def midia(request: Request, tenant: str, conv: str, body: Midia, actor=Depends(painel)):
+    """Envia PDF, JPG ou PNG ao contato. O arquivo não é guardado: fica só o registro na conversa, e o histórico do agente vê o nome."""
+    tipo_provedor, tipo, mimetype, tamanho = conferir_arquivo(body)
+    state = request.app.state
+    conversa = await exigir(request, tenant, 'conversas', conv)
+    cfg = await state.configuracoes.efetiva(tenant, conversa['agente_id'])
+    await pausar(request, tenant, conv, cfg['pause_minutes'], actor, 'conversa.assumida')
+    legenda = (body.legenda or '').strip()
+    nome = ' '.join(body.nome.split())
+    conteudo = f'[arquivo enviado: {nome}]' + (f'\n{legenda}' if legenda else '')
+    try:
+        async with state.db.acquire() as conn, conn.transaction():
+            await conn.execute('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', conv)
+            conversa = await Repositorio(conn).obter(tenant, 'conversas', conv)
+            if not conversa: raise HTTPException(404, 'NOT_FOUND')
+            repo = Repositorio(conn)
+            canal, empresa, cfg = await state.pipeline.contexto(tenant, conversa['canal_id'], repo, Configuracoes(repo))
+            if not canal['ativo'] or empresa['status'] != 'ativo': raise HTTPException(409, 'CHANNEL_UNAVAILABLE')
+            marca = None
+            if cfg['send_mode'] == 'live':
+                if canal['tipo'] != 'uazapi': raise HTTPException(501, 'Envio deste canal não implementado')
+                marca = uazapi.marca_do_envio(canal['id'], await uazapi.enviar_midia(state.http, state.cofre, tenant, canal, conversa['telefone'],
+                                                                                     tipo_provedor, body.conteudo, nome, legenda))
+            msgid = await conn.fetchval("""INSERT INTO mensagens(tenant_id,conversation_id,direcao,origem,conteudo,processada_em,message_id,tipo,meta,autor)
+                VALUES ($1,$2,'saida','humano',$3,now(),$4,$5,$6::jsonb,$7) RETURNING id""", tenant, conv, conteudo, marca, tipo,
+                json.dumps({'arquivo': nome, 'mimetype': mimetype, 'tamanho_bytes': tamanho}, ensure_ascii=False), actor)
+            await auditar(conn, tenant, actor, 'mensagem.humana', conv, {'arquivo': True})
     except HTTPException:
         raise
     except Exception:

@@ -64,6 +64,8 @@ def relogio_fixo(monkeypatch,quando):
 def test_retrato_do_by_koji_identico(tmp_path,monkeypatch):
     quando=[datetime.fromisoformat(DIA+'T13:00:00').replace(tzinfo=SP)]
     relogio_fixo(monkeypatch,quando)
+    # O link do cardápio é aleatório: sem endereço público ele fica nulo e o retrato continua fixo.
+    monkeypatch.delenv('PAINEL_PUBLIC_URL',raising=False)
     retrato={};numeros=[]
     async def cenario(pool):
         app,c,r,p,pref=await montar_fila(pool,True,tmp_path)

@@ -174,9 +174,12 @@ async def para_o_painel(conn,tenant,rows):
     if ids:
         pratos={p['id']:{'id':p['id'],'codigo':p['codigo'],'nome':p['nome']} for p in await conn.fetch(
             'SELECT id,codigo,nome FROM catalogo_pratos WHERE tenant_id=$1 AND id=ANY($2::bigint[])',tenant,list(ids))}
+    com_opcoes={g['item_id']:g['n'] for g in await conn.fetch(
+        'SELECT item_id,count(*) n FROM catalogo_grupos WHERE tenant_id=$1 AND ativo AND item_id=ANY($2::int[]) GROUP BY item_id',tenant,[r['id'] for r in rows])}
     saida=[]
     for r,base in zip(rows,await com_agora(conn,tenant,rows)):
         saida.append({**base,'categoria_id':r['categoria_id'],'posicao':r['posicao'],'prato':pratos.get(r['prato_id']),
+                      'qtd_opcoes':com_opcoes.get(r['id'],0),
                       'esgotado_ate':r['esgotado_ate'],'esgotado_motivo':r['esgotado_motivo'],'arquivado_em':r['arquivado_em'],
                       'arquivado':r['arquivado_em'] is not None})
     return saida
@@ -334,7 +337,9 @@ async def criar_item(request:Request,tenant_id:str,dados:Corpo,actor=Depends(pai
 
 
 async def copiar_item(conn,tenant,origem,u,categoria_id,nome,actor,prato_id=None):
-    """Cópia do item na unidade `u` (código novo com o prefixo dela), inativa (decisão 2)."""
+    """Cópia do item na unidade `u` (código novo com o prefixo dela), inativa (decisão 2). Leva as opções: sem elas, a cópia
+    de um produto com tamanho obrigatório seria outro produto."""
+    from .opcoes import do_painel,gravar
     codigo=await proximo_codigo(conn,tenant,u)
     c=await conn.fetchrow('SELECT id,nome FROM catalogo_categorias WHERE tenant_id=$1 AND id=$2',tenant,categoria_id)
     item_id=await conn.fetchval('''INSERT INTO catalogo_itens(tenant_id,unidade,categoria,categoria_id,codigo,nome,descricao,preco,tipo,alcoolico,delivery,
@@ -342,6 +347,8 @@ async def copiar_item(conn,tenant,origem,u,categoria_id,nome,actor,prato_id=None
         SELECT tenant_id,$3::text,$4::text,$5::bigint,$6::text,$7::text,descricao,preco,tipo,alcoolico,delivery,observacao,disponibilidade,false,$8::bigint
         FROM catalogo_itens WHERE tenant_id=$1 AND id=$2 RETURNING id''',tenant,origem['id'],u['codigo'],c['nome'],c['id'],codigo,nome or origem['nome'],prato_id)
     await colocar(conn,tenant,c['id'],item_id)
+    conjunto=await do_painel(conn,tenant,{'id':origem['id'],'opcoes_atualizado_em':None})
+    if conjunto['grupos']: await gravar(conn,tenant,item_id,conjunto['grupos'],manter_ids=False)
     await registrar(conn,tenant,actor,'catalogo_item',item_id,'criado',None,{'codigo':codigo,'unidade':u['codigo'],'categoria':c['nome'],
                     'copiado_de':origem['id'],'ativo':False,**({'prato_id':prato_id} if prato_id else {})})
     return item_id

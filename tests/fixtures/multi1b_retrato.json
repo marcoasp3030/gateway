@@ -198,6 +198,8 @@
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
+       "bairro": null,
+       "cep": null,
        "conversation_id": "bykoji:can_<id>:5511900000001",
        "de_atendimento_anterior": false,
        "endereco": null,
@@ -208,6 +210,7 @@
        ],
        "forma_pagamento": null,
        "formas_aceitas": [],
+       "frete_gratis": false,
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -222,6 +225,7 @@
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
+       "taxa_origem": null,
        "tem_alcoolico": false,
        "total": null,
        "troco": null,
@@ -230,6 +234,7 @@
       },
       "carrinho_expirado": false,
       "itens_expirados": [],
+      "link_cardapio": null,
       "ultimo_pedido": null,
       "ultimos_pedidos": []
      },
@@ -394,6 +399,8 @@
      "carrinho": {
       "agendado_para": null,
       "atualizado_em": "<variavel>",
+      "bairro": null,
+      "cep": null,
       "conversation_id": "bykoji:can_<id>:5511900000001",
       "endereco": null,
       "faltando": [
@@ -413,6 +420,7 @@
         "rotulo": "Dinheiro"
        }
       ],
+      "frete_gratis": false,
       "horario": null,
       "horario_aviso": null,
       "horario_vencido": false,
@@ -443,6 +451,7 @@
       "pode_fechar": false,
       "subtotal": 68.0,
       "taxa_entrega": null,
+      "taxa_origem": null,
       "tem_alcoolico": false,
       "total": 68.0,
       "troco": null,
@@ -754,6 +763,8 @@
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
+       "bairro": null,
+       "cep": null,
        "conversation_id": "bykoji:can_<id>:55119000000014",
        "de_atendimento_anterior": false,
        "endereco": null,
@@ -764,6 +775,7 @@
        ],
        "forma_pagamento": null,
        "formas_aceitas": [],
+       "frete_gratis": false,
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -778,6 +790,7 @@
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
+       "taxa_origem": null,
        "tem_alcoolico": false,
        "total": null,
        "troco": null,
@@ -786,6 +799,7 @@
       },
       "carrinho_expirado": false,
       "itens_expirados": [],
+      "link_cardapio": null,
       "ultimo_pedido": null,
       "ultimos_pedidos": []
      },
@@ -1100,6 +1114,8 @@
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
+       "bairro": null,
+       "cep": null,
        "conversation_id": "bykoji:can_<id>:55119000000014",
        "de_atendimento_anterior": false,
        "endereco": null,
@@ -1110,6 +1126,7 @@
        ],
        "forma_pagamento": null,
        "formas_aceitas": [],
+       "frete_gratis": false,
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -1124,6 +1141,7 @@
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
+       "taxa_origem": null,
        "tem_alcoolico": false,
        "total": null,
        "troco": null,
@@ -1132,6 +1150,7 @@
       },
       "carrinho_expirado": false,
       "itens_expirados": [],
+      "link_cardapio": null,
       "ultimo_pedido": null,
       "ultimos_pedidos": []
      },
@@ -1548,6 +1567,8 @@
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": "<variavel>",
+       "bairro": null,
+       "cep": null,
        "conversation_id": "bykoji:can_<id>:55119000000013",
        "de_atendimento_anterior": false,
        "endereco": null,
@@ -1569,6 +1590,7 @@
          "rotulo": "Dinheiro"
         }
        ],
+       "frete_gratis": false,
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -1614,6 +1636,7 @@
        "pode_fechar": false,
        "subtotal": 89.0,
        "taxa_entrega": null,
+       "taxa_origem": null,
        "tem_alcoolico": true,
        "total": 89.0,
        "troco": null,
@@ -1622,6 +1645,7 @@
       },
       "carrinho_expirado": false,
       "itens_expirados": [],
+      "link_cardapio": null,
       "ultimo_pedido": null,
       "ultimos_pedidos": []
      },
@@ -2013,6 +2037,8 @@
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
+       "bairro": null,
+       "cep": null,
        "conversation_id": "bykoji:can_<id>:5511900000001",
        "de_atendimento_anterior": false,
        "endereco": null,
@@ -2023,6 +2049,7 @@
        ],
        "forma_pagamento": null,
        "formas_aceitas": [],
+       "frete_gratis": false,
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -2037,6 +2064,7 @@
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
+       "taxa_origem": null,
        "tem_alcoolico": false,
        "total": null,
        "troco": null,
@@ -2045,6 +2073,7 @@
       },
       "carrinho_expirado": false,
       "itens_expirados": [],
+      "link_cardapio": null,
       "ultimo_pedido": null,
       "ultimos_pedidos": []
      },
@@ -2560,6 +2589,8 @@
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
+       "bairro": null,
+       "cep": null,
        "conversation_id": "bykoji:can_<id>:55119000000017",
        "de_atendimento_anterior": false,
        "endereco": null,
@@ -2570,6 +2601,7 @@
        ],
        "forma_pagamento": null,
        "formas_aceitas": [],
+       "frete_gratis": false,
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -2584,6 +2616,7 @@
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
+       "taxa_origem": null,
        "tem_alcoolico": false,
        "total": null,
        "troco": null,
@@ -2597,6 +2630,7 @@
         "quantidade": 1
        }
       ],
+      "link_cardapio": null,
       "ultimo_pedido": null,
       "ultimos_pedidos": []
      },
@@ -2751,6 +2785,8 @@
      "carrinho": {
       "agendado_para": null,
       "atualizado_em": null,
+      "bairro": null,
+      "cep": null,
       "conversation_id": "bykoji:can_<id>:55119000000017",
       "endereco": null,
       "faltando": [
@@ -2760,6 +2796,7 @@
       ],
       "forma_pagamento": null,
       "formas_aceitas": [],
+      "frete_gratis": false,
       "horario": null,
       "horario_aviso": null,
       "horario_vencido": false,
@@ -2774,6 +2811,7 @@
       "pode_fechar": false,
       "subtotal": null,
       "taxa_entrega": null,
+      "taxa_origem": null,
       "tem_alcoolico": false,
       "total": null,
       "troco": null,
@@ -3006,6 +3044,8 @@
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
+       "bairro": null,
+       "cep": null,
        "conversation_id": "bykoji:can_<id>:55119000000017",
        "de_atendimento_anterior": false,
        "endereco": null,
@@ -3016,6 +3056,7 @@
        ],
        "forma_pagamento": null,
        "formas_aceitas": [],
+       "frete_gratis": false,
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -3030,6 +3071,7 @@
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
+       "taxa_origem": null,
        "tem_alcoolico": false,
        "total": null,
        "troco": null,
@@ -3038,6 +3080,7 @@
       },
       "carrinho_expirado": false,
       "itens_expirados": [],
+      "link_cardapio": null,
       "ultimo_pedido": null,
       "ultimos_pedidos": []
      },
@@ -3181,6 +3224,8 @@
      "carrinho": {
       "agendado_para": null,
       "atualizado_em": "<variavel>",
+      "bairro": null,
+      "cep": null,
       "conversation_id": "bykoji:can_<id>:55119000000017",
       "endereco": null,
       "faltando": [
@@ -3200,6 +3245,7 @@
         "rotulo": "Dinheiro"
        }
       ],
+      "frete_gratis": false,
       "horario": null,
       "horario_aviso": null,
       "horario_vencido": false,
@@ -3230,6 +3276,7 @@
       "pode_fechar": false,
       "subtotal": 150.0,
       "taxa_entrega": null,
+      "taxa_origem": null,
       "tem_alcoolico": false,
       "total": 150.0,
       "troco": null,
@@ -3486,6 +3533,8 @@
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
+       "bairro": null,
+       "cep": null,
        "conversation_id": "bykoji:can_<id>:5511900000001",
        "de_atendimento_anterior": false,
        "endereco": null,
@@ -3496,6 +3545,7 @@
        ],
        "forma_pagamento": null,
        "formas_aceitas": [],
+       "frete_gratis": false,
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -3510,6 +3560,7 @@
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
+       "taxa_origem": null,
        "tem_alcoolico": false,
        "total": null,
        "troco": null,
@@ -3518,6 +3569,7 @@
       },
       "carrinho_expirado": false,
       "itens_expirados": [],
+      "link_cardapio": null,
       "ultimo_pedido": {
        "atualizado_em": "<variavel>",
        "criado_em": "<variavel>",
@@ -3735,11 +3787,14 @@
       "agendado_para": "2030-11-05T17:00:00+00:00",
       "atualizado_em": "<variavel>",
       "atualizado_ha_segundos": "<variavel>",
+      "bairro": null,
+      "cep": null,
       "cliente_nome": null,
       "conversation_id": "bykoji:can_<id>:5511900000001",
       "criado_em": "<variavel>",
       "decidido_em": "<variavel>",
       "endereco": null,
+      "frete_gratis": false,
       "horario": "hoje às 14h",
       "itens": [
        {
@@ -3782,6 +3837,7 @@
       "status_descricao": "Confirmado pela unidade",
       "subtotal": 68.0,
       "taxa_entrega": null,
+      "taxa_origem": null,
       "tem_alcoolico": false,
       "total": 68.0,
       "unidade": "patio_guedala"
@@ -4112,6 +4168,8 @@
       "carrinho": {
        "agendado_para": "2030-11-05T14:00:00-03:00",
        "atualizado_em": "<variavel>",
+       "bairro": null,
+       "cep": null,
        "conversation_id": "bykoji:can_<id>:5511900000001",
        "de_atendimento_anterior": false,
        "endereco": null,
@@ -4129,6 +4187,7 @@
          "rotulo": "Dinheiro"
         }
        ],
+       "frete_gratis": false,
        "horario": "hoje às 14h",
        "horario_aviso": null,
        "horario_vencido": false,
@@ -4159,6 +4218,7 @@
        "pode_fechar": true,
        "subtotal": 68.0,
        "taxa_entrega": null,
+       "taxa_origem": null,
        "tem_alcoolico": false,
        "total": 68.0,
        "troco": null,
@@ -4167,6 +4227,7 @@
       },
       "carrinho_expirado": false,
       "itens_expirados": [],
+      "link_cardapio": null,
       "ultimo_pedido": null,
       "ultimos_pedidos": []
      },
@@ -4351,6 +4412,8 @@
      "carrinho": {
       "agendado_para": null,
       "atualizado_em": null,
+      "bairro": null,
+      "cep": null,
       "conversation_id": "bykoji:can_<id>:5511900000001",
       "endereco": null,
       "faltando": [
@@ -4360,6 +4423,7 @@
       ],
       "forma_pagamento": null,
       "formas_aceitas": [],
+      "frete_gratis": false,
       "horario": null,
       "horario_aviso": null,
       "horario_vencido": false,
@@ -4374,6 +4438,7 @@
       "pode_fechar": false,
       "subtotal": null,
       "taxa_entrega": null,
+      "taxa_origem": null,
       "tem_alcoolico": false,
       "total": null,
       "troco": null,
@@ -4385,11 +4450,14 @@
      "pedido": {
       "agendado_para": "2030-11-05T17:00:00+00:00",
       "atualizado_em": "<variavel>",
+      "bairro": null,
+      "cep": null,
       "cliente_nome": null,
       "conversation_id": "bykoji:can_<id>:5511900000001",
       "criado_em": "<variavel>",
       "decidido_em": null,
       "endereco": null,
+      "frete_gratis": false,
       "horario": "hoje às 14h",
       "itens": [
        {
@@ -4420,6 +4488,7 @@
       "status": "aguardando_loja",
       "subtotal": 68.0,
       "taxa_entrega": null,
+      "taxa_origem": null,
       "tem_alcoolico": false,
       "total": 68.0,
       "unidade": "patio_guedala"
@@ -4666,6 +4735,8 @@
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
+       "bairro": null,
+       "cep": null,
        "conversation_id": "bykoji:can_<id>:55119000000018",
        "de_atendimento_anterior": false,
        "endereco": null,
@@ -4676,6 +4747,7 @@
        ],
        "forma_pagamento": null,
        "formas_aceitas": [],
+       "frete_gratis": false,
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -4690,6 +4762,7 @@
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
+       "taxa_origem": null,
        "tem_alcoolico": false,
        "total": null,
        "troco": null,
@@ -4698,6 +4771,7 @@
       },
       "carrinho_expirado": false,
       "itens_expirados": [],
+      "link_cardapio": null,
       "ultimo_pedido": null,
       "ultimos_pedidos": []
      },
@@ -5118,6 +5192,7 @@
     "desfecho": null,
     "encerrada_em": null,
     "estado": "bot",
+    "etiquetas": [],
     "follow_up": null,
     "limitado_ate": null,
     "nome": null,
@@ -5180,6 +5255,7 @@
     "desfecho": null,
     "encerrada_em": null,
     "estado": "aguardando_atendente",
+    "etiquetas": [],
     "follow_up": null,
     "limitado_ate": null,
     "nome": null,
@@ -5239,6 +5315,7 @@
     "desfecho": null,
     "encerrada_em": null,
     "estado": "bot",
+    "etiquetas": [],
     "follow_up": null,
     "limitado_ate": null,
     "nome": null,
@@ -5303,6 +5380,7 @@
     "desfecho": null,
     "encerrada_em": null,
     "estado": "bot",
+    "etiquetas": [],
     "follow_up": null,
     "limitado_ate": null,
     "nome": null,
@@ -5362,6 +5440,7 @@
     "desfecho": null,
     "encerrada_em": null,
     "estado": "aguardando_atendente",
+    "etiquetas": [],
     "follow_up": null,
     "limitado_ate": null,
     "nome": null,
@@ -5421,6 +5500,7 @@
     "desfecho": null,
     "encerrada_em": null,
     "estado": "aguardando_atendente",
+    "etiquetas": [],
     "follow_up": null,
     "limitado_ate": null,
     "nome": null,
@@ -5480,6 +5560,7 @@
     "desfecho": null,
     "encerrada_em": null,
     "estado": "bot",
+    "etiquetas": [],
     "follow_up": null,
     "limitado_ate": null,
     "nome": null,
@@ -5539,6 +5620,7 @@
     "desfecho": null,
     "encerrada_em": null,
     "estado": "bot",
+    "etiquetas": [],
     "follow_up": null,
     "limitado_ate": null,
     "nome": null,
@@ -5598,6 +5680,7 @@
     "desfecho": null,
     "encerrada_em": null,
     "estado": "bot",
+    "etiquetas": [],
     "follow_up": null,
     "limitado_ate": null,
     "nome": null,
@@ -6172,6 +6255,8 @@
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": "<variavel>",
+       "bairro": null,
+       "cep": null,
        "conversation_id": "bykoji:can_<id>:5511900000001",
        "de_atendimento_anterior": false,
        "endereco": null,
@@ -6192,6 +6277,7 @@
          "rotulo": "Dinheiro"
         }
        ],
+       "frete_gratis": false,
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -6222,6 +6308,7 @@
        "pode_fechar": false,
        "subtotal": 68.0,
        "taxa_entrega": null,
+       "taxa_origem": null,
        "tem_alcoolico": false,
        "total": 68.0,
        "troco": null,
@@ -6230,6 +6317,7 @@
       },
       "carrinho_expirado": false,
       "itens_expirados": [],
+      "link_cardapio": null,
       "ultimo_pedido": null,
       "ultimos_pedidos": []
      },
@@ -6405,6 +6493,8 @@
      "carrinho": {
       "agendado_para": "2030-11-05T14:00:00-03:00",
       "atualizado_em": "<variavel>",
+      "bairro": null,
+      "cep": null,
       "conversation_id": "bykoji:can_<id>:5511900000001",
       "endereco": null,
       "faltando": [],
@@ -6421,6 +6511,7 @@
         "rotulo": "Dinheiro"
        }
       ],
+      "frete_gratis": false,
       "horario": "hoje às 14h",
       "horario_aviso": null,
       "horario_vencido": false,
@@ -6451,6 +6542,7 @@
       "pode_fechar": true,
       "subtotal": 68.0,
       "taxa_entrega": null,
+      "taxa_origem": null,
       "tem_alcoolico": false,
       "total": 68.0,
       "troco": null,
@@ -6468,6 +6560,8 @@
      "carrinho": {
       "agendado_para": "2030-11-05T14:00:00-03:00",
       "atualizado_em": "<variavel>",
+      "bairro": null,
+      "cep": null,
       "conversation_id": "bykoji:can_<id>:5511900000001",
       "endereco": null,
       "faltando": [],
@@ -6484,6 +6578,7 @@
         "rotulo": "Dinheiro"
        }
       ],
+      "frete_gratis": false,
       "horario": "hoje às 14h",
       "horario_aviso": null,
       "horario_vencido": false,
@@ -6514,6 +6609,7 @@
       "pode_fechar": true,
       "subtotal": 68.0,
       "taxa_entrega": null,
+      "taxa_origem": null,
       "tem_alcoolico": false,
       "total": 68.0,
       "troco": null,
@@ -6916,6 +7012,8 @@
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
+       "bairro": null,
+       "cep": null,
        "conversation_id": "bykoji:can_<id>:5511900000001",
        "de_atendimento_anterior": false,
        "endereco": null,
@@ -6926,6 +7024,7 @@
        ],
        "forma_pagamento": null,
        "formas_aceitas": [],
+       "frete_gratis": false,
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -6940,6 +7039,7 @@
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
+       "taxa_origem": null,
        "tem_alcoolico": false,
        "total": null,
        "troco": null,
@@ -6948,6 +7048,7 @@
       },
       "carrinho_expirado": false,
       "itens_expirados": [],
+      "link_cardapio": null,
       "ultimo_pedido": null,
       "ultimos_pedidos": []
      },
@@ -7338,6 +7439,8 @@
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
+       "bairro": null,
+       "cep": null,
        "conversation_id": "bykoji:can_<id>:5511900000001",
        "de_atendimento_anterior": false,
        "endereco": null,
@@ -7348,6 +7451,7 @@
        ],
        "forma_pagamento": null,
        "formas_aceitas": [],
+       "frete_gratis": false,
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -7362,6 +7466,7 @@
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
+       "taxa_origem": null,
        "tem_alcoolico": false,
        "total": null,
        "troco": null,
@@ -7370,6 +7475,7 @@
       },
       "carrinho_expirado": false,
       "itens_expirados": [],
+      "link_cardapio": null,
       "ultimo_pedido": {
        "atualizado_em": "<variavel>",
        "criado_em": "<variavel>",
@@ -7886,6 +7992,8 @@
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
+       "bairro": null,
+       "cep": null,
        "conversation_id": "bykoji:can_<id>:55119000000012",
        "de_atendimento_anterior": false,
        "endereco": null,
@@ -7896,6 +8004,7 @@
        ],
        "forma_pagamento": null,
        "formas_aceitas": [],
+       "frete_gratis": false,
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -7910,6 +8019,7 @@
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
+       "taxa_origem": null,
        "tem_alcoolico": false,
        "total": null,
        "troco": null,
@@ -7918,6 +8028,7 @@
       },
       "carrinho_expirado": false,
       "itens_expirados": [],
+      "link_cardapio": null,
       "ultimo_pedido": null,
       "ultimos_pedidos": []
      },
@@ -8310,6 +8421,8 @@
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
+       "bairro": null,
+       "cep": null,
        "conversation_id": "bykoji:can_<id>:5511900000001",
        "de_atendimento_anterior": false,
        "endereco": null,
@@ -8320,6 +8433,7 @@
        ],
        "forma_pagamento": null,
        "formas_aceitas": [],
+       "frete_gratis": false,
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -8334,6 +8448,7 @@
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
+       "taxa_origem": null,
        "tem_alcoolico": false,
        "total": null,
        "troco": null,
@@ -8342,6 +8457,7 @@
       },
       "carrinho_expirado": false,
       "itens_expirados": [],
+      "link_cardapio": null,
       "ultimo_pedido": {
        "atualizado_em": "<variavel>",
        "criado_em": "<variavel>",
@@ -8792,6 +8908,8 @@
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
+       "bairro": null,
+       "cep": null,
        "conversation_id": "bykoji:can_<id>:55119000000016",
        "de_atendimento_anterior": false,
        "endereco": null,
@@ -8802,6 +8920,7 @@
        ],
        "forma_pagamento": null,
        "formas_aceitas": [],
+       "frete_gratis": false,
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -8816,6 +8935,7 @@
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
+       "taxa_origem": null,
        "tem_alcoolico": false,
        "total": null,
        "troco": null,
@@ -8824,6 +8944,7 @@
       },
       "carrinho_expirado": false,
       "itens_expirados": [],
+      "link_cardapio": null,
       "ultimo_pedido": null,
       "ultimos_pedidos": []
      },
@@ -8967,6 +9088,8 @@
      "carrinho": {
       "agendado_para": null,
       "atualizado_em": null,
+      "bairro": null,
+      "cep": null,
       "conversation_id": "bykoji:can_<id>:55119000000016",
       "endereco": null,
       "faltando": [
@@ -8976,6 +9099,7 @@
       ],
       "forma_pagamento": null,
       "formas_aceitas": [],
+      "frete_gratis": false,
       "horario": null,
       "horario_aviso": null,
       "horario_vencido": false,
@@ -8990,6 +9114,7 @@
       "pode_fechar": false,
       "subtotal": null,
       "taxa_entrega": null,
+      "taxa_origem": null,
       "tem_alcoolico": false,
       "total": null,
       "troco": null,
@@ -9245,6 +9370,8 @@
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
+       "bairro": null,
+       "cep": null,
        "conversation_id": "bykoji:can_<id>:55119000000015",
        "de_atendimento_anterior": false,
        "endereco": null,
@@ -9255,6 +9382,7 @@
        ],
        "forma_pagamento": null,
        "formas_aceitas": [],
+       "frete_gratis": false,
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -9269,6 +9397,7 @@
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
+       "taxa_origem": null,
        "tem_alcoolico": false,
        "total": null,
        "troco": null,
@@ -9277,6 +9406,7 @@
       },
       "carrinho_expirado": false,
       "itens_expirados": [],
+      "link_cardapio": null,
       "ultimo_pedido": null,
       "ultimos_pedidos": []
      },
@@ -9591,6 +9721,8 @@
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
+       "bairro": null,
+       "cep": null,
        "conversation_id": "bykoji:can_<id>:55119000000015",
        "de_atendimento_anterior": false,
        "endereco": null,
@@ -9601,6 +9733,7 @@
        ],
        "forma_pagamento": null,
        "formas_aceitas": [],
+       "frete_gratis": false,
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -9615,6 +9748,7 @@
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
+       "taxa_origem": null,
        "tem_alcoolico": false,
        "total": null,
        "troco": null,
@@ -9623,6 +9757,7 @@
       },
       "carrinho_expirado": false,
       "itens_expirados": [],
+      "link_cardapio": null,
       "ultimo_pedido": null,
       "ultimos_pedidos": []
      },
@@ -10001,6 +10136,8 @@
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
+       "bairro": null,
+       "cep": null,
        "conversation_id": "bykoji:can_<id>:55119000000013",
        "de_atendimento_anterior": false,
        "endereco": null,
@@ -10011,6 +10148,7 @@
        ],
        "forma_pagamento": null,
        "formas_aceitas": [],
+       "frete_gratis": false,
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -10025,6 +10163,7 @@
        "pode_fechar": false,
        "subtotal": null,
        "taxa_entrega": null,
+       "taxa_origem": null,
        "tem_alcoolico": false,
        "total": null,
        "troco": null,
@@ -10033,6 +10172,7 @@
       },
       "carrinho_expirado": false,
       "itens_expirados": [],
+      "link_cardapio": null,
       "ultimo_pedido": null,
       "ultimos_pedidos": []
      },
@@ -10362,6 +10502,8 @@
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": "<variavel>",
+       "bairro": null,
+       "cep": null,
        "conversation_id": "bykoji:can_<id>:55119000000013",
        "de_atendimento_anterior": false,
        "endereco": null,
@@ -10383,6 +10525,7 @@
          "rotulo": "Dinheiro"
         }
        ],
+       "frete_gratis": false,
        "horario": null,
        "horario_aviso": null,
        "horario_vencido": false,
@@ -10413,6 +10556,7 @@
        "pode_fechar": false,
        "subtotal": 55.0,
        "taxa_entrega": null,
+       "taxa_origem": null,
        "tem_alcoolico": true,
        "total": 55.0,
        "troco": null,
@@ -10421,6 +10565,7 @@
       },
       "carrinho_expirado": false,
       "itens_expirados": [],
+      "link_cardapio": null,
       "ultimo_pedido": null,
       "ultimos_pedidos": []
      },
@@ -10569,6 +10714,8 @@
      "carrinho": {
       "agendado_para": null,
       "atualizado_em": "<variavel>",
+      "bairro": null,
+      "cep": null,
       "conversation_id": "bykoji:can_<id>:55119000000013",
       "endereco": null,
       "faltando": [
@@ -10589,6 +10736,7 @@
         "rotulo": "Dinheiro"
        }
       ],
+      "frete_gratis": false,
       "horario": null,
       "horario_aviso": null,
       "horario_vencido": false,
@@ -10619,6 +10767,7 @@
       "pode_fechar": false,
       "subtotal": 55.0,
       "taxa_entrega": null,
+      "taxa_origem": null,
       "tem_alcoolico": true,
       "total": 55.0,
       "troco": null,
@@ -10635,6 +10784,8 @@
      "carrinho": {
       "agendado_para": null,
       "atualizado_em": "<variavel>",
+      "bairro": null,
+      "cep": null,
       "conversation_id": "bykoji:can_<id>:55119000000013",
       "endereco": null,
       "faltando": [
@@ -10655,6 +10806,7 @@
         "rotulo": "Dinheiro"
        }
       ],
+      "frete_gratis": false,
       "horario": null,
       "horario_aviso": null,
       "horario_vencido": false,
@@ -10700,6 +10852,7 @@
       "pode_fechar": false,
       "subtotal": 89.0,
       "taxa_entrega": null,
+      "taxa_origem": null,
       "tem_alcoolico": true,
       "total": 89.0,
       "troco": null,

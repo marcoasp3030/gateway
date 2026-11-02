@@ -66,7 +66,7 @@ class Infra:
             os.getenv('REDIS_URL',''),os.getenv('GATEWAY_PUBLIC_URL','https://painel.luxbrain.com.br/gateway'),
             skyone_rpm=int(os.getenv('SKYONE_REQUESTS_PER_MINUTE','240')),
             fila_duravel=ligada_no_ambiente(),
-            concorrencia_por_worker=int(os.getenv('CONCORRENCIA_POR_WORKER','20')),
+            concorrencia_por_worker=int(os.getenv('CONCORRENCIA_POR_WORKER','100')),
             registrar_webhook_uazapi=os.getenv('REGISTRAR_WEBHOOK_UAZAPI','on').strip().lower() in ('on','1','sim','true'),
             panel_platform_key=os.getenv('PANEL_PLATFORM_KEY',''),panel_platform_next=os.getenv('PANEL_PLATFORM_KEY_NEXT',''))
 
@@ -205,7 +205,7 @@ def criar_app(infra,db=None,redis=None):
         if grupo in ('api','webhooks'):
             try:
                 permitido=await limites.permitir(app.state.redis,grupo,limites.ip_cliente(
-                    request.client.host if request.client else None,request.headers))
+                    request.client.host if request.client else None,request.headers),request.url.path,request.headers)
             except aioredis.RedisError:
                 return resposta_erro(503)
             if not permitido: return resposta_erro(429,headers={'Retry-After':'1'})
@@ -272,6 +272,10 @@ def criar_app(infra,db=None,redis=None):
     app.include_router(respostas_rapidas)
     from admin.notas import router as notas
     app.include_router(notas)
+    from admin.etiquetas import router as etiquetas
+    app.include_router(etiquetas)
+    from admin.operacao import router as operacao
+    app.include_router(operacao)
     from admin.follow_up import router as follow_ups
     app.include_router(follow_ups)
     # ARQ1-a1: envio de documento (API pública com chave) e o painel dos documentos.
@@ -299,5 +303,10 @@ def criar_app(infra,db=None,redis=None):
     for nome_do_modulo in REGISTRO:
         rotas_do_modulo=importlib.import_module(f'modulos.{nome_do_modulo}.rotas')
         app.include_router(rotas_do_modulo.router);app.include_router(rotas_do_modulo.admin)
+    # Cardápio interativo: rotas públicas do link (sem chave) e as do painel que geram o link.
+    from modulos.pedidos.cardapio import router as cardapio_interativo
+    app.include_router(cardapio_interativo)
+    from modulos.pedidos.aparencia import router as aparencia_do_cardapio
+    app.include_router(aparencia_do_cardapio)
     app.include_router(canais_router);app.include_router(router);app.include_router(api)
     return app

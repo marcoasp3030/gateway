@@ -233,6 +233,20 @@ async def enviar(client,cofre,tenant_id,canal,telefone,texto):
     except ValueError: return None
 
 
+async def enviar_midia(client,cofre,tenant_id,canal,telefone,tipo,arquivo_base64,nome,legenda=''):
+    """POST /send/media {number,type,file,text,docName} (documentação uazapi): `file` aceita base64; docName só em documento.
+    Mesma regra de `enviar`: recusa certa (4xx) levanta EnvioRecusado e nada saiu."""
+    corpo={'number':telefone,'type':tipo,'file':arquivo_base64}
+    if legenda: corpo['text']=legenda
+    if tipo=='document': corpo['docName']=nome
+    try: response=await _chamar(client,cofre,tenant_id,canal,'POST','/send/media',corpo,timeout=60)
+    except ValueError as erro:
+        achado=re.search(r'HTTP (\d{3})',str(erro))
+        raise EnvioRecusado('Envio recusado' if achado else str(erro),bool(achado and 400<=int(achado.group(1))<500 and achado.group(1)!='408')) from None
+    try: return id_do_envio(response.json())
+    except ValueError: return None
+
+
 async def _menu(client,cofre,tenant_id,canal,corpo):
     """POST /send/menu. Recusa certa do provedor (4xx, menos 408) → MenuRecusado: nada saiu, quem chama envia em texto.
     Qualquer outra falha sobe como entrega incerta (não reenviar). Devolve o messageid do provedor."""

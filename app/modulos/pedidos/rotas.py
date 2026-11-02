@@ -2,7 +2,7 @@
 e consulta administrativa. A empresa vem sempre da chave, nunca de quem chama."""
 from datetime import datetime
 from typing import Literal
-from fastapi import APIRouter,Depends,Request,HTTPException
+from fastapi import APIRouter,Depends,Query,Request,HTTPException
 from pydantic import BaseModel,ConfigDict,Field
 from starlette.responses import JSONResponse
 from nucleo.autenticacao import contexto_da_chave,painel,exigir_admin
@@ -11,10 +11,12 @@ from nucleo.webhooks import emitir
 from nucleo import follow_up
 from admin.servico import auditar
 from modulos import habilitado
+from modulos.entrega import cep_limpo
 from . import servico,avisos
 
 router=APIRouter()
 chave=contexto_da_chave('ferramentas:pedidos')
+chave_catalogo=contexto_da_chave('ferramentas:catalogo')
 
 
 class Estrito(BaseModel):
@@ -46,6 +48,10 @@ class Entrega(Estrito):
     unidade:str|None=Field(None,pattern=r'^[a-z0-9][a-z0-9_]{0,39}$')
     modalidade:Literal['delivery','retirada']|None=None
     endereco:str|None=Field(None,max_length=500)
+    # G4-b: quem tem bairro e CEP separados envia. Sem eles, a área sai do endereço em texto.
+    bairro:str|None=Field(None,max_length=80)
+    cep:str|None=Field(None,max_length=9)
+    bairro_confirmado:bool|None=None
     horario:str|None=Field(None,max_length=100)
     # PED2: data e hora do pedido agendado (AAAA-MM-DDTHH:MM, no fuso da unidade). Conferido na regra, não aqui:
     # formato errado volta como horario_invalido, com a orientação para o agente.
@@ -203,6 +209,22 @@ async def fechar(request:Request,dados:Fechar,ctx=Depends(chave)):
         return {'ok':True,'numero':p['numero'],'pedido':servico.retrato_pedido(p),'carrinho':await servico.retrato(conn,t,conversa)}
 
 
+@router.get('/api/v1/entrega')
+async def consultar_entrega(request:Request,conversation_id:str,unidade:str=Query(max_length=40),bairro:str|None=Query(None,max_length=80),
+                            cep:str|None=Query(None,max_length=9),bairro_confirmado:bool=False,ctx=Depends(chave_catalogo)):
+    """Skill consultar_entrega (ESPEC_GESTAO 11.11): a unidade entrega neste bairro ou CEP, e por quanto? Não grava nada."""
+    t=await conversa_da_chave(request,ctx,conversation_id);db=request.app.state.db
+    u=await servico.unidade_da_empresa(db,t,unidade)
+    if not u: raise HTTPException(404,{'campo':'unidade','motivo':'unidade_inexistente'})
+    if cep and not cep_limpo(cep): raise HTTPException(400,{'campo':'cep','motivo':'cep_invalido'})
+    if u['delivery_ativo'] is not False:
+        if u['taxa_modo']=='cep' and not cep: raise HTTPException(400,{'campo':'cep','motivo':'obrigatorio'})
+        if u['taxa_modo']=='bairro' and not (bairro or cep): raise HTTPException(400,{'campo':'bairro','motivo':'obrigatorio'})
+    e=await servico.entrega_da_unidade(db,t,u,bairro,cep,None,bairro_confirmado)
+    return {'unidade':unidade,'atende':e['atende'],'motivo':e['motivo'],'taxa':servico.dinheiro(e['taxa']),'frete_gratis_acima':servico.dinheiro(u['frete_gratis_acima']),
+            'pedido_minimo':servico.dinheiro(u['pedido_minimo']),'tempo_estimado_min':u['tempo_entrega_min'],'origem_taxa':e['origem'],'pedir':e['pedir']}
+
+
 @router.get('/api/v1/pedidos')
 async def ultimos_pedidos(request:Request,conversation_id:str,ctx=Depends(chave)):
     """consultar_pedido sem número: os últimos pedidos desta conversa (mais recente primeiro)."""
@@ -296,14 +318,16 @@ def resumo_painel(r):
             'unidade_nome':r['unidade_nome'] or r['unidade'],'numero_itens':sum(i['quantidade'] for i in b['itens']),
             'cliente':{'nome':r['cliente_nome'],'telefone':e164(r['cliente_telefone']),
                        'canal':{'id':r['canal_id'],'tipo':r['canal_tipo'],'nome':r['canal_nome'],'icone':ICONES.get(r['canal_tipo'])} if r['canal_id'] else None},
-            'aviso':aviso}
+            'aviso':aviso,
+            # O cartão do quadro avança o pedido sem abrir o detalhe: os passos saem daqui, como no detalhe.
+            'proximos_status':servico.proximos(r)}
 
 
 async def detalhe_painel(db,tenant_id,numero):
     r=await db.fetchrow(SELECAO+' WHERE p.tenant_id=$1 AND p.numero=$2',tenant_id,numero)
     if not r: raise HTTPException(404,'NOT_FOUND')
     return {**resumo_painel(r),'entrega':{'modalidade':r['modalidade'],'endereco':r['endereco'],'horario':r['horario'],'agendado_para':r['agendado_para'],'observacao':r['observacao']},
-            'status_descricao':servico.DESCRICAO[r['status']],'proximos_status':servico.proximos(r),'linha_do_tempo':await servico.linha_do_tempo(db,tenant_id,r)}
+            'status_descricao':servico.DESCRICAO[r['status']],'linha_do_tempo':await servico.linha_do_tempo(db,tenant_id,r)}
 
 
 @admin.get('/tenants/{tenant_id}/pedidos')

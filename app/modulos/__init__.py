@@ -59,7 +59,7 @@ async def pedidos_contexto(repo, tenant, conversa):
 REGISTRO={
  'catalogo':Modulo('catalogo',('006_catalogo.sql','021_catalogo_pedidos.sql'),('/api/v1/catalogo/busca',),('ferramentas:catalogo',),catalogo_contexto,
                    telas=('cardapio',),skills={('GET','/api/v1/catalogo/busca'):'buscar_catalogo'},ganchos='modulos.catalogo.ganchos'),
- 'pedidos':Modulo('pedidos',('021_catalogo_pedidos.sql','022_pedidos_dados.sql'),('/api/v1/carrinho/{conversation_id}','/api/v1/pedidos'),('ferramentas:pedidos',),pedidos_contexto,
+ 'pedidos':Modulo('pedidos',('021_catalogo_pedidos.sql','022_pedidos_dados.sql'),('/api/v1/carrinho/{conversation_id}','/api/v1/pedidos','/api/v1/entrega'),('ferramentas:pedidos',),pedidos_contexto,
                   motivos_transferencia=({'id':'pedido_para_confirmar','rotulo':'Pedido para confirmar'},),
                   comportamentos={
                       # UX3.1: acoes_recentes do pacote = chamadas de Skill da conversa nos últimos N minutos (0 = lista vazia).
@@ -73,6 +73,7 @@ REGISTRO={
                           ('DELETE','/api/v1/carrinho/{conversation_id}/itens/{linha_id}'):'remover_item',
                           ('DELETE','/api/v1/carrinho/{conversation_id}'):'esvaziar_carrinho',
                           ('PUT','/api/v1/carrinho/{conversation_id}/entrega'):'definir_entrega',
+                          ('GET','/api/v1/entrega'):'consultar_entrega',
                           ('POST','/api/v1/pedidos'):'fechar_pedido',
                           ('GET','/api/v1/pedidos'):'consultar_pedido',
                           ('GET','/api/v1/pedidos/{numero}'):'consultar_pedido',

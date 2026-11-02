@@ -105,7 +105,7 @@ async def mensagens_admin(request:Request,tenant_id:str,conversa_id:str,antes:in
     if antes is not None and not 1<=antes<=9223372036854775807: raise HTTPException(400,{"campo":"antes"})
     if not await Repositorio(request.app.state.db).obter(tenant_id,'conversas',conversa_id): raise HTTPException(404,'NOT_FOUND')
     # ENC1-a: ?atendimento=at_… filtra as mensagens de um atendimento; cada mensagem diz a qual pertence.
-    rows=await request.app.state.db.fetch('SELECT id,conteudo,direcao,origem,enviada_em,atendimento_id FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND ($3::bigint IS NULL OR id<$3) AND ($5::text IS NULL OR atendimento_id=$5) ORDER BY id DESC LIMIT $4',tenant_id,conversa_id,antes,limite+1,atendimento)
+    rows=await request.app.state.db.fetch("SELECT id,conteudo,direcao,origem,enviada_em,atendimento_id,tipo,meta->>'arquivo' AS arquivo FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2 AND ($3::bigint IS NULL OR id<$3) AND ($5::text IS NULL OR atendimento_id=$5) ORDER BY id DESC LIMIT $4",tenant_id,conversa_id,antes,limite+1,atendimento)
     return {'itens':[dict(r) for r in reversed(rows[:limite])],'tem_mais':len(rows)>limite}
 
 

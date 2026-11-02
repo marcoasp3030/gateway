@@ -4,11 +4,11 @@ Processos (mesma imagem, `docker-compose.yml`):
 
 | Serviço | Réplicas | Limites | Papel |
 |---|---|---|---|
-| `gateway` (recepção/API) | 1 | 192 MB, 0,5 CPU | Recebe, valida, grava e agenda. Com `FILA_DURAVEL=off` também processa (caminho atual). |
-| `worker` | `WORKERS` (padrão 2) | 256 MB, 0,5 CPU cada | Consome as filas por empresa, chama o agente e envia. Cada um atende até `CONCORRENCIA_POR_WORKER` conversas ao mesmo tempo (padrão 20). |
+| `gateway` (recepção/API) | 1 | 256 MB, 1 CPU | Recebe, valida, grava e agenda. Com `FILA_DURAVEL=off` também processa (caminho atual). |
+| `worker` | `WORKERS` (padrão 3) | 256 MB, 0,5 CPU cada | Consome as filas por empresa, chama o agente e envia. Cada um atende até `CONCORRENCIA_POR_WORKER` conversas ao mesmo tempo (padrão 100). |
 | `agendador` | 1 (trava de liderança no Redis) | 128 MB, 0,25 CPU | Debounce → fila, reconciliação com o Postgres, webhooks de saída, limpeza, indicadores e alertas. |
 
-Capacidade nominal: `WORKERS × CONCORRENCIA_POR_WORKER` conversas em andamento (2 × 20 = 40). O Skyone processa chamadas em paralelo (10/10 simultâneas, lote em 7,89 s) e o gateway limita a 240 chamadas/min por URL; com respostas de 6–15 s, 40 em andamento cabem nessa cota.
+Capacidade nominal: `WORKERS × CONCORRENCIA_POR_WORKER` conversas em andamento (3 × 100 = 300). O Skyone processa chamadas em paralelo (10/10 simultâneas, lote em 7,89 s) e o gateway limita a 240 chamadas/min por URL; com respostas de 6–15 s, 40 em andamento cabem nessa cota.
 
 ## Como aumentar
 
@@ -28,7 +28,7 @@ Exemplo (By Koji): 240 chamadas/min × (8 s ÷ 60) ≈ 32 → `max_lotes_simulta
 - `max_concorrencia` (por agente, padrão 5): conversas em andamento de um agente. Ajuste: `PATCH /admin/v1/tenants/{t}/agentes/{a}` com `{"max_concorrencia": N}`, ou no `/config` da empresa para valer como padrão dos agentes dela.
 - Os dois valem ao mesmo tempo. Como a cota do Skyone é por URL (por fluxo, isto é, por agente), o agente só chega perto do teto da empresa se o `max_concorrencia` dele também subir.
 - Em 10/10/2026: bykoji com `max_lotes_simultaneos = 30` e o agente “Atendimento By Koji” (`bykoji_atendimento`, um agente e um fluxo Skyone próprio) com `max_concorrencia = 30`. Demais empresas e agentes no padrão 5 e 5 (inclusive o agente `[teste]` de bench do bykoji).
-- A capacidade dos workers (`WORKERS × CONCORRENCIA_POR_WORKER`, hoje 40) é o teto de tudo somado.
+- A capacidade dos workers (`WORKERS × CONCORRENCIA_POR_WORKER`, padrão 300) é o teto de tudo somado.
 
 ## Alertas
 
@@ -54,6 +54,29 @@ Leitura:
 - Um terceiro worker corta a espera máxima de ~33 s para ~24 s e custa mais ~50 MB reais (256 MB reservados). Aumentar `CONCORRENCIA_POR_WORKER` rende mais e não custa memória; com 100 por worker o agente simulado passou de 8,0 para 8,7 s de mediana (primeiro sinal de disputa de CPU e de conexões com o banco, 5 por worker).
 - Com o Skyone real há outro teto, que este teste não exercita: 240 chamadas/min por URL de fluxo. 200 conversas no mesmo fluxo levam pelo menos ~50 s por causa da cota, com qualquer número de workers.
 - Em produção valem também os limites por empresa e por agente (padrão 5 e 5): uma empresa sozinha não ocupa mais que 5 vagas.
+
+## Teste com 55 empresas (02/11/2026)
+
+Pilha isolada num Mac com Docker, agente simulado de 8 s, envio simulado, limite padrão de 5 conversas por empresa. Em todas as rodadas: nenhuma perda, duplicidade ou erro.
+
+| Configuração | Conversas | Tudo respondido em | Espera na fila: mediana | máxima | Até a resposta: mediana |
+|---|---|---|---|---|---|
+| 2 × 20, recepção 0,5 CPU | 550 | 136,8 s | 49,3 s | 116,3 s | 58,6 s |
+| 2 × 100, recepção 0,5 CPU | 550 | 36,5 s | 5,2 s | 16,9 s | 14,8 s |
+| 2 × 100, recepção 1 CPU | 550 | 40,5 s | 9,6 s | 21,9 s | 20,2 s |
+| 3 × 100, recepção 1 CPU | 550 | 31,0 s | 3,6 s | 16,9 s | 13,5 s |
+| 2 × 100, recepção 0,5 CPU | 1.650 | 83,0 s | 17,5 s | 48,0 s | 26,7 s |
+| 3 × 100, recepção 1 CPU | 1.650 | 66,2 s | 17,5 s | 51,6 s | 27,7 s |
+
+- **Empresa grande:** 200 conversas numa empresa e 200 divididas pelas outras 54. A grande esperou até 321 s; as outras, mediana de 0,3 s e máximo de 6,1 s.
+- **Recepção:** com 1 CPU, recebe cerca de 110 mensagens/s, o dobro de 0,5 CPU.
+- **Cardápio público (120 produtos), 50 clientes juntos:** 18 aberturas/s com 0,5 CPU e 49 com 1 CPU. Com 100 juntos, 14 e 24/s.
+- **Banco:** com 442.600 conversas e 705.200 mensagens, as telas principais responderam entre 5 e 73 ms.
+- **Workers:** 66 MB reais cada, longe dos 256 MB.
+
+**Limites do teste:** Postgres em memória e sem limite de CPU, agente e envio simulados, mensagens pela rota de simulação, e o painel fora da medição. Os números são otimistas para uma VPS. Em empresas no mesmo fluxo Skyone, a cota de 240 chamadas/min é compartilhada e passa a ser o teto de todas: cada empresa precisa de fluxo próprio.
+
+Para repetir: `sh scripts/carga_fila.sh rodar --conversas 1650 --tenants 55 --limite 5`. `--dominante N` manda N conversas à primeira empresa.
 
 ## Teste de falhas (INV14), mesma pilha isolada
 

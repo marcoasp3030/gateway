@@ -461,7 +461,7 @@ Alinhar com E.164: só dígitos, **10 a 15**, com DDI, sem `+`. Hoje a rota e o 
 
 ## 11. G4 — entrega e pagamento: o que faltava especificar (11/10/2026)
 
-**Situação:** aprovada pelo Marco em 11/10/2026 (decisões na 11.9). **G4-a implantado** (contrato final na 11.10); G4-b a fazer (inclui `consultar_entrega`, 11.11). Fecha as pendências da seção 10.4 e junta o G4 com o que mudou desde então (PED1, CFG1). As regras das seções 3.1–3.3, 4.3, 4.4 e 4.6 continuam valendo; aqui está só o que faltava.
+**Situação:** aprovada pelo Marco em 11/10/2026 (decisões na 11.9). **G4-a implantado** (contrato final na 11.10). **G4-b, parte de taxa e área, feita em 02/11/2026** (inclui `consultar_entrega`, 11.11), ainda sem publicar. Ficaram fora: `abaixo_do_minimo` segue com o nome antigo, `pedido_com_unidade_fechada` e `tempo_estimado_min` no pedido. Acréscimos: `falta_cep`, `cep_invalido` e a leitura do bairro e do CEP dentro do endereço em texto, para o agente atual não precisar mudar. Fecha as pendências da seção 10.4 e junta o G4 com o que mudou desde então (PED1, CFG1). As regras das seções 3.1–3.3, 4.3, 4.4 e 4.6 continuam valendo; aqui está só o que faltava.
 
 ### 11.1 Onde estamos
 

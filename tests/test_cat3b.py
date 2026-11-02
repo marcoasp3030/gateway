@@ -44,6 +44,22 @@ def test_cadastro_no_painel_validacao_conflito_e_aplicar_em(monkeypatch):
     cenario_cat3(monkeypatch,corpo)
 
 
+def test_lista_informa_opcoes_e_copia_leva_o_conjunto(monkeypatch):
+    async def corpo(conn,client,api,ids,conversa,relogio):
+        ed=ids['GUE-0001'];url=f'{CAT}/itens/{ed}/opcoes'
+        await client.put(url,json={'grupos':[MOLHO,{**EXTRAS,'ativo':False}]},headers=ADMIN)
+        lista={i['item_id']:i for i in (await client.get(f'{CAT}/itens?limite=200')).json()['itens']}
+        assert (lista[ed]['qtd_opcoes'],lista[ids['GUE-0002']]['qtd_opcoes'])==(1,0)
+        origem=(await client.get(url)).json()['grupos']
+        r=await client.post(f'{CAT}/itens/{ed}/duplicar',json={},headers=ADMIN);assert r.status_code==201,r.text
+        novo=r.json();assert (novo['ativo'],novo['qtd_opcoes'])==(False,1)
+        copia=(await client.get(f'{CAT}/itens/{novo["item_id"]}/opcoes')).json()['grupos']
+        assert [(g['nome'],g['minimo'],g['maximo'],g['ativo'],[(o['nome'],o['preco_extra'],o['ativo']) for o in g['opcoes']]) for g in copia]==\
+               [(g['nome'],g['minimo'],g['maximo'],g['ativo'],[(o['nome'],o['preco_extra'],o['ativo']) for o in g['opcoes']]) for g in origem]
+        assert not {g['id'] for g in copia}&{g['id'] for g in origem}
+    cenario_cat3(monkeypatch,corpo)
+
+
 def test_busca_escolhas_recusas_carrinho_pedido_e_unidade(monkeypatch):
     async def corpo(conn,client,api,ids,conversa,relogio):
         ed=ids['GUE-0001']

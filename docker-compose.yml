@@ -64,8 +64,8 @@ services:
     # Sem nenhuma capacidade do kernel (o processo já roda sem root).
     cap_drop:
       - ALL
-    mem_limit: 192m
-    cpus: 0.5
+    mem_limit: 256m
+    cpus: 1.0
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=3)"]
       interval: 15s
@@ -93,7 +93,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
     deploy:
-      replicas: ${WORKERS:-2}
+      replicas: ${WORKERS:-3}
     read_only: true
     tmpfs:
       - /tmp

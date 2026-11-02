@@ -24,7 +24,7 @@ class LimiteCorpo:
         tamanho = headers.get(b"content-length", b"")
         # ARQ1-a1: só as rotas de envio de documento aceitam até 16 MiB (o arquivo tem teto próprio, conferido depois).
         caminho = scope.get("path", "")
-        maximo = DOCUMENTOS_BYTES if caminho == "/api/v1/documentos" or (caminho.startswith("/admin/v1/") and caminho.endswith("/simular-documento")) else self.max_bytes
+        maximo = DOCUMENTOS_BYTES if caminho == "/api/v1/documentos" or (caminho.startswith("/admin/v1/") and caminho.endswith(("/simular-documento", "/midia", "/cardapio/aparencia/imagem"))) else self.max_bytes
         if tamanho.isdigit() and int(tamanho) > maximo:
             return await self.recusar(scope, receive, send)
         partes, total = [], 0
@@ -66,7 +66,7 @@ def ip_cliente(host: str | None, headers) -> str:
         return host or "desconhecido"
 
 
-# Token bucket atômico: webhooks 30/s com capacidade 60; API 10/s, capacidade 20.
+# Token bucket atômico. Valores por balde em cotas().
 # Relógio do Redis evita divergência entre processos. TTL limita chaves ociosas.
 _BUCKET = """
 local tempo = redis.call('TIME')
@@ -84,7 +84,22 @@ return permitido
 """
 
 
-async def permitir(redis, grupo: str, ip: str) -> bool:
-    taxa, capacidade = (30, 60) if grupo == "webhooks" else (10, 20)
-    identificador = hashlib.sha256(ip.encode()).hexdigest()
-    return bool(await redis.eval(_BUCKET, 1, f"limite:{grupo}:{identificador}", taxa, capacidade))
+def cotas(grupo: str, ip: str, caminho: str, headers) -> list[tuple[str, int, int]]:
+    """Baldes de uma chamada: (identificador, por segundo, capacidade). Provedor de mensagens e Skyone falam por um IP com várias
+    empresas: a cota é por canal e por chave, para o movimento de uma não recusar a outra. O teto do IP segura chave e canal inventados."""
+    if grupo == "webhooks":
+        partes = caminho.split("/")
+        canal = partes[3] if len(partes) > 3 else ""
+        return [(f"teto:{ip}", 300, 600), (f"{ip}|{canal}", 30, 60)]
+    chave = headers.get("x-api-key", "")
+    if chave:
+        return [(f"teto:{ip}", 200, 400), (f"{ip}|{hashlib.sha256(chave.encode()).hexdigest()}", 10, 20)]
+    return [(ip, 10, 20)]
+
+
+async def permitir(redis, grupo: str, ip: str, caminho: str = "", headers: dict | None = None) -> bool:
+    for identificador, taxa, capacidade in cotas(grupo, ip, caminho, headers or {}):
+        resumo = hashlib.sha256(identificador.encode()).hexdigest()
+        if not await redis.eval(_BUCKET, 1, f"limite:{grupo}:{resumo}", taxa, capacidade):
+            return False
+    return True
