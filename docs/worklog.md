@@ -1,3 +1,12 @@
+## [2026-11-03 13:37] — CARD-REDES na VPS (migração 063)
+- **Autor:** Auto
+- **Objetivo:** Implantar Instagram/Facebook/telefone no cardápio (c4a3ca0 + docs).
+- **Arquivos alterados:** imagem `gateway:7ad23e8`; migração `063_cardapio_redes.sql`.
+- **Resumo das mudanças:** Suíte 426 OK; backup; migração 063; serviços saudáveis. Volta: `gateway:ff865b6`.
+- **Comandos executados:** `implantar.sh card-redes-20261103` → OK; `max(versao)=63`.
+- **Pendências / TODO:** painel CARD-REDES.
+- **Próximos passos:** publicar painel com a tela Redes e contato.
+
 ## [2026-11-03 00:09] — Link da loja (migração 062) na VPS
 - **Autor:** Auto
 - **Objetivo:** Publicar `ff865b6` (link da loja + finalização WhatsApp).

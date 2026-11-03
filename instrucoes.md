@@ -1,5 +1,11 @@
 # Instruções — gateway By Koji
 
+## CARD-REDES (03/11/2026)
+
+- Commit `7ad23e8` (código `c4a3ca0` + registro). Migração 063. Volta: `gateway:ff865b6`.
+- Rotas GET/PUT `cardapio/redes`; página pública traz `redes` ativas.
+
+
 ## Link da loja (03/11/2026)
 
 - Commit `ff865b6`, migração 062 (`cardapio_links.loja`, `cardapio_rascunhos`). Volta: `gateway:8f5208a`.
