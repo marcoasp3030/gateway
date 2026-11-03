@@ -1,5 +1,9 @@
 # Instruções — gateway By Koji
 
+## Link da loja (03/11/2026)
+
+- Commit `ff865b6`, migração 062 (`cardapio_links.loja`, `cardapio_rascunhos`). Volta: `gateway:8f5208a`.
+
 ## Implantação cardápio/taxas (02/11/2026)
 
 - `sh scripts/implantar.sh cardapio-publico-20261102` → `gateway:8f5208a`, migrações até 061.

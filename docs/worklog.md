@@ -1,3 +1,12 @@
+## [2026-11-03 00:09] — Link da loja (migração 062) na VPS
+- **Autor:** Auto
+- **Objetivo:** Publicar `ff865b6` (link da loja + finalização WhatsApp).
+- **Arquivos alterados:** pull `ff865b6`; migração `062_cardapio_loja.sql` aplicada.
+- **Resumo das mudanças:** `implantar.sh link-loja-20261103`: suíte 423 OK, backup, migração 062, `gateway:ff865b6` saudável. Volta: `gateway:8f5208a`.
+- **Comandos executados:** implantar → OK; health 200; `max(versao)=62`.
+- **Pendências / TODO:** —
+- **Próximos passos:** validar card Link da loja no painel.
+
 ## [2026-11-02 22:50] — Implantação cardápio/taxas/isolamento na VPS
 - **Autor:** Auto
 - **Objetivo:** Atualizar o gateway da VPS com o `main` do GitHub de forma segura.
