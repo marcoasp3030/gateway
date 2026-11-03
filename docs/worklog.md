@@ -1,3 +1,16 @@
+## [2026-11-02 22:50] — Implantação cardápio/taxas/isolamento na VPS
+- **Autor:** Auto
+- **Objetivo:** Atualizar o gateway da VPS com o `main` do GitHub de forma segura.
+- **Arquivos alterados:**
+ - `app/admin/operacao.py` — `public.unaccent` (commit `8f5208a`)
+ - `.env` — `PAINEL_PUBLIC_URL=https://painel.luxbrain.com.br` (local)
+- **Resumo das mudanças:** `implantar.sh cardapio-publico-20261102`: suíte 415 passed, backup, migrações 056–061, serviços em `gateway:8f5208a` saudáveis. Volta: `gateway:0cc55d5`.
+- **Decisões e justificativas:** A suíte travou 1 teste de busca (503) porque `unaccent` não estava no search_path do schema de teste.
+- **Comandos executados:** implantar → OK; health `/gateway/health` → 200; `max(versao)=61`.
+- **Erros e resoluções:** `unaccent` → `public.unaccent`.
+- **Pendências / TODO:** avaliar `WORKERS=3` e `CONCORRENCIA_POR_WORKER=100` no `.env` da VPS.
+- **Próximos passos:** acompanhar vigia 24 h.
+
 ## [2026-11-02] — Taxa de entrega por bairro e CEP (G4-b)
 
 - Migração 061: bairro e CEP no carrinho e no pedido, `taxa_origem` e `frete_gratis`.
