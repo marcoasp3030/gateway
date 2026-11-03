@@ -1,6 +1,6 @@
 # CARD-REDES — redes sociais e telefone no cardápio
 
-**Situação: proposta para revisão do Marco, 03/11/2026. Nada implementado.**
+**Situação: aprovada pelo Marco em 03/11/2026 (decisões da seção 7) e implementada no gateway; painel pendente ([PAINEL]).**
 
 ## 1. O que muda
 
@@ -34,8 +34,10 @@ Ficam separadas da aparência porque o `PUT` da aparência substitui tudo. Se as
 | `PUT /admin/v1/tenants/{t}/cardapio/redes` | `{"itens":[{"tipo":"instagram","valor":"@bykoji","ativo":true}, …]}`: substitui a lista; `[]` apaga tudo | gestor |
 
 - **Página pública:** `POST /api/v1/publico/cardapio/ler` passa a trazer `redes: [{"tipo","url","rotulo"}]`, só com as ativas. Sem nenhuma, vem `[]`.
-  - Os rótulos são: `@bykoji` (Instagram), `By Koji` (Facebook, o caminho da página) e `(11) 3333-4444` (telefone, formatado).
-- **Auditoria:** cada `PUT` que muda algo grava `cardapio.redes_salvas` com o antes e o depois.
+  - Os rótulos são: `@bykoji` (Instagram), `bykoji` (Facebook: o caminho da página) e `(11) 3333-4444` (telefone, formatado).
+  - A resposta do link já usado (`usado`) também traz `redes`, para a tela "Este pedido já foi enviado" mostrar o Instagram.
+- **Auditoria:** cada `PUT` que muda algo grava `cardapio.redes_salvas` com os tipos e se estão ligados, antes e depois. O conteúdo não vai para a auditoria.
+- **Restaurar a aparência** (`DELETE …/cardapio/aparencia`) não apaga as redes.
 
 ## 4. Dados
 
@@ -66,10 +68,10 @@ Migração `063_cardapio_redes.sql`, aditiva:
 - Salvar a aparência (cores) não mexe nas redes.
 - Auditoria só quando algo muda.
 
-## 7. Decisões que ficam com o Marco
+## 7. Decisões do Marco (03/11/2026)
 
-1. **Telefone:** ao tocar, abre a **ligação** (proposta) ou abre o **WhatsApp** daquele número?
-2. **Botão na tela de pedido enviado:** só o Instagram (proposta) ou a rede que vier primeiro na lista?
+1. **Telefone:** ao tocar, abre a **ligação** (`tel:`).
+2. **Botão na tela de pedido enviado:** leva **só para o Instagram**.
 
 ## 8. O que não entra
 

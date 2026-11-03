@@ -308,5 +308,7 @@ def criar_app(infra,db=None,redis=None):
     app.include_router(cardapio_interativo)
     from modulos.pedidos.aparencia import router as aparencia_do_cardapio
     app.include_router(aparencia_do_cardapio)
+    from modulos.pedidos.redes import router as redes_do_cardapio
+    app.include_router(redes_do_cardapio)
     app.include_router(canais_router);app.include_router(router);app.include_router(api)
     return app

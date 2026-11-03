@@ -25,6 +25,7 @@ from nucleo.horarios import situacao_da_unidade
 from nucleo.webhooks import emitir
 from . import avisos,servico
 from .aparencia import da_empresa
+from .redes import da_empresa as redes_da_empresa
 from .rotas import Estrito,NovoItem,recusa,resumo_evento
 
 router=APIRouter()
@@ -203,7 +204,7 @@ async def ler(request:Request,dados:Ler):
     db=request.app.state.db;r=await _abrir(request,dados.token);t=r['tenant_id']
     empresa=await db.fetchval('SELECT nome FROM tenants WHERE id=$1',t)
     tema=await da_empresa(db,t)
-    if r['usado_em']: return _resposta({'empresa':empresa,'aparencia':tema,'usado':{'numero':r['pedido_numero']}})
+    if r['usado_em']: return _resposta({'empresa':empresa,'aparencia':tema,'redes':await redes_da_empresa(db,t),'usado':{'numero':r['pedido_numero']}})
     carrinho=None
     if r['conversation_id']:
         c=await servico.retrato(db,t,r['conversation_id'])
@@ -212,7 +213,7 @@ async def ler(request:Request,dados:Ler):
                   'agendado_para':c['agendado_para'],'observacao':None,
                   'itens':[{'item_id':i['item_id'],'quantidade':i['quantidade'],'observacao':i['observacao'],
                             'opcoes':[{'grupo_id':o['grupo_id'],'opcao_id':o['opcao_id'],'quantidade':o['quantidade']} for o in i['opcoes']]} for i in c['itens']]}
-    return _resposta({'empresa':empresa,'aparencia':tema,'previa':r['conversation_id'] is None and not r['loja'],'loja':r['loja'],'expira_em':r['expira_em'],'unidades':await _unidades(db,t),'carrinho':carrinho})
+    return _resposta({'empresa':empresa,'aparencia':tema,'redes':await redes_da_empresa(db,t),'previa':r['conversation_id'] is None and not r['loja'],'loja':r['loja'],'expira_em':r['expira_em'],'unidades':await _unidades(db,t),'carrinho':carrinho})
 
 
 @router.post('/api/v1/publico/cardapio/unidade')

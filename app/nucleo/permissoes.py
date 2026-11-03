@@ -180,6 +180,9 @@ PERMISSOES={
     ('PUT','/tenants/{tenant}/cardapio/aparencia'):'gestor',
     ('DELETE','/tenants/{tenant}/cardapio/aparencia'):'gestor',
     ('POST','/tenants/{tenant}/cardapio/aparencia/imagem'):'gestor',
+    # CARD-REDES
+    ('GET','/tenants/{tenant}/cardapio/redes'):'gestor',
+    ('PUT','/tenants/{tenant}/cardapio/redes'):'gestor',
     ('GET','/tenants/{tenant}/conversas/{conv}/notas'):'funcionario',
     ('POST','/tenants/{tenant}/conversas/{conv}/notas'):'funcionario',
     ('DELETE','/tenants/{tenant}/conversas/{conv}/notas/{nid}'):'funcionario',

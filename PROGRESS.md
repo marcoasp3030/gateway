@@ -1492,3 +1492,11 @@ PY
 - **Depende de.** Canal uazapi ativo, com `numero_instancia`, e webhook da instância apontando para o gateway.
 - **Migração 062.** Coluna `loja` em `cardapio_links` e tabela `cardapio_rascunhos`.
 - **Testes.** `tests/test_cardapio_loja.py`.
+
+## CARD-REDES: Instagram, Facebook e telefone no cardápio — 2026-11-03
+
+- **O que é.** A empresa pode cadastrar Instagram, Facebook e telefone na Aparência do cardápio, se quiser. Vale para a empresa inteira, e cada item liga e desliga. Especificação em `docs/ESPEC_CARD_REDES.md`; decisões do Marco: o telefone abre ligação, e a tela de pedido enviado mostra só o Instagram.
+- **Rotas.** `GET` e `PUT /admin/v1/tenants/{t}/cardapio/redes`, só para gestor e acima. São separadas da aparência: salvar ou restaurar a aparência não mexe nas redes.
+- **Segurança.** O gateway grava só o usuário, a página ou o número (telefone pela regra do TEL1) e monta o link. Link de outro domínio é recusado. A auditoria (`cardapio.redes_salvas`) guarda só os tipos e se estão ligados.
+- **Página pública.** `cardapio/ler` traz `redes` (só as ativas, com `url` e `rotulo`), também na resposta do link já usado.
+- **Migração 063.** Testes em `tests/test_card_redes.py`. A tela é do [PAINEL].
