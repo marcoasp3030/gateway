@@ -360,6 +360,12 @@ return 1
                 if limitado:
                     await conn.execute('UPDATE mensagens SET processada_em=now() WHERE tenant_id=$1 AND id=$2',tenant,msgid)
                     return {'ok':True,'ignorado':True,'limitado':True,'conversation_id':conversa,'mensagem_id':msgid}
+                # A mensagem pode ser uma ação de módulo (ex.: finalizar um pedido) e não um pedido de resposta ao agente.
+                for _,acao in ganchos('mensagem_do_cliente',cfg.get('modulos')):
+                    resposta=await acao(conn,tenant,conversa,m)
+                    if resposta is not None:
+                        await conn.execute('UPDATE mensagens SET processada_em=now() WHERE tenant_id=$1 AND id=$2',tenant,msgid)
+                        return {**resposta,'mensagem_id':msgid}
             if msgid and cfg['modo_piloto'] and identificador not in cfg['contatos_permitidos']:
                 await conn.execute('UPDATE mensagens SET processada_em=now() WHERE tenant_id=$1 AND id=$2',tenant,msgid)
                 return {'ok':True,'ignorado':True,'conversation_id':conversa,'mensagem_id':msgid}

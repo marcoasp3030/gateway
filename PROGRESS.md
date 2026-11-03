@@ -1482,3 +1482,13 @@ PY
 - **Bairro fora da lista.** Sem faixa de CEP, o cliente confirma e o pedido segue com taxa a confirmar. A confirmação vale só para aquele bairro.
 - **Migração 061.** Bairro, CEP e confirmação em `carrinhos`; bairro, CEP, origem da taxa e frete grátis em `pedidos`.
 - **Testes.** `tests/test_g4b_taxa.py`. Suíte completa com 415 aprovados.
+
+## Link da loja: pedido sem conversa, finalizado pelo WhatsApp — 2026-11-02
+
+- **Motivo.** O cardápio só fechava pedido por link criado numa conversa. Sem conversa, restava a prévia, que não envia.
+- **Fluxo.** A loja divulga um link fixo (`POST /admin/v1/tenants/{tenant}/cardapio/loja`). O cliente monta o pedido e a página chama `POST /api/v1/publico/cardapio/finalizar`, que confere tudo num ensaio desfeito e devolve um código e o link do `wa.me`. A mensagem com o código chega pelo webhook e o gancho `mensagem_do_cliente` fecha o pedido na conversa do cliente. A página acompanha por `POST /api/v1/publico/cardapio/situacao`.
+- **Por que pelo WhatsApp.** A mensagem prova o número e nada é enviado a telefone digitado por terceiros.
+- **Regras.** Código de 6 caracteres, válido por 30 minutos, de uso único e preso à empresa. Preço ou loja que mudou antes da mensagem: sem pedido, e o cliente recebe o aviso com o link. Depois de usado, o rascunho perde os dados. O link da loja não usa o limite por link: vale a cota por IP.
+- **Depende de.** Canal uazapi ativo, com `numero_instancia`, e webhook da instância apontando para o gateway.
+- **Migração 062.** Coluna `loja` em `cardapio_links` e tabela `cardapio_rascunhos`.
+- **Testes.** `tests/test_cardapio_loja.py`.

@@ -175,6 +175,7 @@ PERMISSOES={
     # A rota confere o resto: apaga quem escreveu ou, a partir de gestor, a equipe.
     ('POST','/tenants/{tenant}/conversas/{conv}/cardapio-link'):'funcionario',
     ('POST','/tenants/{tenant}/cardapio/previa'):'supervisor',
+    ('POST','/tenants/{tenant}/cardapio/loja'):'gestor',
     ('GET','/tenants/{tenant}/cardapio/aparencia'):'gestor',
     ('PUT','/tenants/{tenant}/cardapio/aparencia'):'gestor',
     ('DELETE','/tenants/{tenant}/cardapio/aparencia'):'gestor',

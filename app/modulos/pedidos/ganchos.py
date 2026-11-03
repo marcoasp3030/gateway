@@ -31,6 +31,13 @@ async def numero_interno(db,tenant,identificador,m):
         return await mensagem_de_numero_interno(conn,tenant,identificador,unidades,m['texto'],m.get('message_id'))
 
 
+async def mensagem_do_cliente(conn,tenant,conversa,m):
+    """Cardápio da loja: a mensagem com o código do pedido fecha o pedido. Devolve a resposta da recepção, ou None (segue para o agente)."""
+    if m.get('tipo') not in (None,'texto'): return None
+    from .cardapio import finalizar_pela_mensagem
+    return await finalizar_pela_mensagem(conn,tenant,conversa,m['texto'])
+
+
 async def em_andamento(db,tenant,conversa,para):
     """Há algo deste módulo em andamento na conversa? `para` diz quem pergunta:
     'fora_do_horario' (modo "só avisar": quem tem pedido ativo é atendido), 'aviso_espera' (carrinho aberto com itens),

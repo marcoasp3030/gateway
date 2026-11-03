@@ -3,9 +3,10 @@
 O token é a única credencial. Fica fora da URL do servidor (o painel lê do # e manda no corpo), então não entra em log.
 Nada do cliente sai daqui: nem telefone, nem nome, nem endereço. O pedido passa pelas mesmas funções do agente, na mesma
 transação: preço, opções, horário, pagamento e maioridade são conferidos em servico, nunca confiados ao que vem da página."""
-import base64,hashlib,hmac,os,secrets
+import base64,hashlib,hmac,json,os,re,secrets
 from datetime import datetime,timedelta,timezone
 from functools import wraps
+from urllib.parse import quote
 import httpx
 from fastapi import APIRouter,Depends,HTTPException,Request
 from fastapi.encoders import jsonable_encoder
@@ -32,6 +33,13 @@ VALIDADE=timedelta(hours=24)
 FOLGA=timedelta(hours=2)
 VALIDADE_PREVIA=timedelta(hours=1)
 LIMITE_POR_MINUTO=120
+# Link da loja: fixo até alguém trocar. O código do pedido vale pouco tempo: o cliente envia na hora, e o endereço não fica guardado.
+VALIDADE_LOJA=timedelta(days=3650)
+VALIDADE_RASCUNHO=timedelta(minutes=30)
+# Sem 0, O, 1, I e L: o código pode ser lido e digitado.
+ALFABETO='ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+PEDIDO_NA_MENSAGEM=re.compile(r'pedido\s*#([A-Z0-9]{6})(?![A-Z0-9])',re.IGNORECASE)
+PROBLEMA_DO_PEDIDO={'preco_alterado':'um preço mudou','unidade_fechada':'a loja está fechada agora','item_indisponivel':'um item ficou indisponível'}
 SEM_CACHE={'Cache-Control':'no-store','X-Robots-Tag':'noindex','X-Content-Type-Options':'nosniff'}
 
 
@@ -115,10 +123,12 @@ async def _abrir(request,token,conn=None,travar=False):
     db=conn or request.app.state.db
     r=await db.fetchrow('SELECT * FROM cardapio_links WHERE token_hash=$1'+(' FOR UPDATE' if travar else ''),_hash(token))
     if r is None: raise _erro(404,'link_invalido')
-    janela=datetime.now(timezone.utc).replace(second=0,microsecond=0)
-    chamadas=await db.fetchval('''UPDATE cardapio_links SET janela=$2,chamadas=CASE WHEN janela=$2 THEN chamadas+1 ELSE 1 END
-        WHERE id=$1 RETURNING chamadas''',r['id'],janela)
-    if chamadas>LIMITE_POR_MINUTO: raise _erro(429,'muitas_chamadas')
+    # O link da loja é de todos os clientes: quem limita é a cota por IP da recepção.
+    if not r['loja']:
+        janela=datetime.now(timezone.utc).replace(second=0,microsecond=0)
+        chamadas=await db.fetchval('''UPDATE cardapio_links SET janela=$2,chamadas=CASE WHEN janela=$2 THEN chamadas+1 ELSE 1 END
+            WHERE id=$1 RETURNING chamadas''',r['id'],janela)
+        if chamadas>LIMITE_POR_MINUTO: raise _erro(429,'muitas_chamadas')
     if r['usado_em'] is None and r['expira_em']<=datetime.now(timezone.utc): raise _erro(410,'link_expirado')
     repo=Repositorio(db)
     try: await habilitado(repo,r['tenant_id'],'pedidos');await habilitado(repo,r['tenant_id'],'catalogo')
@@ -202,7 +212,7 @@ async def ler(request:Request,dados:Ler):
                   'agendado_para':c['agendado_para'],'observacao':None,
                   'itens':[{'item_id':i['item_id'],'quantidade':i['quantidade'],'observacao':i['observacao'],
                             'opcoes':[{'grupo_id':o['grupo_id'],'opcao_id':o['opcao_id'],'quantidade':o['quantidade']} for o in i['opcoes']]} for i in c['itens']]}
-    return _resposta({'empresa':empresa,'aparencia':tema,'previa':r['conversation_id'] is None,'expira_em':r['expira_em'],'unidades':await _unidades(db,t),'carrinho':carrinho})
+    return _resposta({'empresa':empresa,'aparencia':tema,'previa':r['conversation_id'] is None and not r['loja'],'loja':r['loja'],'expira_em':r['expira_em'],'unidades':await _unidades(db,t),'carrinho':carrinho})
 
 
 @router.post('/api/v1/publico/cardapio/unidade')
@@ -247,6 +257,38 @@ async def taxa(request:Request,dados:CotarTaxa):
     return _resposta({'atende':e['atende'],'motivo':e['motivo'],'taxa':servico.dinheiro(e['taxa']),'origem':e['origem'],'pedir':e['pedir']})
 
 
+async def _montar_e_fechar(conn,t,conversa,d):
+    """Carrinho da página e fechamento, com as regras de sempre. Sem pedido, ou com outro total, nada fica gravado."""
+    await servico.substituir_itens(conn,t,conversa)
+    await servico.entrega(conn,t,conversa,{'unidade':d['unidade']})
+    await marcar_vistos(conn,t,conversa,[i['item_id'] for i in d['itens']])
+    for i in d['itens']:
+        await servico.adicionar(conn,t,conversa,i['item_id'],i['quantidade'],i.get('observacao'),i.get('opcoes') or [])
+    campos={'modalidade':d['modalidade'],'observacao':d.get('observacao'),'maioridade_confirmada':d.get('maioridade_confirmada'),
+            'forma_pagamento':d['forma_pagamento'],'troco_para':d.get('troco_para')}
+    # Sem endereço na página, vale o que o cliente já disse na conversa.
+    if (d.get('endereco') or '').strip():
+        campos.update(endereco=d['endereco'],bairro=d.get('bairro'),cep=d.get('cep'),bairro_confirmado=d.get('bairro_confirmado',False))
+    await servico.entrega(conn,t,conversa,campos)
+    atual=await servico.retrato(conn,t,conversa)
+    if abs((atual['total'] or 0)-d['total_visto'])>0.005:
+        raise servico.Recusa('preco_alterado',409,detalhes={'total':atual['total']})
+    p=await servico.fechar(conn,t,conversa)
+    # Com os itens recém-gravados não há preço a atualizar; sem pedido aqui, o carrinho mudou no meio do caminho.
+    if p is None: raise servico.Recusa('preco_alterado',409,detalhes={'total':atual['total']})
+    return p
+
+
+async def _depois_de_fechar(conn,t,conversa,p):
+    await follow_up.cancelar(conn,t,conversa,'pedido_fechado',sem_esperar=True)
+    await auditar(conn,t,'cliente','pedido.criado',p['numero'])
+    await emitir(conn,t,'pedido.criado',resumo_evento(p))
+    await avisos.avisar_unidade_do_pedido(conn,t,p,servico.retrato_pedido(p)['itens'])
+    await avisos.enfileirar(conn,t,'pedido_cliente',f'{p["numero"]}:recebido',
+        f'Recebemos seu pedido nº {p["numero"]} pelo cardápio, no total de {avisos.reais(p["total"])}. Agora é só aguardar a confirmação da unidade.',None,conversa)
+    await servico.registrar_skill(conn,t,conversa,'fechar_pedido',{'detalhe':'pedido '+str(p['numero'])+' pelo cardápio'},'ok')
+
+
 @router.post('/api/v1/publico/cardapio/pedido',status_code=201)
 @publica
 async def pedido(request:Request,dados:Envio):
@@ -257,34 +299,124 @@ async def pedido(request:Request,dados:Envio):
                 r=await _abrir(request,dados.token,conn,travar=True);t=r['tenant_id'];conversa=r['conversation_id']
                 if conversa is None: raise _erro(403,'previa')
                 if r['usado_em']: return _resposta({'ok':True,'numero':r['pedido_numero'],'repetido':True})
-                await servico.substituir_itens(conn,t,conversa)
-                await servico.entrega(conn,t,conversa,{'unidade':dados.unidade})
-                await marcar_vistos(conn,t,conversa,[i.item_id for i in dados.itens])
-                for i in dados.itens:
-                    await servico.adicionar(conn,t,conversa,i.item_id,i.quantidade,i.observacao,[o.model_dump() for o in i.opcoes or []])
-                campos={'modalidade':dados.modalidade,'observacao':dados.observacao,'maioridade_confirmada':dados.maioridade_confirmada,
-                        'forma_pagamento':dados.forma_pagamento,'troco_para':dados.troco_para}
-                # Sem endereço na página, vale o que o cliente já disse na conversa.
-                if (dados.endereco or '').strip():
-                    campos.update(endereco=dados.endereco,bairro=dados.bairro,cep=dados.cep,bairro_confirmado=dados.bairro_confirmado)
-                await servico.entrega(conn,t,conversa,campos)
-                atual=await servico.retrato(conn,t,conversa)
-                if abs((atual['total'] or 0)-dados.total_visto)>0.005:
-                    raise servico.Recusa('preco_alterado',409,detalhes={'total':atual['total']})
-                p=await servico.fechar(conn,t,conversa)
-                # Com os itens recém-gravados não há preço a atualizar; sem pedido aqui, o carrinho mudou no meio do caminho.
-                if p is None: raise servico.Recusa('preco_alterado',409,detalhes={'total':atual['total']})
-                await follow_up.cancelar(conn,t,conversa,'pedido_fechado',sem_esperar=True)
-                await auditar(conn,t,'cliente','pedido.criado',p['numero'])
-                await emitir(conn,t,'pedido.criado',resumo_evento(p))
-                await avisos.avisar_unidade_do_pedido(conn,t,p,servico.retrato_pedido(p)['itens'])
-                await avisos.enfileirar(conn,t,'pedido_cliente',f'{p["numero"]}:recebido',
-                    f'Recebemos seu pedido nº {p["numero"]} pelo cardápio, no total de {avisos.reais(p["total"])}. Agora é só aguardar a confirmação da unidade.',None,conversa)
-                await servico.registrar_skill(conn,t,conversa,'fechar_pedido',{'detalhe':'pedido '+str(p['numero'])+' pelo cardápio'},'ok')
+                p=await _montar_e_fechar(conn,t,conversa,dados.model_dump())
+                await _depois_de_fechar(conn,t,conversa,p)
                 await conn.execute('UPDATE cardapio_links SET usado_em=now(),pedido_numero=$2 WHERE id=$1',r['id'],p['numero'])
         except servico.Recusa as e:
             return recusa(e)
     return JSONResponse(jsonable_encoder({'ok':True,'numero':p['numero'],'total':servico.dinheiro(p['total']),'modalidade':p['modalidade']}),status_code=201,headers=SEM_CACHE)
+
+
+class _Desfazer(Exception):
+    """Fim do ensaio do pedido: desfaz a transação de propósito."""
+
+
+class Situacao(Ler):
+    codigo:str=Field(pattern=r'^[A-Z0-9]{6}$')
+
+
+async def _canal_da_loja(db,tenant):
+    """Canal de WhatsApp que recebe a mensagem de finalização, com o número já limpo para o link. None sem canal conectado."""
+    r=await db.fetchrow("""SELECT id,agente_id,numero_instancia FROM tenant_canais WHERE tenant_id=$1 AND tipo='uazapi' AND ativo AND publico='clientes'
+        AND agente_id IS NOT NULL AND numero_instancia IS NOT NULL ORDER BY id LIMIT 1""",tenant)
+    numero=re.sub(r'\D','',re.split(r'[@:]',r['numero_instancia'])[0]) if r else ''
+    return {'id':r['id'],'agente_id':r['agente_id'],'numero':numero} if numero else None
+
+
+@router.post('/api/v1/publico/cardapio/finalizar',status_code=201)
+@publica
+async def finalizar(request:Request,dados:Envio):
+    """Link da loja: confere o pedido inteiro num ensaio desfeito e guarda o que o cliente montou. O pedido nasce quando a mensagem
+    com o código chega do WhatsApp dele: é o que prova o número, sem enviar nada a um telefone digitado por terceiros."""
+    db=request.app.state.db;r=await _abrir(request,dados.token);t=r['tenant_id']
+    if not r['loja']: raise _erro(403,'previa')
+    canal=await _canal_da_loja(db,t)
+    if not canal: raise _erro(409,'whatsapp_indisponivel')
+    corpo=dados.model_dump(exclude={'token'})
+    async with db.acquire() as conn:
+        try:
+            async with conn.transaction():
+                ensaio=f'{t}:{canal["id"]}:ensaio-{secrets.token_hex(8)}'
+                await conn.execute('''INSERT INTO conversas(tenant_id,conversation_id,canal,canal_id,agente_id,simulada)
+                    VALUES ($1,$2,'uazapi',$3,$4,true)''',t,ensaio,canal['id'],canal['agente_id'])
+                await _montar_e_fechar(conn,t,ensaio,corpo)
+                raise _Desfazer
+        except _Desfazer: pass
+        except servico.Recusa as e: return recusa(e)
+        agora=datetime.now(timezone.utc)
+        await conn.execute('DELETE FROM cardapio_rascunhos WHERE tenant_id=$1 AND expira_em<$2',t,agora-timedelta(days=1))
+        for _ in range(5):
+            codigo=''.join(secrets.choice(ALFABETO) for _ in range(6))
+            criado=await conn.fetchval('''INSERT INTO cardapio_rascunhos(tenant_id,codigo,dados,expira_em) VALUES ($1,$2,$3::jsonb,$4)
+                ON CONFLICT(tenant_id,codigo) DO NOTHING RETURNING id''',t,codigo,json.dumps(corpo,ensure_ascii=False),agora+VALIDADE_RASCUNHO)
+            if criado: break
+        else: raise _erro(503,'tente_de_novo')
+    texto=f'Olá! Quero finalizar meu pedido #{codigo}'
+    return JSONResponse(jsonable_encoder({'codigo':codigo,'whatsapp_url':f'https://wa.me/{canal["numero"]}?text={quote(texto)}',
+                                          'expira_em':agora+VALIDADE_RASCUNHO}),status_code=201,headers=SEM_CACHE)
+
+
+@router.post('/api/v1/publico/cardapio/situacao')
+@publica
+async def situacao(request:Request,dados:Situacao):
+    """A página acompanha o código até o pedido nascer. Só o número e o total: nada do cliente."""
+    db=request.app.state.db;r=await _abrir(request,dados.token)
+    c=await db.fetchrow('SELECT usado_em,pedido_numero,total,erro,expira_em FROM cardapio_rascunhos WHERE tenant_id=$1 AND codigo=$2',r['tenant_id'],dados.codigo)
+    if c is None: raise _erro(404,'codigo_invalido')
+    if c['usado_em']: return _resposta({'estado':'recebido','numero':c['pedido_numero'],'total':servico.dinheiro(c['total'])})
+    if c['erro']: return _resposta({'estado':'recusado','motivo':c['erro']})
+    return _resposta({'estado':'expirado' if c['expira_em']<=datetime.now(timezone.utc) else 'aguardando'})
+
+
+async def finalizar_pela_mensagem(conn,tenant,conversa,texto):
+    """Mensagem do cliente com o código do pedido. Roda na transação da recepção, sob a trava da conversa, e devolve a resposta dela;
+    None quando a mensagem não é de finalização, e o agente segue normalmente."""
+    achado=PEDIDO_NA_MENSAGEM.search(texto or '')
+    if not achado: return None
+    codigo=achado[1].upper()
+    r=await conn.fetchrow('SELECT * FROM cardapio_rascunhos WHERE tenant_id=$1 AND codigo=$2 FOR UPDATE',tenant,codigo)
+    if r is None: return None
+    if r['usado_em']: return {'ok':True,'ignorado':True,'conversation_id':conversa,'pedido':r['pedido_numero']}
+    link=await conn.fetchval('SELECT nonce FROM cardapio_links WHERE tenant_id=$1 AND loja',tenant)
+    url=_url(_token(link)) if link else None
+    async def recusar(motivo,problema):
+        await conn.execute('UPDATE cardapio_rascunhos SET erro=$3 WHERE tenant_id=$1 AND id=$2',tenant,r['id'],motivo)
+        await avisos.enfileirar(conn,tenant,'pedido_cliente',f'{codigo}:nao_finalizado',
+            f'Não consegui finalizar seu pedido: {problema}.'+(f' Confira e envie de novo por aqui: {url}' if url else ' Confira o cardápio e envie de novo.'),None,conversa)
+        return {'ok':True,'finalizacao':'recusada','motivo':motivo,'conversation_id':conversa}
+    if r['expira_em']<=datetime.now(timezone.utc): return await recusar('codigo_expirado','o código venceu')
+    dados=json.loads(r['dados']) if isinstance(r['dados'],str) else r['dados']
+    try:
+        async with conn.transaction():
+            p=await _montar_e_fechar(conn,tenant,conversa,dados)
+            await _depois_de_fechar(conn,tenant,conversa,p)
+            # O endereço já está no pedido: não fica uma segunda cópia.
+            await conn.execute("UPDATE cardapio_rascunhos SET usado_em=now(),pedido_numero=$3,total=$4,erro=NULL,dados='{}'::jsonb WHERE tenant_id=$1 AND id=$2",
+                               tenant,r['id'],p['numero'],p['total'])
+    except servico.Recusa as e:
+        return await recusar(e.motivo,PROBLEMA_DO_PEDIDO.get(e.motivo,'algo mudou no cardápio'))
+    return {'ok':True,'finalizacao':'pedido','pedido':p['numero'],'conversation_id':conversa}
+
+
+class TrocarLink(Estrito):
+    renovar:bool=False
+
+
+@router.post('/admin/v1/tenants/{tenant}/cardapio/loja',dependencies=[Depends(painel)])
+async def link_da_loja(request:Request,tenant:str,dados:TrocarLink|None=None,actor=Depends(painel)):
+    """Link fixo que a loja divulga. Trocar invalida o anterior e os pedidos ainda não finalizados continuam valendo pelo código."""
+    db=request.app.state.db
+    await habilitado(Repositorio(db),tenant,'pedidos')
+    if not os.getenv('PAINEL_PUBLIC_URL') or not os.getenv('API_KEY_PEPPER'): raise HTTPException(409,{'motivo':'endereco_publico_ausente'})
+    async with db.acquire() as conn,conn.transaction():
+        if dados and dados.renovar:
+            await conn.execute('DELETE FROM cardapio_links WHERE tenant_id=$1 AND loja',tenant)
+            await auditar(conn,tenant,actor,'cardapio.link_loja_trocado',tenant)
+        nonce=secrets.token_urlsafe(16);token=_token(nonce)
+        await conn.execute('''INSERT INTO cardapio_links(tenant_id,conversation_id,token_hash,nonce,expira_em,criado_por,loja) VALUES ($1,NULL,$2,$3,$4,$5,true)
+            ON CONFLICT(tenant_id) WHERE loja DO NOTHING''',tenant,_hash(token),nonce,datetime.now(timezone.utc)+VALIDADE_LOJA,actor)
+        atual=await conn.fetchval('SELECT nonce FROM cardapio_links WHERE tenant_id=$1 AND loja',tenant)
+    return {'url':_url(_token(atual)),'whatsapp_conectado':await _canal_da_loja(db,tenant) is not None}
 
 
 @router.post('/admin/v1/tenants/{tenant}/conversas/{conv}/cardapio-link',dependencies=[Depends(painel)])
