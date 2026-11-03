@@ -23,10 +23,11 @@ async def buscar(request:Request,tenant:str,conv:str,q:str):
     if not 2<=len(q)<=100: raise HTTPException(400,{'campo':'q'})
     db=request.app.state.db
     if not await Repositorio(db).obter(tenant,'conversas',conv): raise HTTPException(404,'NOT_FOUND')
+    # public.unaccent: a extensão fica em public; nos testes o search_path é só o schema isolado.
     mensagens=await db.fetch('''SELECT id,conteudo,enviada_em,origem FROM mensagens WHERE tenant_id=$1 AND conversation_id=$2
-        AND strpos(lower(unaccent(conteudo)),lower(unaccent($3)))>0 ORDER BY id DESC LIMIT $4''',tenant,conv,q,RESULTADOS)
+        AND strpos(lower(public.unaccent(conteudo)),lower(public.unaccent($3)))>0 ORDER BY id DESC LIMIT $4''',tenant,conv,q,RESULTADOS)
     notas=await db.fetch('''SELECT id,texto AS conteudo,criado_em AS enviada_em,autor FROM conversa_notas WHERE tenant_id=$1 AND conversation_id=$2
-        AND strpos(lower(unaccent(texto)),lower(unaccent($3)))>0 ORDER BY id DESC LIMIT $4''',tenant,conv,q,RESULTADOS)
+        AND strpos(lower(public.unaccent(texto)),lower(public.unaccent($3)))>0 ORDER BY id DESC LIMIT $4''',tenant,conv,q,RESULTADOS)
     itens=[{'tipo':'mensagem','id':r['id'],'trecho':_trecho(r['conteudo'],q),'em':r['enviada_em'].isoformat(),'origem':r['origem']} for r in mensagens]
     itens+=[{'tipo':'nota','id':r['id'],'trecho':_trecho(r['conteudo'],q),'em':r['enviada_em'].isoformat(),'origem':'nota'} for r in notas]
     itens.sort(key=lambda i:i['em'],reverse=True)

@@ -74,8 +74,11 @@ def test_busca_acha_em_mensagens_e_notas_sem_ligar_para_acento():
         _,c,conv,_,B=await montar(conn)
         await fala(conn,conv,'Moro na Rua São João, 100')
         await fala(conn,conv,'Outra coisa')
-        await c.post(B+'/notas',headers=ANA,json={'texto':'Portão azul na sao joao'})
-        r=(await c.get(B+'/busca?q=SAO JOAO',headers=ANA)).json()
+        nota=await c.post(B+'/notas',headers=ANA,json={'texto':'Portão azul na sao joao'})
+        assert nota.status_code==201,nota.text
+        resp=await c.get(B+'/busca?q=SAO JOAO',headers=ANA)
+        r=resp.json()
+        assert resp.status_code==200,r
         assert sorted(i['tipo'] for i in r['itens'])==['mensagem','nota'],r
         assert (await c.get(B+'/busca?q=x',headers=ANA)).status_code==400
         assert (await c.get(B.replace('/alpha/','/nao-existe/')+'/busca?q=joao',headers=ANA)).status_code==404
