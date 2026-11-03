@@ -1500,3 +1500,13 @@ PY
 - **Segurança.** O gateway grava só o usuário, a página ou o número (telefone pela regra do TEL1) e monta o link. Link de outro domínio é recusado. A auditoria (`cardapio.redes_salvas`) guarda só os tipos e se estão ligados.
 - **Página pública.** `cardapio/ler` traz `redes` (só as ativas, com `url` e `rotulo`), também na resposta do link já usado.
 - **Migração 063.** Testes em `tests/test_card_redes.py`. A tela é do [PAINEL].
+
+## Desfazer o último passo do pedido — 2026-11-03
+
+- **Motivo.** No painel, um clique errado mudava o status e não havia como voltar.
+- **Rota.** `POST /admin/v1/tenants/{tenant}/pedidos/{numero}/voltar` com `{"de": "<status visto>"}`, papel funcionário. Volta um passo, para o status anterior da linha do tempo. Se o pedido mudou nesse meio-tempo, 409 `pedido_mudou`.
+- **Regras.** Até 60 minutos depois do passo (`JANELA_VOLTAR_MIN`). Recusa, cancelamento e pedido aguardando a loja não voltam. Voltar para "aguardando a loja" limpa a decisão.
+- **Aviso ao cliente.** Ainda não enviado: é apagado e o cliente não recebe nada; refeito o passo, sai normalmente. Já enviado: fica, e a resposta traz `aviso_ja_enviado: true` para o painel avisar. O passo desfeito sai da linha do tempo e fica na auditoria (`pedido.status_desfeito`), com webhook de saída de mesmo nome.
+- **Lista e detalhe.** Ganham `voltar_para`: o status para onde o pedido pode voltar agora, ou nulo.
+- **Testes.** `tests/test_voltar_status.py`.
+

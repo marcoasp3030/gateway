@@ -2,6 +2,7 @@
 preço sempre do catálogo, carrinho de uma unidade só, item só entra se for vendável,
 bebida alcoólica só fecha com maioridade confirmada (SEG06: o que o agente pedir não muda isso)."""
 import json,secrets
+from datetime import datetime,timezone
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 from nucleo.contatos import nome_da_conversa
@@ -571,6 +572,46 @@ def conferir(status,modalidade,novo):
     if novo=='cancelado': return None
     if ETAPA[novo]<=ETAPA[status]: return 'nao_pode_voltar'
     return None
+
+
+# Voltar um passo: corrige o clique errado. Recusa e cancelamento não voltam (o cliente já foi avisado de que acabou),
+# e o pedido ainda aguardando a loja não tem para onde voltar. Depois da janela, o passo vale como feito.
+NAO_VOLTA=('aguardando_loja','recusado','cancelado')
+JANELA_VOLTAR_MIN=60
+# Aviso que pode ter chegado ao cliente: fica como está, e o painel diz que o cliente já recebeu.
+AVISO_JA_SAIU=('enviado','enviando')
+
+
+def voltar_para(status,anterior,quando,agora=None):
+    """Status para onde o pedido pode voltar agora (o anterior ao atual), ou None."""
+    if status in NAO_VOLTA or not anterior or anterior==status or quando is None: return None
+    agora=agora or datetime.now(timezone.utc)
+    return anterior if (agora-quando).total_seconds()<=JANELA_VOLTAR_MIN*60 else None
+
+
+async def voltar_status(conn,tenant,numero,esperado):
+    """Desfaz o último passo do pedido. Devolve (pedido, {de, para, aviso_ja_enviado}); None se o pedido não existe;
+    TransicaoInvalida se o pedido mudou ou se o passo não pode ser desfeito."""
+    p=await conn.fetchrow('SELECT * FROM pedidos WHERE tenant_id=$1 AND numero=$2 FOR UPDATE',tenant,numero)
+    if not p: return None
+    if p['status']!=esperado: raise TransicaoInvalida(p,'pedido_mudou')
+    e=await conn.fetchrow('SELECT id,de,criado_em FROM pedido_eventos WHERE tenant_id=$1 AND pedido_id=$2 AND para=$3',tenant,p['id'],p['status'])
+    alvo=voltar_para(p['status'],e and e['de'],e and e['criado_em'])
+    if not alvo: raise TransicaoInvalida(p,'nao_pode_voltar')
+    atual=p['status']
+    # Voltar para "aguardando a loja" desfaz também a decisão: a unidade decide de novo.
+    p=await conn.fetchrow("""UPDATE pedidos SET status=$3,atualizado_em=now(),
+        decidido_em=CASE WHEN $3='aguardando_loja' THEN NULL ELSE decidido_em END,
+        decidido_por=CASE WHEN $3='aguardando_loja' THEN NULL ELSE decidido_por END
+        WHERE tenant_id=$1 AND id=$2 RETURNING *""",tenant,p['id'],alvo)
+    # O passo sai da linha do tempo (fica na auditoria): refeito depois, ele volta a ser registrado.
+    await conn.execute('DELETE FROM pedido_eventos WHERE tenant_id=$1 AND id=$2',tenant,e['id'])
+    a=await conn.fetchrow("SELECT id,status FROM avisos_internos WHERE tenant_id=$1 AND tipo='pedido_cliente' AND referencia=$2 FOR UPDATE",
+                          tenant,f'{numero}:{atual}')
+    ja_saiu=bool(a and a['status'] in AVISO_JA_SAIU)
+    # Ainda não enviado: o cliente nunca fica sabendo. Refeito o passo, o aviso sai normalmente.
+    if a and not ja_saiu: await conn.execute('DELETE FROM avisos_internos WHERE id=$1',a['id'])
+    return p,{'de':atual,'para':alvo,'aviso_ja_enviado':ja_saiu}
 
 
 def proximos(p):

@@ -295,7 +295,7 @@ class MudancaDeStatus(Estrito):
 admin=APIRouter(prefix='/admin/v1',dependencies=[Depends(painel)])
 from nucleo.contatos import ICONES
 SELECAO="""SELECT p.*,u.nome AS unidade_nome,k.id AS canal_id,k.tipo AS canal_tipo,k.nome AS canal_nome,
-        a.status AS aviso_status,e.aviso AS aviso_evento
+        a.status AS aviso_status,e.aviso AS aviso_evento,e.de AS status_anterior,e.criado_em AS status_em
     FROM pedidos p
     LEFT JOIN tenant_unidades u ON u.tenant_id=p.tenant_id AND u.codigo=p.unidade
     LEFT JOIN conversas v ON v.tenant_id=p.tenant_id AND v.conversation_id=p.conversation_id
@@ -320,7 +320,9 @@ def resumo_painel(r):
                        'canal':{'id':r['canal_id'],'tipo':r['canal_tipo'],'nome':r['canal_nome'],'icone':ICONES.get(r['canal_tipo'])} if r['canal_id'] else None},
             'aviso':aviso,
             # O cartão do quadro avança o pedido sem abrir o detalhe: os passos saem daqui, como no detalhe.
-            'proximos_status':servico.proximos(r)}
+            'proximos_status':servico.proximos(r),
+            # Clique errado: o passo de agora pode ser desfeito, voltando para este status (None quando não pode).
+            'voltar_para':servico.voltar_para(r['status'],r['status_anterior'],r['status_em'])}
 
 
 async def detalhe_painel(db,tenant_id,numero):
@@ -503,6 +505,28 @@ async def _mudar_pelo_painel(request,tenant_id,numero,novo,motivo,previsao_min,a
 @admin.post('/tenants/{tenant_id}/pedidos/{numero}/status')
 async def mudar(request:Request,tenant_id:str,numero:str,dados:MudancaDeStatus,actor=Depends(painel)):
     return await _mudar_pelo_painel(request,tenant_id,numero,dados.status,dados.motivo,dados.previsao_min,actor)
+
+
+class Voltar(Estrito):
+    # O status que o painel está vendo: se o pedido mudou nesse meio-tempo, nada é desfeito.
+    de:Literal['confirmado','em_preparo','pronto_retirada','saiu_entrega','concluido']
+
+
+@admin.post('/tenants/{tenant_id}/pedidos/{numero}/voltar')
+async def voltar(request:Request,tenant_id:str,numero:str,dados:Voltar,actor=Depends(painel)):
+    """Desfaz o último passo do pedido (clique errado), dentro de servico.JANELA_VOLTAR_MIN."""
+    async with request.app.state.db.acquire() as conn:
+        try:
+            async with conn.transaction():
+                feito=await servico.voltar_status(conn,tenant_id,numero,dados.de)
+                if feito:
+                    p,info=feito
+                    await auditar(conn,tenant_id,actor,'pedido.status_desfeito',numero)
+                    await emitir(conn,tenant_id,'pedido.status_desfeito',{**resumo_evento(p),'de':info['de'],'para':info['para']})
+        except servico.TransicaoInvalida as t:
+            return conflito(t.pedido,t.motivo)
+    if feito is None: raise HTTPException(404,'NOT_FOUND')
+    return {**await detalhe_painel(request.app.state.db,tenant_id,numero),'desfeito':info}
 
 
 @admin.post('/tenants/{tenant_id}/pedidos/{numero}/confirmar')

@@ -104,6 +104,7 @@ PERMISSOES={
     ('POST','/tenants/{tenant_id}/pedidos/{numero}/confirmar'):'funcionario',
     ('POST','/tenants/{tenant_id}/pedidos/{numero}/recusar'):'funcionario',
     ('POST','/tenants/{tenant_id}/pedidos/{numero}/status'):'funcionario',
+    ('POST','/tenants/{tenant_id}/pedidos/{numero}/voltar'):'funcionario',
     ('GET','/tenants/{tenant_id}/skills/registro'):'supervisor',
     ('GET','/tenants/{tenant_id}/solicitacoes'):'funcionario',
     ('GET','/tenants/{tenant_id}/solicitacoes/contagem'):'funcionario',
