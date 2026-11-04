@@ -164,7 +164,7 @@ def test_link_invalido_vencido_limite_e_empresa_fora():
         r=await client.post(P+'/pedido',json=pedido(tok,ids));assert r.status_code==410 and motivo_de(r)=='link_expirado'
         assert await conn.fetchval('SELECT count(*) FROM pedidos WHERE conversation_id=$1',c)==0
         await conn.execute("UPDATE cardapio_links SET expira_em=now()+interval '1 day' WHERE conversation_id=$1",c)
-        await conn.execute("UPDATE cardapio_links SET janela=date_trunc('minute',now()),chamadas=$2 WHERE conversation_id=$1",c,CARD.LIMITE_POR_MINUTO)
+        await conn.execute("UPDATE cardapio_links SET janela=date_trunc('minute',clock_timestamp()),chamadas=$2 WHERE conversation_id=$1",c,CARD.LIMITE_POR_MINUTO)
         r=await client.post(P+'/ler',json={'token':tok});assert r.status_code==429 and motivo_de(r)=='muitas_chamadas'
         await conn.execute("UPDATE cardapio_links SET chamadas=0 WHERE conversation_id=$1",c)
         await conn.execute("UPDATE tenants SET status='suspenso' WHERE id=$1",T)
@@ -244,7 +244,7 @@ def test_cep_exige_link_valido_e_formato(monkeypatch):
         r=await client.post(P+'/cep',json={'token':tok,'cep':'01310100'});assert r.status_code==200 and r.json()['rua']=='Rua A'
         r=await client.post(P+'/cep',json={'token':tok,'cep':'00000000'});assert r.status_code==404 and motivo_de(r)=='cep_inexistente'
         r=await client.post(P+'/cep',json={'token':tok,'cep':'99999999'});assert r.status_code==503 and motivo_de(r)=='cep_indisponivel'
-        await conn.execute("UPDATE cardapio_links SET janela=date_trunc('minute',now()),chamadas=$2 WHERE conversation_id=$1",c,CARD.LIMITE_POR_MINUTO)
+        await conn.execute("UPDATE cardapio_links SET janela=date_trunc('minute',clock_timestamp()),chamadas=$2 WHERE conversation_id=$1",c,CARD.LIMITE_POR_MINUTO)
         assert (await client.post(P+'/cep',json={'token':tok,'cep':'01310100'})).status_code==429
     em_banco(cenario)
 
