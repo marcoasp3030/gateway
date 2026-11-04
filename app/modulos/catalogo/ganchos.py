@@ -24,3 +24,8 @@ async def unidades_que_atendem(db,tenant):
 async def anonimizar(conn,tenant,antiga,nova):
     """LGPD1: o que a conversa buscou no catálogo passa para o identificador novo (o antigo contém o telefone)."""
     await conn.execute('UPDATE catalogo_vistos SET conversation_id=$3 WHERE tenant_id=$1 AND conversation_id=$2',tenant,antiga,nova)
+
+
+async def excluir_conversas(conn,tenant,conversas):
+    """CANAL-EXC: os itens que a conversa viu no catálogo saem com ela."""
+    await conn.execute('DELETE FROM catalogo_vistos WHERE tenant_id=$1 AND conversation_id=ANY($2::text[])',tenant,list(conversas))

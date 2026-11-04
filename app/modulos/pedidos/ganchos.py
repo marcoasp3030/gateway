@@ -97,6 +97,19 @@ async def resumo_das_conversas(db,tenant,conversas):
     return saida
 
 
+async def conversas_presas(conn,tenant,conversas):
+    """CANAL-EXC: {conversa: pedidos} das conversas que não podem sumir, porque o pedido exige conversa."""
+    return {r['conversation_id']:r['n'] for r in await conn.fetch(
+        'SELECT conversation_id,count(*) AS n FROM pedidos WHERE tenant_id=$1 AND conversation_id=ANY($2::text[]) GROUP BY 1',tenant,list(conversas))}
+
+
+async def excluir_conversas(conn,tenant,conversas):
+    """CANAL-EXC: o carrinho sai; o pedido fica, sem carrinho nem atendimento (os dados pessoais saem no gancho anonimizar)."""
+    await conn.execute('UPDATE pedidos SET carrinho_id=NULL,atendimento_id=NULL WHERE tenant_id=$1 AND conversation_id=ANY($2::text[])',tenant,list(conversas))
+    await conn.execute('DELETE FROM carrinhos WHERE tenant_id=$1 AND conversation_id=ANY($2::text[])',tenant,list(conversas))
+    await conn.execute('DELETE FROM cardapio_links WHERE tenant_id=$1 AND conversation_id=ANY($2::text[])',tenant,list(conversas))
+
+
 async def anonimizar(conn,tenant,antiga,nova):
     """LGPD: carrinho e pedido acompanham a troca do identificador (ON UPDATE CASCADE); saem endereço, observações (a geral e a de
     cada item, LGPD1) e dados do cliente. O registro curto das Skills (sem endereço nem observação) passa para o identificador novo."""

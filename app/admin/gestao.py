@@ -172,6 +172,7 @@ async def conversas(request: Request, tenant: str, agente: str | None = None, ca
         LEFT JOIN tenant_unidades u ON u.tenant_id=c.tenant_id AND u.codigo=c.unidade_preferida
         LEFT JOIN atendimentos a ON a.tenant_id=c.tenant_id AND a.id=c.atendimento_id
         WHERE c.tenant_id=$1 AND ($2::text IS NULL OR c.agente_id=$2)
+        AND NOT EXISTS(SELECT 1 FROM tenant_canais xk WHERE xk.tenant_id=c.tenant_id AND xk.id=c.canal_id AND xk.excluido_em IS NOT NULL)
         AND ($3::text IS NULL OR c.canal_id=$3)
         AND ($4::text IS NULL OR (CASE WHEN c.bot_pausado_ate>now() THEN 'pausada' ELSE 'ativa' END)=$4)
         AND ($5::text IS NULL OR strpos(lower(concat_ws(' ',c.nome,c.telefone,ct.nome_cadastro,ct.nome_informado,ct.nome_perfil)),lower($5))>0)

@@ -31,8 +31,8 @@ AMOSTRA_DE_PRESENCA=20
 @router.post('/webhooks/{tipo}/{canal_id}')
 async def webhook(request:Request,tipo:str,canal_id:str,s:str=''):
     # Só resolve identidade antes da autenticação. Todo acesso posterior usa tenant explícito.
-    canal=await request.app.state.db.fetchrow('SELECT tenant_id,webhook_secret,tipo FROM tenant_canais WHERE id=$1',canal_id)
-    if not canal or canal['tipo']!=tipo: raise HTTPException(404,'NOT_FOUND')
+    canal=await request.app.state.db.fetchrow('SELECT tenant_id,webhook_secret,tipo,excluido_em FROM tenant_canais WHERE id=$1',canal_id)
+    if not canal or canal['tipo']!=tipo or canal['excluido_em']: raise HTTPException(404,'NOT_FOUND')
     esperado=request.app.state.cofre.abrir(canal['tenant_id'],canal['webhook_secret']) if canal['webhook_secret'] else None
     if not segredo_confere(s,esperado): raise HTTPException(401,'UNAUTHORIZED')
     if tipo not in ('api','uazapi'): raise HTTPException(501,'Provedor ainda não implementado')

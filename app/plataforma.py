@@ -287,6 +287,8 @@ def criar_app(infra,db=None,redis=None):
     from admin.solicitacoes import router as solicitacoes
     app.include_router(solicitacoes)
     app.include_router(contatos)
+    from admin.canal_excluir import router as canal_excluir
+    app.include_router(canal_excluir)
     app.include_router(unidades)
     from admin.entrega import router as entrega
     app.include_router(entrega)

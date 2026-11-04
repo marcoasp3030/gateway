@@ -1501,6 +1501,17 @@ PY
 - **Página pública.** `cardapio/ler` traz `redes` (só as ativas, com `url` e `rotulo`), também na resposta do link já usado.
 - **Migração 063.** Testes em `tests/test_card_redes.py`. A tela é do [PAINEL].
 
+## CANAL-EXC: excluir canal — 2026-11-04
+
+- **O que é.** `DELETE /admin/v1/tenants/{t}/canais/{canal}`, só da plataforma. O canal precisa estar desativado e o nome digitado em `confirmacao`. Especificação e decisões do Marco em `docs/ESPEC_CANAL_EXC.md`.
+- **Histórico.** Apaga todo o histórico das conversas do canal:
+  - mensagens, turnos, atendimentos, notas, etiquetas, esperas, follow-ups, solicitações, avisos;
+  - registros de Skills, documentos (com o arquivo), links do cardápio e carrinhos;
+  - o contato que ficar sem conversa.
+  - A auditoria antiga perde o alvo, que levava o telefone.
+- **Pedidos.** Ficam, sem dados pessoais (pela mesma rotina do LGPD), presos a uma conversa vazia e anônima. Se sobrar alguma, o canal fica marcado (`excluido_em`): some das listas e da ficha do agente, fica sem credenciais e devolve 404 em consulta, alteração e webhook. Sem nenhuma, a linha do canal é apagada.
+- **Migração 064.** Testes em `tests/test_canal_exc.py`. O botão é do [PAINEL].
+
 ## Desfazer o último passo do pedido — 2026-11-03
 
 - **Motivo.** No painel, um clique errado mudava o status e não havia como voltar.

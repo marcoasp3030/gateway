@@ -94,12 +94,16 @@ async def listar(request:Request,tenant_id:str,entidade:str,limite:int=50,cursor
         rows=await request.app.state.db.fetch("""SELECT a.*,
             CASE WHEN c.aberto_ate>now() THEN 'aberto' WHEN c.aberto_ate IS NOT NULL THEN 'meio_aberto' ELSE 'fechado' END AS circuito_estado,
             COALESCE((SELECT jsonb_agg(jsonb_build_object('id',ch.id,'tipo',ch.tipo,'ativo',ch.ativo) ORDER BY ch.id)
-                FROM tenant_canais ch WHERE ch.tenant_id=a.tenant_id AND ch.agente_id=a.id),'[]'::jsonb) AS canais
+                FROM tenant_canais ch WHERE ch.tenant_id=a.tenant_id AND ch.agente_id=a.id AND ch.excluido_em IS NULL),'[]'::jsonb) AS canais
             FROM agentes a LEFT JOIN agente_circuitos c ON c.tenant_id=a.tenant_id AND c.agente_id=a.id
             WHERE a.tenant_id=$1 AND ($2::text IS NULL OR a.id>$2) ORDER BY a.id LIMIT $3""",tenant_id,cursor,limite+1)
         rows=[{**registro(r),'canais':json.loads(r['canais']) if isinstance(r['canais'],str) else r['canais']} for r in rows]
         # MULTI1-a: módulos que cada agente usa de fato (para o painel).
         for r in rows: r['modulos']=(await request.app.state.configuracoes.efetiva(tenant_id,r['id']))['modulos']
+    elif entidade=='canais':
+        # CANAL-EXC: canal excluído (marcado porque sobrou pedido) não aparece mais.
+        rows=[registro(r) for r in await request.app.state.db.fetch("""SELECT * FROM tenant_canais WHERE tenant_id=$1 AND excluido_em IS NULL
+            AND ($2::text IS NULL OR id::text>$2) ORDER BY id::text LIMIT $3""",tenant_id,cursor,limite+1)]
     else:
         rows=await Repositorio(request.app.state.db).listar(tenant_id,ENTIDADES[entidade][0],limite+1,cursor)
     return pagina(limpar(rows),limite)
@@ -128,7 +132,7 @@ async def criar(request:Request,tenant_id:str,entidade:str,dados:dict,actor=Depe
 async def obter(request:Request,tenant_id:str,entidade:str,identidade:str):
     if entidade not in ENTIDADES: raise HTTPException(404,'NOT_FOUND')
     row=await Repositorio(request.app.state.db).obter(tenant_id,ENTIDADES[entidade][0],identidade)
-    if not row: raise HTTPException(404,'NOT_FOUND')
+    if not row or row.get('excluido_em'): raise HTTPException(404,'NOT_FOUND')
     result=limpar(row)
     if entidade=='agentes':
         result['configuracao_efetiva']=await request.app.state.configuracoes.efetiva(tenant_id,identidade)
@@ -147,6 +151,8 @@ async def alterar(request:Request,tenant_id:str,entidade:str,identidade:str,dado
         if recusa: return recusa
         # MULTI1-a: ligar e desligar módulos no agente, de admin ou plataforma.
         if 'modulos_ligados' in dados and not pode(request,'gestor'): raise HTTPException(403,'FORBIDDEN')
+    if entidade=='canais' and await request.app.state.db.fetchval('SELECT excluido_em IS NOT NULL FROM tenant_canais WHERE tenant_id=$1 AND id=$2',tenant_id,identidade):
+        raise HTTPException(404,'NOT_FOUND')
     result=await request.app.state.admin.salvar(tenant_id,entidade,dados,actor,identidade)
     # MULTI1-a: credenciais novas num canal uazapi → cadastra de novo o webhook (pode ser outra instância).
     if entidade=='canais' and result.get('tipo')=='uazapi' and isinstance(dados,dict) and dados.get('credenciais') and request.app.state.infra.registrar_webhook_uazapi:

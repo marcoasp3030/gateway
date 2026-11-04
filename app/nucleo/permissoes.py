@@ -154,6 +154,8 @@ PERMISSOES={
     ('GET','/tenants/{tenant}/anexos/{aid}/texto'):'gestor',
     ('POST','/tenants/{tenant}/canais/{canal}/rotacionar-segredo'):'gestor',
     ('POST','/tenants/{tenant}/canais/{canal}/webhook'):'gestor',
+    # CANAL-EXC: apaga o histórico do canal; irreversível.
+    ('DELETE','/tenants/{tenant}/canais/{canal}'):'plataforma',
     ('GET','/tenants/{tenant}/capacidades'):'gestor',
     ('PUT','/tenants/{tenant}/capacidades/documentos'):'plataforma',
     ('GET','/tenants/{tenant}/chaves-formulario'):'gestor',
