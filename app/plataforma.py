@@ -299,6 +299,9 @@ def criar_app(infra,db=None,redis=None):
     app.include_router(notificacoes)
     app.include_router(saidas)
     app.include_router(capacidades)
+    # PED-BI: antes das rotas do módulo, senão /pedidos/indicadores cairia em /pedidos/{numero}.
+    from modulos.pedidos.indicadores import router as indicadores_de_pedidos
+    app.include_router(indicadores_de_pedidos)
     # MULTI1-b: rotas de cada módulo do registro (Skills em `router`, painel em `admin`), na ordem do registro.
     import importlib
     from modulos import REGISTRO

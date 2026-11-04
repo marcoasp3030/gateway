@@ -99,6 +99,7 @@ PERMISSOES={
     ('PUT','/tenants/{tenant_id}/pedidos/avisos/{status}'):'gestor',
     ('POST','/tenants/{tenant_id}/pedidos/avisos/{status}/previa'):'supervisor',
     ('GET','/tenants/{tenant_id}/pedidos/contagem'):'funcionario',
+    ('GET','/tenants/{tenant_id}/pedidos/indicadores'):'gestor',
     ('GET','/tenants/{tenant_id}/pedidos/{numero}'):'funcionario',
     ('POST','/tenants/{tenant_id}/pedidos/{numero}/avisos/{status}/reenviar'):'supervisor',
     ('POST','/tenants/{tenant_id}/pedidos/{numero}/confirmar'):'funcionario',

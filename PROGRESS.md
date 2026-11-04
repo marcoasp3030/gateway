@@ -1501,6 +1501,17 @@ PY
 - **Página pública.** `cardapio/ler` traz `redes` (só as ativas, com `url` e `rotulo`), também na resposta do link já usado.
 - **Migração 063.** Testes em `tests/test_card_redes.py`. A tela é do [PAINEL].
 
+## PED-BI: visão de vendas da empresa — 2026-11-04
+
+- **O que é.** `GET /admin/v1/tenants/{t}/pedidos/indicadores`, para gestor e acima. Mostra o período escolhido (padrão: 30 dias; máximo: 366) comparado com o anterior. Especificação e decisões do Marco em `docs/ESPEC_PED_BI.md`.
+- **O que traz:**
+  - resumo, evolução e horários de pico;
+  - produtos (ranking, curva ABC, categorias e produtos sem venda);
+  - clientes (por valor, por frequência e sumidos, com nome e telefone completo);
+  - pagamento, bairros, tempos da operação, motivos de perda e unidades.
+- **Regras.** Venda é confirmado em diante; aguardando, recusado e cancelado vêm à parte. Só origem real por padrão. Fuso de São Paulo. Pedido anonimizado entra nos totais e fica fora do ranking de clientes.
+- **Sem migração.** Testes em `tests/test_ped_bi.py`. A tela é do [PAINEL].
+
 ## CANAL-EXC: excluir canal — 2026-11-04
 
 - **O que é.** `DELETE /admin/v1/tenants/{t}/canais/{canal}`, só da plataforma. O canal precisa estar desativado e o nome digitado em `confirmacao`. Especificação e decisões do Marco em `docs/ESPEC_CANAL_EXC.md`.
