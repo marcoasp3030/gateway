@@ -29,8 +29,29 @@ async def modulos_tenant(request:Request,tenant_id:str):
     for a in await db.fetch("SELECT id FROM agentes WHERE tenant_id=$1 AND status<>'pausado'",tenant_id):
         em_uso.update((await request.app.state.configuracoes.efetiva(tenant_id,a['id']))['modulos'])
     em_uso=[m for m in REGISTRO if m in em_uso]
+    from nucleo.telas import bloqueadas
     return {'itens':await Repositorio(db).listar(tenant_id,'modulos_tenant',100),'em_uso':em_uso,
-            'telas':[t for m in em_uso for t in REGISTRO[m].telas]}
+            'telas':[t for m in em_uso for t in REGISTRO[m].telas],
+            # TELAS1: telas do painel bloqueadas pela plataforma nesta empresa.
+            'bloqueadas':sorted(await bloqueadas(db,tenant_id))}
+
+class TelasBloqueadas(Estrito):
+    bloqueadas:list[str]=Field(max_length=40)
+
+@router.put('/tenants/{tenant_id}/telas',dependencies=[Depends(exigir_plataforma)])
+async def salvar_telas(request:Request,tenant_id:str,dados:dict,actor=Depends(painel)):
+    """TELAS1: telas do painel bloqueadas na empresa (o resto fica liberado). Só a plataforma."""
+    from nucleo import telas
+    d=validar(TelasBloqueadas,dados)
+    desconhecidas=sorted(set(d['bloqueadas'])-set(telas.TELAS))
+    if desconhecidas: raise HTTPException(400,{'campo':'bloqueadas','mensagem':'Tela desconhecida: '+', '.join(desconhecidas[:5])})
+    lista=telas.normalizar(d['bloqueadas'])
+    async with request.app.state.db.acquire() as c,c.transaction():
+        await empresa(c,tenant_id)
+        await c.execute('UPDATE tenants SET telas_bloqueadas=$2 WHERE id=$1',tenant_id,lista)
+        await auditar(c,tenant_id,actor,'telas.alteradas','telas',{'bloqueadas':lista})
+    telas.invalidar(tenant_id)
+    return {'bloqueadas':lista}
 
 @router.put('/tenants/{tenant_id}/modulos/{modulo}',dependencies=[Depends(exigir_plataforma)])
 async def salvar_modulo(request:Request,tenant_id:str,modulo:str,dados:dict,actor=Depends(painel)):

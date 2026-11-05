@@ -175,6 +175,14 @@ def criar_app(infra,db=None,redis=None):
         if not permissoes.atende(quem,minimo):
             await _auditar_negado(request,quem,rota_txt,'papel_insuficiente')
             return _recusa('papel_insuficiente','Seu papel não permite esta operação.',minimo=minimo)
+        # TELAS1: tela do painel bloqueada pela plataforma nesta empresa. A plataforma continua vendo tudo.
+        if quem!='plataforma':
+            from nucleo import telas
+            tela=telas.tela_da_rota(rota_txt)
+            tenant=parametros.get('tenant_id') or parametros.get('tenant')
+            if tela and tenant and tela in await telas.bloqueadas(app.state.db,tenant):
+                await _auditar_negado(request,quem,rota_txt,'tela_bloqueada')
+                return _recusa('tela_bloqueada','Este módulo não está liberado para a sua empresa.',tela=tela)
         return None
 
     @app.middleware('http')

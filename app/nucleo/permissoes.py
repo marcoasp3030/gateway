@@ -94,6 +94,7 @@ PERMISSOES={
     ('GET','/tenants/{tenant_id}/modelos-disponiveis'):'gestor',
     ('GET','/tenants/{tenant_id}/modulos'):'gestor',
     ('PUT','/tenants/{tenant_id}/modulos/{modulo}'):'plataforma',
+    ('PUT','/tenants/{tenant_id}/telas'):'plataforma',
     ('GET','/tenants/{tenant_id}/pedidos'):'funcionario',
     ('GET','/tenants/{tenant_id}/pedidos/avisos'):'supervisor',
     ('PUT','/tenants/{tenant_id}/pedidos/avisos/{status}'):'gestor',

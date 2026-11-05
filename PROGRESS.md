@@ -1521,3 +1521,11 @@ PY
 - **Lista e detalhe.** Ganham `voltar_para`: o status para onde o pedido pode voltar agora, ou nulo.
 - **Testes.** `tests/test_voltar_status.py`.
 
+
+## Módulos do painel por empresa (TELAS1) — 2026-11-03
+
+- **Motivo.** Cada opção do menu do painel é um módulo que a plataforma libera ou bloqueia por empresa, conforme o perfil de cada cliente.
+- **Dado.** `tenants.telas_bloqueadas` (migração 065). Guarda o que está bloqueado: vazio = tudo liberado, e tela nova nasce liberada para quem já existe.
+- **Rotas.** `GET /tenants/{t}/modulos` passa a trazer `bloqueadas`. `PUT /admin/v1/tenants/{t}/telas` com `{"bloqueadas": [...]}`, só a plataforma; tela fora do catálogo (`nucleo/telas.py`) é 400. Auditoria `telas.alteradas`.
+- **Recusa.** No middleware do painel, depois do papel: quem não é a plataforma recebe 403 `tela_bloqueada` nas rotas que só servem à tela bloqueada (pedidos, avisos de pedido, catálogo e cardápio, aparência e redes, webhooks de saída, operação, respostas rápidas). Rota usada por mais de uma tela (agentes, canais, unidades, conversas, chaves de formulário, prévia e link do cardápio) não entra: ali vale o bloqueio do painel no menu e na página.
+- **Testes.** `tests/test_telas1.py`. A tela é do [PAINEL].
