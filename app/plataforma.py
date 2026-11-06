@@ -299,6 +299,9 @@ def criar_app(infra,db=None,redis=None):
     app.include_router(notificacoes)
     app.include_router(saidas)
     app.include_router(capacidades)
+    # IFOOD1-a: lojas do iFood ligadas às empresas (docs/ESPEC_IFOOD1.md).
+    from modulos.ifood.rotas import router as ifood_lojas
+    app.include_router(ifood_lojas)
     # PED-BI: antes das rotas do módulo, senão /pedidos/indicadores cairia em /pedidos/{numero}.
     from modulos.pedidos.indicadores import router as indicadores_de_pedidos
     app.include_router(indicadores_de_pedidos)

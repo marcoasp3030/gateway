@@ -1501,6 +1501,15 @@ PY
 - **Página pública.** `cardapio/ler` traz `redes` (só as ativas, com `url` e `rotulo`), também na resposta do link já usado.
 - **Migração 063.** Testes em `tests/test_card_redes.py`. A tela é do [PAINEL].
 
+## IFOOD1-a: lojas do iFood ligadas às empresas — 2026-11-06
+
+- **O que é.** Primeira parte da integração com o iFood. A especificação e as decisões do Marco estão em `docs/ESPEC_IFOOD1.md`.
+- **Token.** O gateway funciona como aplicativo centralizado: um token só para todas as lojas, pedido com `IFOOD_CLIENT_ID` e `IFOOD_CLIENT_SECRET` do `.env`.
+  - Fica cifrado no Redis e só um processo renova por vez.
+  - É renovado só ao vencer ou com 401.
+- **Ligação das lojas.** Só a plataforma liga e desliga uma loja a uma empresa, porque a lista do iFood traz as lojas de todas as empresas. O gestor vê as lojas da empresa e confere se a loja ainda dá acesso.
+- **Migração 065.** Testes em `tests/test_ifood1a.py`, com iFood simulado. As coletas e as telas ficam para o IFOOD1-b, que depende da especificação oficial.
+
 ## PED-BI: visão de vendas da empresa — 2026-11-04
 
 - **O que é.** `GET /admin/v1/tenants/{t}/pedidos/indicadores`, para gestor e acima. Mostra o período escolhido (padrão: 30 dias; máximo: 366) comparado com o anterior. Especificação e decisões do Marco em `docs/ESPEC_PED_BI.md`.

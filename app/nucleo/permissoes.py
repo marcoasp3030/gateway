@@ -9,6 +9,7 @@ LEGADOS={'admin':'gestor','membro':'funcionario'}
 PERMISSOES={
     ('GET','/auditoria/plataforma'):'plataforma',
     ('GET','/fila'):'plataforma',
+    ('GET','/ifood/lojas-autorizadas'):'plataforma',
     ('GET','/modelos-agente'):'plataforma',
     ('POST','/modelos-agente'):'plataforma',
     ('GET','/modelos-agente/{modelo_id}'):'plataforma',
@@ -100,6 +101,10 @@ PERMISSOES={
     ('POST','/tenants/{tenant_id}/pedidos/avisos/{status}/previa'):'supervisor',
     ('GET','/tenants/{tenant_id}/pedidos/contagem'):'funcionario',
     ('GET','/tenants/{tenant_id}/pedidos/indicadores'):'gestor',
+    ('GET','/tenants/{tenant_id}/ifood/lojas'):'gestor',
+    ('PUT','/tenants/{tenant_id}/ifood/lojas/{merchant_id}'):'plataforma',
+    ('DELETE','/tenants/{tenant_id}/ifood/lojas/{merchant_id}'):'plataforma',
+    ('POST','/tenants/{tenant_id}/ifood/lojas/{merchant_id}/conferir'):'gestor',
     ('GET','/tenants/{tenant_id}/pedidos/{numero}'):'funcionario',
     ('POST','/tenants/{tenant_id}/pedidos/{numero}/avisos/{status}/reenviar'):'supervisor',
     ('POST','/tenants/{tenant_id}/pedidos/{numero}/confirmar'):'funcionario',
