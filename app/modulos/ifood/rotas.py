@@ -7,7 +7,7 @@ from fastapi import APIRouter,Depends,Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel,ConfigDict,Field
 from admin.servico import auditar
-from nucleo.autenticacao import painel
+from nucleo.autenticacao import painel,credencial
 from nucleo.banco import Repositorio
 from .cliente import Ifood,ErroIfood
 
@@ -37,9 +37,12 @@ class Confirmacao(Estrito):
 
 
 def _falha(status,motivo,campo=None):
-    codigo={400:'VALIDATION_ERROR',404:'NOT_FOUND',409:'CONFLICT',502:'UPSTREAM_ERROR',503:'UNAVAILABLE'}[status]
+    codigo={400:'VALIDATION_ERROR',403:'FORBIDDEN',404:'NOT_FOUND',409:'CONFLICT',502:'UPSTREAM_ERROR',503:'UNAVAILABLE'}[status]
     mensagens={'ligada_a_outra_empresa':'Esta loja do iFood já está ligada a outra empresa.','unidade':'Unidade não encontrada nesta empresa.',
-               'nao_autorizada':'Esta loja não autorizou o aplicativo da Ticway no iFood.','confirmacao':'Digite o nome da loja para confirmar.'}
+               'nao_autorizada':'Esta loja não autorizou o aplicativo da Ticway no iFood.','confirmacao':'Digite o nome da loja para confirmar.',
+               'credenciais_recusadas':'O iFood recusou este Client ID e Client Secret. Nada foi gravado.',
+               'formato':'Confira os campos informados.',
+               'papel_sem_credencial':'Trocar as credenciais do iFood exige a chave de plataforma do painel.'}
     detalhes={'motivo':motivo,**({'campo':campo} if campo else {})}
     return JSONResponse({'erro':{'codigo':codigo,'mensagem':MENSAGENS.get(motivo) or mensagens.get(motivo,'Não foi possível concluir.'),'detalhes':detalhes}},
                         status_code=status,headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
@@ -49,10 +52,12 @@ def _do_ifood(e:ErroIfood):
     return _falha(503 if e.motivo=='nao_configurado' else 502,e.motivo)
 
 
-def cliente(request):
+def _prefixo(request): return getattr(getattr(request.app.state,'pipeline',None),'prefixo','gw')
+
+
+async def cliente(request):
     estado=request.app.state
-    prefixo=getattr(getattr(estado,'pipeline',None),'prefixo','gw')
-    return Ifood(estado.http,estado.redis,estado.cofre,prefixo)
+    return await Ifood(estado.http,estado.redis,estado.cofre,_prefixo(request)).carregar(estado.db)
 
 
 def _loja(r):
@@ -63,7 +68,7 @@ def _loja(r):
 @router.get('/ifood/lojas-autorizadas')
 async def autorizadas(request:Request):
     """Lojas que autorizaram o aplicativo no iFood e a qual empresa cada uma está ligada (só plataforma)."""
-    try: lojas=await cliente(request).lojas()
+    try: lojas=await (await cliente(request)).lojas()
     except ErroIfood as e: return _do_ifood(e)
     ligadas={r['merchant_id']:r for r in await request.app.state.db.fetch('SELECT merchant_id,tenant_id,unidade,ativo FROM ifood_lojas')}
     return {'itens':[{**l,'ligada_a':({'tenant_id':ligadas[l['merchant_id']]['tenant_id'],'unidade':ligadas[l['merchant_id']]['unidade'],
@@ -75,7 +80,9 @@ async def da_empresa(request:Request,tenant_id:str):
     db=request.app.state.db
     if not await Repositorio(db).tenant(tenant_id): return _falha(404,'NOT_FOUND')
     rows=await db.fetch('SELECT * FROM ifood_lojas WHERE tenant_id=$1 ORDER BY ligado_em,merchant_id',tenant_id)
-    return {'configurado':cliente(request).configurado,'itens':[_loja(r) for r in rows]}
+    try: configurado=(await cliente(request)).configurado
+    except ErroIfood: configurado=False
+    return {'configurado':configurado,'itens':[_loja(r) for r in rows]}
 
 
 @router.put('/tenants/{tenant_id}/ifood/lojas/{merchant_id}')
@@ -86,7 +93,7 @@ async def ligar(request:Request,tenant_id:str,merchant_id:str,body:Ligacao,actor
     if not MERCHANT.fullmatch(merchant_id): return _falha(400,'formato','merchant_id')
     if body.unidade and not await db.fetchval('SELECT EXISTS(SELECT 1 FROM tenant_unidades WHERE tenant_id=$1 AND codigo=$2)',tenant_id,body.unidade):
         return _falha(400,'unidade','unidade')
-    try: lojas={l['merchant_id']:l for l in await cliente(request).lojas()}
+    try: lojas={l['merchant_id']:l for l in await (await cliente(request)).lojas()}
     except ErroIfood as e: return _do_ifood(e)
     if merchant_id not in lojas: return _falha(409,'nao_autorizada','merchant_id')
     async with db.acquire() as c,c.transaction():
@@ -111,7 +118,7 @@ async def conferir(request:Request,tenant_id:str,merchant_id:str):
     r=await db.fetchrow('SELECT * FROM ifood_lojas WHERE tenant_id=$1 AND merchant_id=$2',tenant_id,merchant_id)
     if not r: return _falha(404,'NOT_FOUND')
     try:
-        await cliente(request).loja(merchant_id);situacao='conectada'
+        await (await cliente(request)).loja(merchant_id);situacao='conectada'
     except ErroIfood as e:
         if e.motivo not in ('sem_permissao','nao_encontrado'): return _do_ifood(e)
         situacao='sem_permissao'
@@ -129,3 +136,40 @@ async def desligar(request:Request,tenant_id:str,merchant_id:str,body:Confirmaca
         await c.execute('DELETE FROM ifood_lojas WHERE merchant_id=$1',merchant_id)
         await auditar(c,tenant_id,actor,'ifood.loja_desligada',merchant_id,{'unidade':r['unidade']})
     return {'ok':True}
+
+
+TEXTO_SEGURO=re.compile(r'[\x21-\x7e]+')
+
+
+@router.get('/ifood/credenciais')
+async def credenciais(request:Request):
+    """Se há credenciais e de onde vêm. Nunca devolve o segredo: só os 4 últimos caracteres do Client ID."""
+    r=await request.app.state.db.fetchrow("SELECT id_final,atualizado_por,atualizado_em FROM integracao_credenciais WHERE provedor='ifood'")
+    if r: return {'configurado':True,'origem':'painel','client_id_final':r['id_final'],'atualizado_por':r['atualizado_por'],'atualizado_em':r['atualizado_em']}
+    env=Ifood(request.app.state.http,request.app.state.redis,request.app.state.cofre,_prefixo(request))
+    return {'configurado':env.configurado,'origem':'env' if env.configurado else None,'client_id_final':env._id[-4:] if env.configurado else None,
+            'atualizado_por':None,'atualizado_em':None}
+
+
+@router.put('/ifood/credenciais')
+async def gravar_credenciais(request:Request,dados:dict,actor=Depends(painel)):
+    """{"client_id","client_secret"}: testa no iFood (pede um token) e só então grava cifrado. Só com a chave de plataforma
+    (decisão do Marco de 06/11/2026): o papel de plataforma mandado com a chave de empresa é recusado aqui."""
+    if credencial(request)!='plataforma': return _falha(403,'papel_sem_credencial')
+    if set(dados)!={'client_id','client_secret'}: return _falha(400,'formato','corpo')
+    cid,seg=dados['client_id'],dados['client_secret']
+    if not isinstance(cid,str) or not 8<=len(cid.strip())<=200 or not TEXTO_SEGURO.fullmatch(cid.strip()): return _falha(400,'formato','client_id')
+    if not isinstance(seg,str) or not 8<=len(seg.strip())<=500 or not TEXTO_SEGURO.fullmatch(seg.strip()): return _falha(400,'formato','client_secret')
+    estado=request.app.state
+    novo=Ifood(estado.http,estado.redis,estado.cofre,_prefixo(request),client_id=cid.strip(),client_secret=seg.strip())
+    try: await novo.token()
+    except ErroIfood as e:
+        return _falha(400,'credenciais_recusadas','client_secret') if e.motivo=='autenticacao' else _do_ifood(e)
+    async with estado.db.acquire() as c,c.transaction():
+        antes=await c.fetchval("SELECT id_final FROM integracao_credenciais WHERE provedor='ifood' FOR UPDATE")
+        await c.execute("""INSERT INTO integracao_credenciais(provedor,valor_enc,id_final,atualizado_por) VALUES ('ifood',$1,$2,$3)
+            ON CONFLICT (provedor) DO UPDATE SET valor_enc=EXCLUDED.valor_enc,id_final=EXCLUDED.id_final,atualizado_por=EXCLUDED.atualizado_por,atualizado_em=now()""",
+            novo.cifradas(),novo._id[-4:],actor)
+        # Só o fim do Client ID e quem trocou; o segredo nunca vai para a auditoria.
+        await auditar(c,None,actor,'ifood.credenciais_alteradas','ifood',{'client_id_final_antes':antes,'client_id_final':novo._id[-4:]})
+    return await credenciais(request)

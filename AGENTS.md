@@ -14,7 +14,7 @@ Leia antes de qualquer alteração. Estas regras valem para todas as sessões e 
 
 - **Nunca escrever nome, telefone ou qualquer dado de cliente em docs, PROGRESS.md, testes, fixtures ou mensagens de commit.** Use "cliente real do By Koji em 16/10" e números fictícios (`55119000000NN`).
 - Cópias integrais com dados reais, quando forem indispensáveis, ficam fora do git, em `/home/twadmin/backups/gateway/docs-fora-do-git/` (permissão 600).
-- Nenhum segredo (token, chave, senha, URL de webhook com `?s=`) no repositório, no chat ou na linha de comando. Segredos ficam só no `.env` da VPS. Credenciais de canal entram só por `scripts/canal_credencial.py`.
+- Nenhum segredo (token, chave, senha, URL de webhook com `?s=`) no repositório, no chat ou na linha de comando. Segredos ficam só no `.env` da VPS. Credenciais de canal entram só por `scripts/canal_credencial.py`. Exceção (decisão do Marco, 06/11/2026): as credenciais do aplicativo do iFood entram pelo painel (`PUT /admin/v1/ifood/credenciais`), só com a `PANEL_PLATFORM_KEY`; são testadas no iFood antes de gravar, ficam cifradas e nunca são devolvidas.
 
 ## Trabalho
 

@@ -105,3 +105,51 @@ def test_lojas_do_ifood_token_unico_e_so_plataforma_liga(monkeypatch):
             assert await conn.fetchval("SELECT count(*) FROM audit_log WHERE acao='ifood.loja_desligada'")==1
             await app.state.http.aclose()
     banco(cenario)
+
+
+def test_credenciais_pelo_painel_so_com_a_chave_de_plataforma(monkeypatch):
+    """Decisão do Marco (06/11/2026): Client ID e Secret entram pelo painel, só com a PANEL_PLATFORM_KEY; testados no iFood antes de
+    gravar; cifrados; nunca devolvidos; valem sobre o .env; trocar não reaproveita o token das antigas."""
+    from cryptography.fernet import Fernet
+    from plataforma import Infra,criar_app
+    from test_admin import Pool
+    PLAT,EMPRESA='d'*32,'a'*32
+    monkeypatch.delenv('IFOOD_CLIENT_ID',raising=False);monkeypatch.delenv('IFOOD_CLIENT_SECRET',raising=False)
+    async def cenario(conn):
+        await migrar.aplicar(conn)
+        infra=Infra(EMPRESA,'b'*32,'c'*32,Fernet.generate_key().decode(),panel_platform_key=PLAT);infra.validar()
+        app=criar_app(infra,Pool(conn),RedisSimples());falso=IfoodFalso()
+        app.state.http=httpx.AsyncClient(transport=httpx.MockTransport(falso))
+        c=httpx.AsyncClient(transport=httpx.ASGITransport(app=app,client=('127.0.0.1',1234)),base_url='http://teste')
+        def h(chave,papel='plataforma'): return {'Authorization':'Bearer '+chave,'X-Actor':'marco@exemplo.test','X-Role':papel}
+        q='/admin/v1/ifood/credenciais'
+        async with c:
+            assert (await c.get(q,headers=h(PLAT))).json()['configurado'] is False
+            certo={'client_id':'app-teste','client_secret':SEGREDO}
+            # Papel de plataforma com a chave de empresa: recusado nesta rota, mesmo na fase A; gestor também.
+            r=await c.put(q,json=certo,headers=h(EMPRESA));assert (r.status_code,r.json()['erro']['detalhes']['motivo'])==(403,'papel_sem_credencial')
+            assert (await c.put(q,json=certo,headers=h(EMPRESA,'gestor'))).status_code==403
+            assert (await c.get(q,headers=h(EMPRESA,'gestor'))).status_code==403
+            # Formato e credencial recusada pelo iFood: nada gravado, valor nunca repetido.
+            for corpo,campo in (({'client_id':'app-teste'},'corpo'),({**certo,'x':1},'corpo'),({**certo,'client_id':'curto'},'client_id'),
+                                ({**certo,'client_secret':'com espaco no meio'},'client_secret')):
+                r=await c.put(q,json=corpo,headers=h(PLAT));assert (r.status_code,r.json()['erro']['detalhes']['campo'])==(400,campo),corpo
+            r=await c.put(q,json={'client_id':'app-teste','client_secret':'segredo-errado-ficticio'},headers=h(PLAT))
+            assert (r.status_code,r.json()['erro']['detalhes']['motivo'])==(400,'credenciais_recusadas') and 'segredo-errado' not in r.text
+            assert await conn.fetchval('SELECT count(*) FROM integracao_credenciais')==0
+            # Grava: testado no iFood, cifrado, só o fim do Client ID volta.
+            r=await c.put(q,json=certo,headers=h(PLAT));assert r.status_code==200,r.text
+            assert {k:r.json()[k] for k in ('configurado','origem','client_id_final','atualizado_por')}=={'configurado':True,'origem':'painel','client_id_final':'este','atualizado_por':'marco@exemplo.test'}
+            assert SEGREDO not in r.text and 'app-teste' not in r.text
+            linha=await conn.fetchrow('SELECT * FROM integracao_credenciais');assert SEGREDO not in linha['valor_enc'] and 'app-teste' not in linha['valor_enc']
+            a=await conn.fetchrow("SELECT tenant_id,actor,dados FROM audit_log WHERE acao='ifood.credenciais_alteradas'")
+            assert a['tenant_id'] is None and a['actor']=='marco@exemplo.test' and SEGREDO not in a['dados'] and 'app-teste' not in a['dados']
+            # Valem para as outras rotas, sem .env, e o token pedido no teste é reaproveitado.
+            r=await c.get('/admin/v1/ifood/lojas-autorizadas',headers=h(PLAT));assert r.status_code==200 and len(r.json()['itens'])==2
+            assert falso.tokens==1
+            # Gravadas pelo painel valem sobre o .env.
+            monkeypatch.setenv('IFOOD_CLIENT_ID','outro-app-do-env');monkeypatch.setenv('IFOOD_CLIENT_SECRET','outro-segredo-do-env-ficticio')
+            assert (await c.get('/admin/v1/ifood/lojas-autorizadas',headers=h(PLAT))).status_code==200 and falso.tokens==1
+            assert (await c.get(q,headers=h(PLAT))).json()['origem']=='painel'
+            await app.state.http.aclose()
+    banco(cenario)

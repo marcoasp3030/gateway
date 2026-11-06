@@ -17,7 +17,7 @@ Nada aqui recebe, aceita ou despacha pedido do iFood. Também não muda a loja: 
 ## 2. Como a empresa se conecta (aplicativo centralizado)
 
 - **Aplicativo:** a Ticway tem **um** aplicativo aprovado no portal de desenvolvedor do iFood.
-  - O `clientId` e o `clientSecret` ficam só no `.env` da VPS, como `IFOOD_CLIENT_ID` e `IFOOD_CLIENT_SECRET`. O Marco grava esses valores, que nunca aparecem no chat, no repositório nem em log.
+  - O `clientId` e o `clientSecret` entram pelo painel, só com a chave de plataforma (seção 2a). O `.env` (`IFOOD_CLIENT_ID`, `IFOOD_CLIENT_SECRET`) fica como alternativa. Esses valores nunca aparecem no chat, no repositório nem em log.
 - **Token:** o token é **um só para todas as lojas**.
   - Ele é pedido com `grantType=client_credentials` em `POST /authentication/v1.0/oauth/token`.
   - Fica guardado no Redis até perto de vencer, e só um processo renova por vez.
@@ -39,6 +39,13 @@ Nada aqui recebe, aceita ou despacha pedido do iFood. Também não muda a loja: 
   - 503 `nao_configurado`, quando o `.env` ainda não tem as credenciais;
   - 502 `autenticacao`, `sem_permissao`, `limite`, `indisponivel` ou `formato_inesperado`.
 - **Formato das respostas:** o formato da lista de lojas (`id`, `name`, `corporateName`) e do token (`accessToken`, `expiresIn`) foi usado como o iFood documenta. Se a especificação oficial disser outro, a resposta vira `formato_inesperado` e eu ajusto.
+- **Credenciais pelo painel (decisão do Marco de 06/11/2026):**
+  - `GET` e `PUT /admin/v1/ifood/credenciais`, com o corpo `{"client_id","client_secret"}`.
+  - **O `PUT` só aceita a chave de plataforma** (`PANEL_PLATFORM_KEY`). O papel de plataforma enviado com a chave de empresa recebe 403 `papel_sem_credencial` nesta rota, mesmo na fase A do CHAVES1.
+  - O gateway pede um token ao iFood com os valores digitados. Se o iFood recusar, a resposta é 400 `credenciais_recusadas` e nada é gravado.
+  - Os valores ficam cifrados em `integracao_credenciais` (migração 066) e nunca são devolvidos. A resposta e a auditoria (`ifood.credenciais_alteradas`, sem empresa) trazem só os 4 últimos caracteres do Client ID e quem trocou.
+  - As credenciais gravadas pelo painel valem sobre `IFOOD_CLIENT_ID`/`IFOOD_CLIENT_SECRET` do `.env`, que fica como alternativa.
+  - O token é guardado separado por aplicativo, então trocar as credenciais não reaproveita o token das antigas.
 - **Testes:** `tests/test_ifood1a.py`, com iFood simulado.
 
 ## 3. O que é buscado no iFood

@@ -9,6 +9,8 @@ LEGADOS={'admin':'gestor','membro':'funcionario'}
 PERMISSOES={
     ('GET','/auditoria/plataforma'):'plataforma',
     ('GET','/fila'):'plataforma',
+    ('GET','/ifood/credenciais'):'plataforma',
+    ('PUT','/ifood/credenciais'):'plataforma',
     ('GET','/ifood/lojas-autorizadas'):'plataforma',
     ('GET','/modelos-agente'):'plataforma',
     ('POST','/modelos-agente'):'plataforma',

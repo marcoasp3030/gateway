@@ -1,9 +1,11 @@
 """IFOOD1 (docs/ESPEC_IFOOD1.md): cliente do iFood como aplicativo centralizado.
 
 Um token para todas as lojas (grantType=client_credentials), guardado cifrado no Redis até perto de vencer. Só um processo
-renova por vez, e só ao vencer ou com 401: pedir token demais bloqueia o aplicativo no iFood. O segredo vem do .env
-(IFOOD_CLIENT_ID / IFOOD_CLIENT_SECRET) e nunca vai para log, resposta ou banco."""
+renova por vez, e só ao vencer ou com 401: pedir token demais bloqueia o aplicativo no iFood.
+Credenciais: as gravadas pelo painel (integracao_credenciais, cifradas, só com a chave de plataforma) valem sobre as do .env
+(IFOOD_CLIENT_ID / IFOOD_CLIENT_SECRET). Nunca vão para log nem resposta."""
 import asyncio
+import hashlib
 import os
 import httpx
 
@@ -18,14 +20,34 @@ class ErroIfood(Exception):
 
 
 class Ifood:
-    def __init__(self,http,redis,cofre,prefixo='gw'):
-        self.http=http;self.redis=redis;self.cofre=cofre
+    def __init__(self,http,redis,cofre,prefixo='gw',client_id=None,client_secret=None):
+        self.http=http;self.redis=redis;self.cofre=cofre;self.prefixo=prefixo
         self.base=os.getenv('IFOOD_BASE_URL','https://merchant-api.ifood.com.br').rstrip('/')
-        self._id=os.getenv('IFOOD_CLIENT_ID','');self._segredo=os.getenv('IFOOD_CLIENT_SECRET','')
-        self.k_token=f'{prefixo}:ifood:token';self.k_trava=f'{prefixo}:ifood:token:trava'
+        self.origem=None
+        self._usar(client_id if client_id is not None else os.getenv('IFOOD_CLIENT_ID',''),
+                   client_secret if client_secret is not None else os.getenv('IFOOD_CLIENT_SECRET',''),
+                   'informada' if client_id is not None else 'env')
+
+    def _usar(self,client_id,segredo,origem):
+        self._id=client_id or '';self._segredo=segredo or '';self.origem=origem if self.configurado else None
+        # Token separado por aplicativo: trocar as credenciais não reaproveita o token das antigas.
+        marca=hashlib.sha256(self._id.encode()).hexdigest()[:12]
+        self.k_token=f'{self.prefixo}:ifood:token:{marca}';self.k_trava=f'{self.prefixo}:ifood:token:{marca}:trava'
+
+    async def carregar(self,db):
+        """Usa as credenciais gravadas pelo painel, se houver; senão, as do .env."""
+        v=await db.fetchval("SELECT valor_enc FROM integracao_credenciais WHERE provedor='ifood'")
+        if v:
+            try: d=self.cofre.abrir(CHAVE_COFRE,v)
+            except Exception: raise ErroIfood('nao_configurado') from None
+            self._usar(d.get('client_id'),d.get('client_secret'),'painel')
+        return self
 
     @property
     def configurado(self): return bool(self._id and self._segredo)
+
+    def cifradas(self):
+        return self.cofre.cifrar(CHAVE_COFRE,{'client_id':self._id,'client_secret':self._segredo})
 
     async def _guardado(self):
         cifrado=await self.redis.get(self.k_token)

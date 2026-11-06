@@ -1501,6 +1501,15 @@ PY
 - **Página pública.** `cardapio/ler` traz `redes` (só as ativas, com `url` e `rotulo`), também na resposta do link já usado.
 - **Migração 063.** Testes em `tests/test_card_redes.py`. A tela é do [PAINEL].
 
+## IFOOD1-a: credenciais do iFood pelo painel — 2026-11-06
+
+- **Decisão do Marco.** O Client ID e o Client Secret do aplicativo do iFood entram pelo painel, em `PUT /admin/v1/ifood/credenciais`.
+- **Só com a chave de plataforma.** A rota aceita só a `PANEL_PLATFORM_KEY`. Com a chave de empresa, mesmo com o papel de plataforma, a resposta é 403 `papel_sem_credencial`. É a primeira rota do CHAVES1 que exige a chave de plataforma.
+- **Antes de gravar.** O gateway testa os valores no iFood. Se o iFood recusar, nada é gravado.
+- **Guarda e leitura.** Os valores ficam cifrados (migração 066) e nunca voltam. A tela mostra só os 4 últimos caracteres do Client ID e quem trocou.
+- **Prioridade.** As credenciais gravadas pelo painel valem sobre as do `.env`.
+- **Regra atualizada** no AGENTS.md. Testes em `tests/test_ifood1a.py`.
+
 ## IFOOD1-a: lojas do iFood ligadas às empresas — 2026-11-06
 
 - **O que é.** Primeira parte da integração com o iFood. A especificação e as decisões do Marco estão em `docs/ESPEC_IFOOD1.md`.
