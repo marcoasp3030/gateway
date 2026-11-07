@@ -190,7 +190,10 @@ async def detalhe(request:Request,tenant_id:str,order_id:str):
     if not r: return _falha(404,'NOT_FOUND')
     eventos=[dict(e) for e in await db.fetch('SELECT codigo,criado_em,recebido_em FROM ifood_eventos WHERE tenant_id=$1 AND order_id=$2 ORDER BY coalesce(criado_em,recebido_em),id',
                                              tenant_id,order_id)]
-    return {**_pedido(r,True),'eventos':eventos}
+    # IFOOD1-b2: o que o iFood creditou e descontou neste pedido (comissão, taxas), quando o financeiro já foi coletado.
+    financeiro=[{'nome':f['nome'],'descricao':f['descricao'],'valor':float(f['valor']),'com_repasse':f['com_repasse'],'taxa_pct':float(f['taxa_pct']) if f['taxa_pct'] is not None else None,
+                 'pagamento_previsto':f['pagamento_previsto']} for f in await db.fetch('SELECT * FROM ifood_fin_eventos WHERE tenant_id=$1 AND ref_id=$2 ORDER BY data,id',tenant_id,order_id)]
+    return {**_pedido(r,True),'eventos':eventos,'financeiro':financeiro}
 
 
 @router.post('/tenants/{tenant_id}/ifood/pedidos/atualizar')

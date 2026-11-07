@@ -1501,6 +1501,17 @@ PY
 - **Página pública.** `cardapio/ler` traz `redes` (só as ativas, com `url` e `rotulo`), também na resposta do link já usado.
 - **Migração 063.** Testes em `tests/test_card_redes.py`. A tela é do [PAINEL].
 
+## IFOOD1-b2: financeiro do iFood — 2026-11-07
+
+- **Fonte.** Os eventos financeiros do iFood: vendas, comissões, taxas e cancelamentos, cada um com o valor e com a informação se entra no repasse.
+- **Painel.** Mostra créditos, débitos, repasse líquido, o que a loja recebeu direto, a divisão por tipo, por dia e por forma de pagamento, e o que ainda vai ser pago, por data prevista.
+- **Pedido.** O detalhe de cada pedido do iFood mostra a comissão e as taxas dele.
+- **Coleta.**
+  - Acontece sozinha a cada 6 h, quando o painel abre, ou pelo botão "Atualizar".
+  - A primeira busca 90 dias de histórico; as seguintes, os últimos 8 dias.
+  - Coletar de novo não duplica.
+- **Migração 068.** Testes em `tests/test_ifood1b.py`.
+
 ## IFOOD1-b1: pedidos do iFood por webhook — 2026-11-07
 
 - **O que é.** O iFood avisa cada pedido em `POST /webhooks/ifood`, com o aviso assinado pela chave do aplicativo. O gateway grava o pedido, acompanha o status e busca o detalhe: itens, valores, pagamento, nome do cliente e bairro. Não grava telefone, documento nem endereço.

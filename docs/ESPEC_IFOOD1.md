@@ -77,6 +77,32 @@ Nada aqui recebe, aceita ou despacha pedido do iFood. Também não muda a loja: 
 - **Testes:** `tests/test_ifood1b.py`.
 - **Ainda falta (IFOOD1-b2):** financeiro, avaliações e indicadores do iFood. Falta a especificação (Schemas) do Financial v3 e do Review v2. A do Analytics v1 o Marco já mandou.
 
+## 2c. IFOOD1-b2: financeiro do iFood, implementada em 07/11/2026
+
+- **Fonte:** a API Financial Events v3 (`GET /financial/v3.0/merchants/{id}/financial-events`, com `beginDate`, `endDate`, `page` e `size`), conforme a página da documentação que o Marco mandou em 07/11.
+  - Cada evento traz o valor (positivo é crédito, negativo é débito), se entra no repasse (`hasTransferImpact`), a data prevista de pagamento, o pedido e a forma de pagamento.
+  - **Repasse líquido** é a soma dos eventos com `hasTransferImpact`. Pedido pago direto à loja vem com `false`, mas a comissão dele vem com `true`.
+- **Coleta:**
+  - em janelas de 7 dias (o iFood aceita até 33), página a página;
+  - a primeira coleta pega 90 dias; as seguintes refazem os últimos 8 dias, porque há eventos que chegam atrasados;
+  - a API não dá id ao evento, então cada janela coletada substitui os eventos da loja naquelas datas. Coletar de novo corrige sem duplicar;
+  - acontece sozinha quando o painel abre e a última coleta passou de 6 h, ou pelo botão "Atualizar" (no máximo a cada 10 min por loja);
+  - só uma coleta por loja de cada vez. Se der erro, ele fica gravado e os dados anteriores continuam.
+- **Dados (migração 068):**
+  - `ifood_fin_eventos`, sem o documento da loja nem dado de cliente;
+  - `ifood_coletas`, com a situação de cada coleta.
+- **Painel (gestor):**
+  - `GET /admin/v1/tenants/{t}/ifood/financeiro?de&ate&loja` (padrão: 30 dias) traz:
+    - `resumo`: créditos, débitos, repasse líquido, recebido direto pela loja, pedidos e eventos;
+    - `por_tipo`: por nome e descrição do evento;
+    - `por_dia` e `por_forma`;
+    - `a_receber`: o repasse com data prevista de hoje em diante;
+    - `coletas`: por loja, com o último sucesso, o erro e se está coletando.
+  - `POST …/ifood/financeiro/atualizar` coleta agora.
+  - O detalhe do pedido do iFood ganha `financeiro`: o que o iFood creditou e descontou nele.
+- **Testes:** `tests/test_ifood1b.py`.
+- **Ainda falta:** repasses já pagos (API Settlements), avaliações (Review) e indicadores (Analytics).
+
 ## 3. O que é buscado no iFood
 
 As rotas de leitura são as da referência que o Marco enviou (`integracao_ifood_documentacao_completa.md`). Os campos exatos vêm da especificação oficial (seção 8).

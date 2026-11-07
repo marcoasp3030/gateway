@@ -116,3 +116,75 @@ def test_pedidos_do_ifood_por_webhook(monkeypatch):
             assert v['resumo']['pedidos']==0
             await app.state.http.aclose()
     banco(cenario)
+
+
+class IfoodFinanceiro(IfoodComPedidos):
+    """Eventos financeiros por data; páginas de 2 para exercitar hasNextPage."""
+    def __init__(self):
+        super().__init__();self.fin=[];self.consultas=0
+    def __call__(self,req):
+        p=req.url.path
+        if p.endswith('/financial-events') and req.headers.get('authorization','').removeprefix('Bearer ') in self.validos:
+            if p in self.forcar: return httpx.Response(self.forcar[p])
+            self.consultas+=1;q=req.url.params
+            sel=[e for e in self.fin if q['beginDate']<=e['dateTime'][:10]<=q['endDate']]
+            if not sel: return httpx.Response(204)
+            pg=int(q['page']);fatia=sel[(pg-1)*2:pg*2]
+            return httpx.Response(200,json={'page':pg,'size':2,'hasNextPage':len(sel)>pg*2,'financialEvents':fatia})
+        return super().__call__(req)
+
+
+def fin(dia,nome,valor,repasse,pedido=None,previsto=None,forma='CREDIT',taxa=None):
+    return {'name':nome,'description':nome,'product':'IFOOD','trigger':'ORDER_CONCLUDED','dateTime':f'{dia.isoformat()}T00:00:00Z',
+            'competence':dia.isoformat()[:7],'reference':{'type':'ORDER','id':pedido,'date':dia.isoformat()} if pedido else {},
+            'hasTransferImpact':repasse,'amount':{'value':valor},'billing':{'baseValue':100,'feePercentage':taxa} if taxa else {},
+            'settlement':{'expectedDate':previsto.isoformat()} if previsto else {},'receiver':{'merchantId':'loja-a-1','merchantDocument':'00000000000000'},
+            'payment':{'method':forma,'brand':'VISA','liability':'INTERNAL'}}
+
+
+def test_financeiro_do_ifood(monkeypatch):
+    from zoneinfo import ZoneInfo
+    monkeypatch.setenv('IFOOD_CLIENT_ID','app-teste');monkeypatch.setenv('IFOOD_CLIENT_SECRET',SEGREDO)
+    async def cenario(conn):
+        await migrar.aplicar(conn)
+        app,client=preparar(conn);falso=IfoodFinanceiro()
+        app.state.redis=RedisSimples();app.state.http=httpx.AsyncClient(transport=httpx.MockTransport(falso))
+        hoje=datetime.now(ZoneInfo('America/Sao_Paulo')).date();d1=hoje-timedelta(days=1);d2=hoje-timedelta(days=2);velho=hoje-timedelta(days=60)
+        falso.fin=[fin(d1,'SALE_CONCLUDED',100,True,'ped-1',hoje+timedelta(days=3)),fin(d1,'ORDER_COMMISSION',-12,True,'ped-1',hoje+timedelta(days=3),taxa=12),
+                   fin(d2,'SALE_CONCLUDED',50,False,'ped-2',forma='PIX'),fin(d2,'ORDER_COMMISSION',-6,True,'ped-2',hoje+timedelta(days=3),taxa=12),
+                   fin(velho,'SALE_CONCLUDED',30,True,'ped-0',velho+timedelta(days=7))]
+        async with client:
+            assert (await client.put(f'/admin/v1/tenants/{T}/ifood/lojas/loja-a-1',json={})).status_code==200
+            await conn.execute("INSERT INTO ifood_pedidos(order_id,tenant_id,merchant_id,criado_em,status) VALUES ('ped-1',$1,'loja-a-1',now(),'CONCLUDED')",T)
+            q=f'/admin/v1/tenants/{T}/ifood/financeiro'
+            assert (await client.get(q,headers=SUP)).status_code==403
+            # Primeira vez: responde com o que há (nada) e coleta 90 dias depois da resposta.
+            r=(await client.get(q,headers=GESTOR)).json();assert r['resumo']['eventos']==0
+            assert await conn.fetchval('SELECT count(*) FROM ifood_fin_eventos')==5
+            assert DOC not in str([dict(x) for x in await conn.fetch('SELECT * FROM ifood_fin_eventos')]) and '00000000000000' not in str([dict(x) for x in await conn.fetch('SELECT * FROM ifood_fin_eventos')])
+            r=(await client.get(q,headers=GESTOR)).json()
+            assert r['resumo']=={'creditos':150.0,'debitos':-18.0,'repasse_liquido':82.0,'recebido_direto':50.0,'pedidos':2,'eventos':4}
+            assert r['a_receber']=={'total':82.0,'por_data':[{'data':(hoje+timedelta(days=3)).isoformat(),'valor':82.0}]}
+            assert {(x['forma'],x['valor']) for x in r['por_forma']}=={('CREDIT',100.0),('PIX',50.0)} and len(r['por_dia'])==2
+            assert r['coletas'][0]['erro'] is None and r['coletas'][0]['coletado_desde']==(hoje-timedelta(days=89)).isoformat()
+            # Detalhe do pedido mostra o que o iFood creditou e descontou nele.
+            d=(await client.get(f'/admin/v1/tenants/{T}/ifood/pedidos/ped-1',headers=GESTOR)).json()['financeiro']
+            assert [(x['nome'],x['valor'],x['taxa_pct']) for x in d]==[('SALE_CONCLUDED',100.0,None),('ORDER_COMMISSION',-12.0,12.0)]
+            # Atualizar há menos de 10 min: não consulta de novo. Depois disso: refaz só os últimos 8 dias, corrigindo sem duplicar.
+            antes=falso.consultas
+            assert (await client.post(q+'/atualizar',headers=GESTOR)).json()=={'coletando':1} and falso.consultas==antes
+            await conn.execute("UPDATE ifood_coletas SET sucesso_em=now()-interval '1 hour'")
+            falso.fin[1]=fin(d1,'ORDER_COMMISSION',-15,True,'ped-1',hoje+timedelta(days=3),taxa=15)
+            await client.post(q+'/atualizar',headers=GESTOR)
+            assert falso.consultas-antes<=4 and await conn.fetchval('SELECT count(*) FROM ifood_fin_eventos')==5
+            assert (await client.get(q,headers=GESTOR)).json()['resumo']['repasse_liquido']==79.0
+            # Período antigo continua lá; filtro de datas.
+            assert (await client.get(q+f'?de={velho.isoformat()}&ate={velho.isoformat()}',headers=GESTOR)).json()['resumo']['creditos']==30.0
+            # Loja sem permissão no financeiro: erro gravado, dados anteriores ficam.
+            await conn.execute("UPDATE ifood_coletas SET sucesso_em=now()-interval '1 hour'")
+            falso.forcar['/financial/v3.0/merchants/loja-a-1/financial-events']=403
+            await client.post(q+'/atualizar',headers=GESTOR)
+            r=(await client.get(q,headers=GESTOR)).json()
+            assert r['coletas'][0]['erro']=='sem_permissao' and r['resumo']['eventos']==4
+            await app.state.http.aclose()
+    banco(cenario)
