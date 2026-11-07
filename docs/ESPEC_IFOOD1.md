@@ -48,6 +48,35 @@ Nada aqui recebe, aceita ou despacha pedido do iFood. Também não muda a loja: 
   - O token é guardado separado por aplicativo, então trocar as credenciais não reaproveita o token das antigas.
 - **Testes:** `tests/test_ifood1a.py`, com iFood simulado.
 
+## 2b. IFOOD1-b1: pedidos do iFood por webhook, implementada em 07/11/2026
+
+- **Decisões do Marco (07/11/2026):**
+  - tudo aparece no painel: pedidos, financeiro, avaliações e indicadores;
+  - os pedidos chegam por **webhook**, não por consulta periódica. A consulta periódica é o que mantém a loja "online" no iFood; se ela continuasse depois que a loja fechasse o próprio sistema, entrariam pedidos que ninguém aceita.
+- **Formato:** confirmado com uma consulta de leitura na loja de teste, em 07/11. Os eventos trazem `id`, `code`, `fullCode`, `orderId`, `merchantId`, `createdAt` e `salesChannel`. O detalhe vem em `GET /order/v1.0/orders/{id}`.
+- **Webhook:** `POST /webhooks/ifood`, pelo endereço `https://painel.luxbrain.com.br/gateway/webhooks/ifood`, que o Marco cadastra no portal do iFood.
+  - **Assinatura:** `X-IFood-Signature` é o HMAC-SHA256 do corpo bruto com a chave secreta do aplicativo. Aceita em hexadecimal ou base64.
+  - **Respostas:** assinatura errada → 401; sem credenciais → 503; certo → 202.
+  - **Gravação:** o evento é gravado uma vez só (por `id`). Loja que não está ligada a nenhuma empresa é ignorada.
+  - **Status:** um evento atrasado não faz o status voltar; o cancelamento vale sempre.
+  - **Detalhe:** é buscado depois da resposta. Se falhar, conta tentativa (até 10) e o botão "Atualizar" do painel busca de novo.
+  - **Sem confirmação nem consulta:** o webhook do iFood não tem confirmação de recebimento, e o gateway não faz consulta periódica.
+- **Dados (migração 067):**
+  - `ifood_eventos`;
+  - `ifood_pedidos`: número, status, se é teste, tipo, canal, valores, pagamentos, itens, id e nome do cliente no iFood e bairro.
+  - **Não grava** telefone, documento, e-mail nem endereço do cliente.
+- **Painel (gestor):**
+  - `GET /admin/v1/tenants/{t}/ifood/pedidos` (filtros `de`, `ate`, `status`, `loja`, `teste`, `limite`, `antes`);
+  - `GET …/ifood/pedidos/{order_id}`, com os eventos;
+  - `POST …/ifood/pedidos/atualizar`, que busca até 20 detalhes pendentes.
+- **Visão de vendas:** `GET …/pedidos/indicadores` ganha o bloco `ifood`.
+  - Traz resumo, período anterior, variação, evolução e os 20 produtos que mais venderam no iFood.
+  - Venda é confirmado em diante. Pedido de teste do iFood só entra com `origem=…,teste`.
+  - O filtro de unidade usa a unidade a que a loja está ligada.
+  - O bloco vem `null` se a empresa não tiver loja do iFood.
+- **Testes:** `tests/test_ifood1b.py`.
+- **Ainda falta (IFOOD1-b2):** financeiro, avaliações e indicadores do iFood. Falta a especificação (Schemas) do Financial v3 e do Review v2. A do Analytics v1 o Marco já mandou.
+
 ## 3. O que é buscado no iFood
 
 As rotas de leitura são as da referência que o Marco enviou (`integracao_ifood_documentacao_completa.md`). Os campos exatos vêm da especificação oficial (seção 8).

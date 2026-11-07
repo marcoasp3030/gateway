@@ -125,6 +125,37 @@ def _cliente(r,extra=None):
             'ticket_medio':_d(r['faturamento']/r['pedidos']),'primeiro_pedido_em':r['primeiro_pedido_em'],'ultimo_pedido_em':r['ultimo_pedido_em'],**(extra or {})}
 
 
+IFOOD_VENDA=('CONFIRMED','SEPARATION_STARTED','SEPARATION_ENDED','READY_TO_PICKUP','DISPATCHED','CONCLUDED')
+DE_IFOOD="""FROM ifood_pedidos f LEFT JOIN ifood_lojas l ON l.merchant_id=f.merchant_id
+    WHERE f.tenant_id=$1 AND f.criado_em>=$2 AND f.criado_em<$3 AND ($4::text IS NULL OR l.unidade=$4) AND ($5 OR NOT f.teste)"""
+
+
+async def _ifood(db,tenant_id,unidade,origens,inicio,fim,ant_inicio,ant_fim,de,ate,agrupar):
+    """IFOOD1-b1 (decisão 4 do Marco): o iFood na Visão de vendas, para comparar os canais. Pedido de teste do iFood só entra com
+    origem=teste. None quando a empresa não tem loja do iFood ligada."""
+    if not await db.fetchval('SELECT EXISTS(SELECT 1 FROM ifood_lojas WHERE tenant_id=$1)',tenant_id): return None
+    teste='teste' in origens
+    async def resumo(a,b):
+        r=await db.fetchrow(f"""SELECT count(*) FILTER (WHERE f.status IN {IFOOD_VENDA}) AS pedidos,sum(f.total) FILTER (WHERE f.status IN {IFOOD_VENDA}) AS faturamento,
+            count(*) FILTER (WHERE f.status='CANCELLED') AS cancelados,count(*) FILTER (WHERE f.status='PLACED') AS aguardando,count(*) AS recebidos,
+            count(DISTINCT f.cliente_id) FILTER (WHERE f.status IN {IFOOD_VENDA}) AS clientes {DE_IFOOD}""",tenant_id,a,b,unidade,teste)
+        n=r['pedidos']
+        return {'pedidos':n,'faturamento':_d(r['faturamento']),'ticket_medio':_d(r['faturamento']/n) if n else 0.0,'clientes':r['clientes'],
+                'cancelados':r['cancelados'],'aguardando':r['aguardando'],'recebidos':r['recebidos']}
+    atual=await resumo(inicio,fim);anterior=await resumo(ant_inicio,ant_fim)
+    serie={r['balde']:r for r in await db.fetch(f"""SELECT date_trunc('{ {'dia':'day','semana':'week','mes':'month'}[agrupar] }',f.criado_em AT TIME ZONE 'America/Sao_Paulo')::date AS balde,
+            count(*) AS pedidos,sum(f.total) AS faturamento {DE_IFOOD} AND f.status IN {IFOOD_VENDA} GROUP BY 1""",tenant_id,inicio,fim,unidade,teste)}
+    produtos=[{'nome':r['nome'],'quantidade':int(r['quantidade'] or 0),'faturamento':_d(r['faturamento'])} for r in await db.fetch(f"""
+        SELECT i->>'nome' AS nome,sum((i->>'quantidade')::numeric) AS quantidade,sum((i->>'total')::numeric) AS faturamento
+        {DE_IFOOD.replace('WHERE f.tenant_id','CROSS JOIN LATERAL jsonb_array_elements(f.itens) i WHERE f.tenant_id')} AND f.status IN {IFOOD_VENDA}
+        AND jsonb_typeof(i->'quantidade')='number' GROUP BY 1 ORDER BY 3 DESC NULLS LAST,1 LIMIT 20""",tenant_id,inicio,fim,unidade,teste)]
+    return {'resumo':atual,'anterior':anterior,
+            'variacao_pct':{k:_variacao(atual[k],anterior[k]) for k in ('faturamento','pedidos','ticket_medio')},
+            'evolucao':[{'inicio':b,'pedidos':serie[b]['pedidos'] if b in serie else 0,'faturamento':_d(serie[b]['faturamento']) if b in serie else 0.0}
+                        for b in _baldes(de,ate,agrupar)],
+            'produtos':produtos}
+
+
 @router.get('/tenants/{tenant_id}/pedidos/indicadores')
 async def indicadores(request:Request,tenant_id:str,de:date|None=None,ate:date|None=None,unidade:str|None=None,origem:str|None=None,
                       agrupar:Literal['dia','semana','mes']|None=None,sumido_dias:int=Query(30,ge=7,le=365)):
@@ -241,4 +272,5 @@ async def indicadores(request:Request,tenant_id:str,de:date|None=None,ate:date|N
                         'categorias':sorted(categorias.values(),key=lambda c:-c['faturamento']),
                         'sem_venda':{'itens':sem_venda,'total':sem_venda_total}},
             'clientes':{'por_valor':por_valor,'por_frequencia':por_frequencia,'sumidos':{'itens':sumidos,'total':sumidos_total,'dias':sumido_dias}},
-            'pagamentos':pagamentos,'bairros':bairros,'operacao':{**operacao,'motivos_perda':motivos},'unidades':unidades}
+            'pagamentos':pagamentos,'bairros':bairros,'operacao':{**operacao,'motivos_perda':motivos},'unidades':unidades,
+            'ifood':await _ifood(db,tenant_id,unidade,origens,inicio,fim,ant_inicio,ant_fim,de,ate,agrupar)}

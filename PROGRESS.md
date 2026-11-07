@@ -1501,6 +1501,14 @@ PY
 - **Página pública.** `cardapio/ler` traz `redes` (só as ativas, com `url` e `rotulo`), também na resposta do link já usado.
 - **Migração 063.** Testes em `tests/test_card_redes.py`. A tela é do [PAINEL].
 
+## IFOOD1-b1: pedidos do iFood por webhook — 2026-11-07
+
+- **O que é.** O iFood avisa cada pedido em `POST /webhooks/ifood`, com o aviso assinado pela chave do aplicativo. O gateway grava o pedido, acompanha o status e busca o detalhe: itens, valores, pagamento, nome do cliente e bairro. Não grava telefone, documento nem endereço.
+- **Só leitura.** Nada é aceito ou despachado daqui. Não há consulta periódica, para não manter a loja "online" no iFood.
+- **Painel.** Lista e detalhe para gestor, e um botão para buscar os detalhes que ficaram pendentes.
+- **Visão de vendas.** Ganha o bloco `ifood` para comparar os canais.
+- **Migração 067.** Testes em `tests/test_ifood1b.py`.
+
 ## Chave de plataforma no ar — 2026-11-07
 
 - **O que mudou.** O Marco gravou a `PANEL_PLATFORM_KEY` no `.env` do gateway e o mesmo valor na `GATEWAY_PLATFORM_KEY` do painel. O valor não aparece em lugar nenhum.

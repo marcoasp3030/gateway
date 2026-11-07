@@ -302,6 +302,8 @@ def criar_app(infra,db=None,redis=None):
     # IFOOD1-a: lojas do iFood ligadas às empresas (docs/ESPEC_IFOOD1.md).
     from modulos.ifood.rotas import router as ifood_lojas
     app.include_router(ifood_lojas)
+    from modulos.ifood.pedidos import router as ifood_pedidos,publico as ifood_webhook
+    app.include_router(ifood_pedidos);app.include_router(ifood_webhook)
     # PED-BI: antes das rotas do módulo, senão /pedidos/indicadores cairia em /pedidos/{numero}.
     from modulos.pedidos.indicadores import router as indicadores_de_pedidos
     app.include_router(indicadores_de_pedidos)
