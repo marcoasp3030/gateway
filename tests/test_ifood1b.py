@@ -119,11 +119,16 @@ def test_pedidos_do_ifood_por_webhook(monkeypatch):
 
 
 class IfoodFinanceiro(IfoodComPedidos):
-    """Eventos financeiros por data; páginas de 2 para exercitar hasNextPage."""
+    """Eventos financeiros por data; páginas de 2 para exercitar hasNextPage. Repasses por data de pagamento (404 sem nenhum)."""
     def __init__(self):
-        super().__init__();self.fin=[];self.consultas=0
+        super().__init__();self.fin=[];self.consultas=0;self.titulos=[]
     def __call__(self,req):
         p=req.url.path
+        if p.endswith('/settlements') and req.headers.get('authorization','').removeprefix('Bearer ') in self.validos:
+            q=req.url.params;sel=[t for t in self.titulos if q['beginPaymentDate']<=t['paymentDate']<=q['endPaymentDate']]
+            if not sel: return httpx.Response(404,json={'message':'Nenhuma liquidação'})
+            return httpx.Response(200,json={'beginDate':q['beginPaymentDate'],'endDate':q['endPaymentDate'],'balance':sum(t['amount'] for t in sel),
+                                            'merchantId':'loja-a-1','settlements':[{'startDateCalculation':'2026-01-05','endDateCalculation':'2026-01-11','closingItems':sel}]})
         if p.endswith('/financial-events') and req.headers.get('authorization','').removeprefix('Bearer ') in self.validos:
             if p in self.forcar: return httpx.Response(self.forcar[p])
             self.consultas+=1;q=req.url.params
@@ -153,6 +158,10 @@ def test_financeiro_do_ifood(monkeypatch):
         falso.fin=[fin(d1,'SALE_CONCLUDED',100,True,'ped-1',hoje+timedelta(days=3)),fin(d1,'ORDER_COMMISSION',-12,True,'ped-1',hoje+timedelta(days=3),taxa=12),
                    fin(d2,'SALE_CONCLUDED',50,False,'ped-2',forma='PIX'),fin(d2,'ORDER_COMMISSION',-6,True,'ped-2',hoje+timedelta(days=3),taxa=12),
                    fin(velho,'SALE_CONCLUDED',30,True,'ped-0',velho+timedelta(days=7))]
+        banco_ficticio={'bankName':'BANCO TESTE','bankNumber':'999','branchCode':'0001','accountNumber':'44416444','accountDigit':'4','documentNumber':'24222444222444'}
+        falso.titulos=[{'id':'t-1','type':'REPASSE','product':'IFOOD','amount':500.0,'status':'SUCCEED','transactionId':'x','accountDetails':banco_ficticio,'paymentDate':d2.isoformat()},
+                       {'id':'t-2','type':'REGISTRO_RECEBIVEIS','product':'IFOOD','amount':120.0,'status':'SUCCEED','accountDetails':{},'paymentDate':d2.isoformat()},
+                       {'id':'t-3','type':'REPASSE','product':'IFOOD','amount':80.0,'status':'PENDING','accountDetails':banco_ficticio,'paymentDate':d1.isoformat()}]
         async with client:
             assert (await client.put(f'/admin/v1/tenants/{T}/ifood/lojas/loja-a-1',json={})).status_code==200
             await conn.execute("INSERT INTO ifood_pedidos(order_id,tenant_id,merchant_id,criado_em,status) VALUES ('ped-1',$1,'loja-a-1',now(),'CONCLUDED')",T)
@@ -167,6 +176,11 @@ def test_financeiro_do_ifood(monkeypatch):
             assert r['a_receber']=={'total':82.0,'por_data':[{'data':(hoje+timedelta(days=3)).isoformat(),'valor':82.0}]}
             assert {(x['forma'],x['valor']) for x in r['por_forma']}=={('CREDIT',100.0),('PIX',50.0)} and len(r['por_dia'])==2
             assert r['coletas'][0]['erro'] is None and r['coletas'][0]['coletado_desde']==(hoje-timedelta(days=89)).isoformat()
+            rep=r['repasses']
+            assert (rep['pago'],rep['pendente'],rep['retido_recebiveis'],rep['boletos'])==(500.0,80.0,120.0,0.0) and [x['titulo'] for x in rep['itens']]==['t-3','t-1','t-2']
+            # Dados bancários não são gravados.
+            tudo=str([dict(x) for x in await conn.fetch('SELECT * FROM ifood_repasses')])
+            assert '44416444' not in tudo and '24222444222444' not in tudo and 'BANCO TESTE' not in tudo
             # Detalhe do pedido mostra o que o iFood creditou e descontou nele.
             d=(await client.get(f'/admin/v1/tenants/{T}/ifood/pedidos/ped-1',headers=GESTOR)).json()['financeiro']
             assert [(x['nome'],x['valor'],x['taxa_pct']) for x in d]==[('SALE_CONCLUDED',100.0,None),('ORDER_COMMISSION',-12.0,12.0)]
@@ -175,7 +189,10 @@ def test_financeiro_do_ifood(monkeypatch):
             assert (await client.post(q+'/atualizar',headers=GESTOR)).json()=={'coletando':1} and falso.consultas==antes
             await conn.execute("UPDATE ifood_coletas SET sucesso_em=now()-interval '1 hour'")
             falso.fin[1]=fin(d1,'ORDER_COMMISSION',-15,True,'ped-1',hoje+timedelta(days=3),taxa=15)
+            falso.titulos[2]={**falso.titulos[2],'status':'SUCCEED'}
             await client.post(q+'/atualizar',headers=GESTOR)
+            rep=(await client.get(q,headers=GESTOR)).json()['repasses']
+            assert (rep['pago'],rep['pendente'])==(580.0,0.0) and await conn.fetchval('SELECT count(*) FROM ifood_repasses')==3
             assert falso.consultas-antes<=4 and await conn.fetchval('SELECT count(*) FROM ifood_fin_eventos')==5
             assert (await client.get(q,headers=GESTOR)).json()['resumo']['repasse_liquido']==79.0
             # Período antigo continua lá; filtro de datas.

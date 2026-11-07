@@ -77,6 +77,41 @@ COLUNAS=('data','nome','descricao','gatilho','produto','competencia','ref_tipo',
          'parcela','pagamento_previsto','forma_pagamento','bandeira','responsabilidade')
 
 
+REPASSE_JANELA_DIAS=30
+
+
+def titulos(d):
+    """Títulos (closingItems) da resposta da API Settlement, sem os dados bancários."""
+    if not isinstance(d,dict): return []
+    saida=[]
+    for s in d.get('settlements') or []:
+        if not isinstance(s,dict): continue
+        for t in s.get('closingItems') or []:
+            if not isinstance(t,dict) or not isinstance(t.get('id'),(str,int)) or _num(t.get('amount')) is None: continue
+            saida.append({'titulo_id':str(t['id'])[:100],'tipo':_t(t.get('type'),40),'produto':_t(t.get('product'),40),'valor':round(_num(t['amount']),2),
+                          'status':_t(t.get('status'),60),'pagamento_em':_data(t.get('paymentDate')),
+                          'periodo_inicio':_data(s.get('startDateCalculation')),'periodo_fim':_data(s.get('endDateCalculation'))})
+    return saida
+
+
+async def _repasses(cli,db,tenant,merchant,desde,hoje):
+    """Repasses por data de pagamento (o iFood não aceita data futura). Cada título é gravado por id: coletar de novo atualiza."""
+    a=desde
+    while a<=hoje:
+        b=min(a+timedelta(days=REPASSE_JANELA_DIAS-1),hoje)
+        try: d=await cli.chamar('GET',f'/financial/v3.0/merchants/{merchant}/settlements',params={'beginPaymentDate':a.isoformat(),'endPaymentDate':b.isoformat()})
+        except ErroIfood as e:
+            if e.motivo!='nao_encontrado': raise
+            d=None
+        for t in titulos(d):
+            await db.execute("""INSERT INTO ifood_repasses(merchant_id,titulo_id,tenant_id,tipo,produto,valor,status,pagamento_em,periodo_inicio,periodo_fim)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (merchant_id,titulo_id) DO UPDATE SET tipo=EXCLUDED.tipo,produto=EXCLUDED.produto,
+                valor=EXCLUDED.valor,status=EXCLUDED.status,pagamento_em=EXCLUDED.pagamento_em,periodo_inicio=EXCLUDED.periodo_inicio,
+                periodo_fim=EXCLUDED.periodo_fim,atualizado_em=now()""",merchant,t['titulo_id'],tenant,t['tipo'],t['produto'],t['valor'],t['status'],
+                t['pagamento_em'],t['periodo_inicio'],t['periodo_fim'])
+        a=b+timedelta(days=1)
+
+
 async def coletar(estado,prefixo,tenant,merchant,forcar=False):
     """Coleta o financeiro de uma loja. None se deu certo; senão o motivo ('em_andamento', 'recente' ou o erro do iFood)."""
     db=estado.db
@@ -101,6 +136,8 @@ async def coletar(estado,prefixo,tenant,merchant,forcar=False):
                     await conn.executemany(f"""INSERT INTO ifood_fin_eventos(tenant_id,merchant_id,{','.join(COLUNAS)})
                         VALUES ($1,$2,{','.join(f'${i+3}' for i in range(len(COLUNAS)))})""",[(tenant,merchant,*(l[k] for k in COLUNAS)) for l in linhas])
             a=b+timedelta(days=1)
+        # Repasses: no refazer, as últimas 5 semanas (o título da semana muda de pendente para pago).
+        await _repasses(cli,db,tenant,merchant,desde if not c['coletado_desde'] else hoje-timedelta(days=34),hoje)
     except ErroIfood as e:
         await db.execute("UPDATE ifood_coletas SET iniciada_em=NULL,erro=$2 WHERE merchant_id=$1 AND area='financeiro'",merchant,e.motivo)
         return e.motivo
@@ -148,7 +185,16 @@ async def financeiro(request:Request,tenant_id:str,tarefas:BackgroundTasks,de:da
     a_receber=[{'data':x['pagamento_previsto'],'valor':_d(x['v'])} for x in await db.fetch("""
         SELECT pagamento_previsto,sum(valor) AS v FROM ifood_fin_eventos WHERE tenant_id=$1 AND com_repasse AND pagamento_previsto>=$2
         AND ($3::text IS NULL OR merchant_id=$3) GROUP BY 1 ORDER BY 1""",tenant_id,hoje,loja)]
-    return {'periodo':{'de':de,'ate':ate},
+    rep=await db.fetch("""SELECT * FROM ifood_repasses WHERE tenant_id=$1 AND pagamento_em BETWEEN $2 AND $3 AND ($4::text IS NULL OR merchant_id=$4)
+        ORDER BY pagamento_em DESC,titulo_id""",*args)
+    soma=lambda f: _d(sum(float(x['valor']) for x in rep if f(x)))
+    repasses={'pago':soma(lambda x: x['tipo']=='REPASSE' and x['status']=='SUCCEED'),
+              'pendente':soma(lambda x: x['tipo']=='REPASSE' and x['status']!='SUCCEED'),
+              'retido_recebiveis':soma(lambda x: x['tipo']=='REGISTRO_RECEBIVEIS'),'boletos':soma(lambda x: x['tipo']=='BOLETO'),
+              'renegociado':soma(lambda x: x['tipo']=='RENEGOCIADA'),
+              'itens':[{'titulo':x['titulo_id'],'loja':x['merchant_id'],'tipo':x['tipo'],'produto':x['produto'],'valor':float(x['valor']),'status':x['status'],
+                        'pagamento_em':x['pagamento_em'],'periodo_inicio':x['periodo_inicio'],'periodo_fim':x['periodo_fim']} for x in rep[:100]]}
+    return {'periodo':{'de':de,'ate':ate},'repasses':repasses,
             'resumo':{'creditos':_d(r['creditos']),'debitos':_d(r['debitos']),'repasse_liquido':_d(r['repasse']),'recebido_direto':_d(r['direto']),
                       'pedidos':r['pedidos'],'eventos':r['eventos']},
             'por_tipo':por_tipo,'por_dia':por_dia,'por_forma':por_forma,

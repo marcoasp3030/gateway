@@ -1510,6 +1510,7 @@ PY
   - Acontece sozinha a cada 6 h, quando o painel abre, ou pelo botão "Atualizar".
   - A primeira busca 90 dias de histórico; as seguintes, os últimos 8 dias.
   - Coletar de novo não duplica.
+- **Repasses (migração 069).** Os títulos de repasse do iFood: quanto foi pago, quanto está pendente, quanto ficou retido em recebíveis e os boletos. Os dados bancários não são gravados.
 - **Migração 068.** Testes em `tests/test_ifood1b.py`.
 
 ## IFOOD1-b1: pedidos do iFood por webhook — 2026-11-07

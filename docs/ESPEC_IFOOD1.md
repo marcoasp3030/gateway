@@ -101,7 +101,12 @@ Nada aqui recebe, aceita ou despacha pedido do iFood. Também não muda a loja: 
   - `POST …/ifood/financeiro/atualizar` coleta agora.
   - O detalhe do pedido do iFood ganha `financeiro`: o que o iFood creditou e descontou nele.
 - **Testes:** `tests/test_ifood1b.py`.
-- **Ainda falta:** repasses já pagos (API Settlements), avaliações (Review) e indicadores (Analytics).
+- **Repasses (API Settlement, página enviada pelo Marco em 07/11):**
+  - Chamada: `GET …/settlements?beginPaymentDate&endPaymentDate`, em janelas de 30 dias, até hoje (o iFood não aceita data futura). Sem liquidação no período, o iFood responde 404, que vale como vazio.
+  - Gravação: cada título (`closingItems`) é gravado por id em `ifood_repasses` (migração 069), com tipo, produto, valor, status, data de pagamento e período. **Sem os dados bancários.**
+  - Coleta: a primeira busca 90 dias; as seguintes, as últimas 5 semanas, porque o título muda de pendente para pago.
+  - O financeiro ganha `repasses`: pago, pendente, retido em recebíveis, boletos e renegociado, além dos títulos do período.
+- **Ainda falta:** avaliações (Review) e indicadores (Analytics).
 
 ## 3. O que é buscado no iFood
 
