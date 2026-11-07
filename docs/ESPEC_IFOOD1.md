@@ -106,7 +106,32 @@ Nada aqui recebe, aceita ou despacha pedido do iFood. Também não muda a loja: 
   - Gravação: cada título (`closingItems`) é gravado por id em `ifood_repasses` (migração 069), com tipo, produto, valor, status, data de pagamento e período. **Sem os dados bancários.**
   - Coleta: a primeira busca 90 dias; as seguintes, as últimas 5 semanas, porque o título muda de pendente para pago.
   - O financeiro ganha `repasses`: pago, pendente, retido em recebíveis, boletos e renegociado, além dos títulos do período.
-- **Ainda falta:** avaliações (Review) e indicadores (Analytics).
+
+## 2d. IFOOD1-b3 e b4: avaliações e indicadores, implementadas em 08/11/2026
+
+- **Avaliações (Review v2, documentação enviada pelo Marco em 08/11):**
+  - Coleta de `GET /review/v2.0/merchants/{id}/reviews` (`page`, `pageSize` até 50, `dateFrom`/`dateTo` em ISO com Z) e de `…/summary` (404 vale como sem resumo).
+    - A primeira busca 90 dias; as seguintes, 15 dias.
+    - Acontece sozinha quando o painel abre e a última passou de 30 min, ou pelo botão "Atualizar" (no máximo a cada 10 min).
+  - Gravação: `ifood_avaliacoes`, com status, visibilidade, nota, comentário, nome do cliente, pedido, respostas e perguntas, e `ifood_avaliacoes_resumo` (migração 070).
+  - `GET /admin/v1/tenants/{t}/ifood/avaliacoes?de&ate&loja&status&nota&limite&antes` (gestor) traz:
+    - por loja: a nota do iFood, o total e as válidas;
+    - no período: média, notas de 1 a 5, aguardando resposta e vencendo em 24 h;
+    - a lista, com `pode_responder`, `responder_ate` (5 dias) e `resposta_painel`;
+    - `respostas_ligadas`.
+  - `POST …/ifood/avaliacoes/atualizar` coleta agora.
+  - `POST …/ifood/avaliacoes/{review_id}/responder {"texto"}` (gestor, decisão 2):
+    - aceita de 10 a 300 caracteres, só para avaliação `NOT_REPLIED` ainda não respondida pelo painel;
+    - **sem `IFOOD_RESPOSTAS=live` no `.env`, a resposta fica gravada como simulada e não sai**;
+    - com `live`, vai para o iFood. Se o iFood recusar por prazo ou status, a resposta é 409 `nao_aguarda_resposta`; se recusar o conteúdo ou o tamanho, 400 `conteudo_recusado`;
+    - auditoria `ifood.avaliacao_respondida`, sem o texto.
+  - **Homologação:** o iFood exige link visível para a Política de Avaliações dele na tela. Fica com o [PAINEL].
+- **Indicadores (Analytics v1, Schemas enviados pelo Marco em 08/11):**
+  - `GET /admin/v1/tenants/{t}/ifood/indicadores?loja&de&ate` (gestor; padrão: 30 dias até ontem) consulta na hora, com cópia de 10 min no Redis.
+  - Retorna o período e o anterior (`dateIntervals`) com pedidos e métricas: GMV, valor pago, reembolsos, taxa de entrega, frete cobrado da loja, subsídio da loja, tempos de preparo, pronto, entrega, atraso e espera na loja, e distância.
+  - Divide também por dia da semana, hora, status, pagamento, cliente novo, motivo e origem de cancelamento, quem entrega e canal.
+  - Formato confirmado com uma consulta de leitura na loja de teste: `filter.referenceDate` é obrigatório e `dateIntervals` pede 2 ou mais intervalos. A loja de teste não tem dados, então os valores reais ainda não foram vistos.
+- **Testes:** `tests/test_ifood_avaliacoes.py`.
 
 ## 3. O que é buscado no iFood
 

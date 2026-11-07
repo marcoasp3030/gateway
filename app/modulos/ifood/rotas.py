@@ -42,7 +42,9 @@ def _falha(status,motivo,campo=None):
                'nao_autorizada':'Esta loja não autorizou o aplicativo da Ticway no iFood.','confirmacao':'Digite o nome da loja para confirmar.',
                'credenciais_recusadas':'O iFood recusou este Client ID e Client Secret. Nada foi gravado.',
                'formato':'Confira os campos informados.',
-               'papel_sem_credencial':'Trocar as credenciais do iFood exige a chave de plataforma do painel.'}
+               'papel_sem_credencial':'Trocar as credenciais do iFood exige a chave de plataforma do painel.',
+               'nao_aguarda_resposta':'Esta avaliação não aceita mais resposta (já respondida, publicada ou fora do prazo de 5 dias).',
+               'conteudo_recusado':'O iFood recusou o texto da resposta (tamanho ou conteúdo). Evite dados do cliente, links e linguagem agressiva.'}
     detalhes={'motivo':motivo,**({'campo':campo} if campo else {})}
     return JSONResponse({'erro':{'codigo':codigo,'mensagem':MENSAGENS.get(motivo) or mensagens.get(motivo,'Não foi possível concluir.'),'detalhes':detalhes}},
                         status_code=status,headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})

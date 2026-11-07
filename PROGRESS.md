@@ -1501,6 +1501,17 @@ PY
 - **Página pública.** `cardapio/ler` traz `redes` (só as ativas, com `url` e `rotulo`), também na resposta do link já usado.
 - **Migração 063.** Testes em `tests/test_card_redes.py`. A tela é do [PAINEL].
 
+## IFOOD1-b3/b4: avaliações e indicadores do iFood — 2026-11-08
+
+- **Avaliações.**
+  - Lista com nota, comentário, prazo para responder e a nota do iFood por loja.
+  - O gestor responde pelo painel. **A resposta é simulada até `IFOOD_RESPOSTAS=live` no `.env`.**
+  - Migração 070.
+- **Indicadores do iFood.** Consulta na hora, com cópia de 10 min.
+  - Compara o período com o anterior: pedidos, GMV, tempos e reembolsos.
+  - Divide por dia da semana, hora, status, pagamento, cliente novo e cancelamento.
+- **Testes** em `tests/test_ifood_avaliacoes.py`.
+
 ## IFOOD1-b2: financeiro do iFood — 2026-11-07
 
 - **Fonte.** Os eventos financeiros do iFood: vendas, comissões, taxas e cancelamentos, cada um com o valor e com a informação se entra no repasse.
