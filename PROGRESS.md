@@ -1501,6 +1501,13 @@ PY
 - **Página pública.** `cardapio/ler` traz `redes` (só as ativas, com `url` e `rotulo`), também na resposta do link já usado.
 - **Migração 063.** Testes em `tests/test_card_redes.py`. A tela é do [PAINEL].
 
+## Chave de plataforma no ar — 2026-11-07
+
+- **O que mudou.** O Marco gravou a `PANEL_PLATFORM_KEY` no `.env` do gateway e o mesmo valor na `GATEWAY_PLATFORM_KEY` do painel. O valor não aparece em lugar nenhum.
+- **Para que serve.** A sessão de plataforma do painel passa a usar essa chave. A rota de credenciais do iFood só aceita ela.
+- **O que continua igual.** As outras rotas seguem na fase A do CHAVES1: o papel de plataforma com a chave de empresa ainda vale, com aviso no log.
+- **Por que este commit.** O `implantar.sh` não reimplanta o mesmo commit, e os serviços só leem o `.env` quando são recriados.
+
 ## IFOOD1-a: credenciais do iFood pelo painel — 2026-11-06
 
 - **Decisão do Marco.** O Client ID e o Client Secret do aplicativo do iFood entram pelo painel, em `PUT /admin/v1/ifood/credenciais`.
