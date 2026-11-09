@@ -1501,6 +1501,13 @@ PY
 - **Página pública.** `cardapio/ler` traz `redes` (só as ativas, com `url` e `rotulo`), também na resposta do link já usado.
 - **Migração 063.** Testes em `tests/test_card_redes.py`. A tela é do [PAINEL].
 
+## CARD-LINK: ligar ou desligar o link do cardápio digital — 2026-11-09
+
+- **O que é.** Comportamento do agente `enviar_link_cardapio` (`on`/`off`, padrão `on`), por agente, só gestor e acima. Especificação em `docs/ESPEC_CARD_LINK.md`.
+- **Com `off`.** O pacote ao agente vem sem o link do cardápio e com `cardapio_digital: "desligado"`, e o agente apresenta as opções na conversa.
+- **O que não muda.** O Link da loja continua igual.
+- **Migração 071.** Testes em `tests/test_card_link.py`.
+
 ## IFOOD1-b3/b4: avaliações e indicadores do iFood — 2026-11-08
 
 - **Avaliações.**

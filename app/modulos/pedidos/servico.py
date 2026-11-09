@@ -874,7 +874,7 @@ async def expirado(conn,tenant,conversa):
     return [{'nome':l['nome'],'quantidade':l['quantidade']} for l in await linhas(conn,tenant,c['id'])]
 
 
-async def contexto(repo,tenant,conversa):
+async def contexto(repo,tenant,conversa,cfg=None):
     """Bloco contexto_modulos.pedidos do pacote ao agente: carrinho aberto, carrinho que expirou e o último pedido da conversa."""
     conn=repo.db   # só leituras: serve conexão ou pool
     carrinho=await retrato(conn,tenant,conversa)
@@ -894,10 +894,12 @@ async def contexto(repo,tenant,conversa):
     recentes=await ultimos(conn,tenant,conversa) if p else []
     # Cardápio interativo: link pronto para o agente mandar quando o cliente pedir o cardápio (nulo sem catálogo ou sem endereço público).
     from .cardapio import garantir_link
+    # CARD-LINK: com enviar_link_cardapio=off o agente não recebe o link (nem se gera um) e apresenta as opções na conversa.
+    ligado=(cfg or {}).get('enviar_link_cardapio','on')!='off'
     link=None
-    if await conn.fetchval('SELECT EXISTS(SELECT 1 FROM catalogo_itens WHERE tenant_id=$1 AND ativo LIMIT 1)',tenant):
+    if ligado and await conn.fetchval('SELECT EXISTS(SELECT 1 FROM catalogo_itens WHERE tenant_id=$1 AND ativo LIMIT 1)',tenant):
         link,_=await garantir_link(conn,tenant,conversa)
-    return {'carrinho':carrinho,'link_cardapio':link,
+    return {'carrinho':carrinho,'link_cardapio':link,'cardapio_digital':'ligado' if ligado else 'desligado',
             # true = o carrinho antigo foi arquivado por tempo; itens_expirados diz o que havia, para o agente oferecer refazer.
             'carrinho_expirado':antigos is not None,'itens_expirados':antigos or [],
             'ultimo_pedido':{'numero':p['numero'],'status':p['status'],'status_descricao':DESCRICAO[p['status']],'total':dinheiro(p['total']),

@@ -195,6 +195,7 @@
       "itens_ativos": 7
      },
      "pedidos": {
+      "cardapio_digital": "ligado",
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
@@ -760,6 +761,7 @@
       "itens_ativos": 7
      },
      "pedidos": {
+      "cardapio_digital": "ligado",
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
@@ -1111,6 +1113,7 @@
       "itens_ativos": 7
      },
      "pedidos": {
+      "cardapio_digital": "ligado",
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
@@ -1564,6 +1567,7 @@
       "itens_ativos": 7
      },
      "pedidos": {
+      "cardapio_digital": "ligado",
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": "<variavel>",
@@ -2034,6 +2038,7 @@
       "itens_ativos": 7
      },
      "pedidos": {
+      "cardapio_digital": "ligado",
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
@@ -2586,6 +2591,7 @@
       "itens_ativos": 7
      },
      "pedidos": {
+      "cardapio_digital": "ligado",
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
@@ -3041,6 +3047,7 @@
       "itens_ativos": 7
      },
      "pedidos": {
+      "cardapio_digital": "ligado",
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
@@ -3530,6 +3537,7 @@
       "itens_ativos": 7
      },
      "pedidos": {
+      "cardapio_digital": "ligado",
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
@@ -4165,6 +4173,7 @@
       "itens_ativos": 7
      },
      "pedidos": {
+      "cardapio_digital": "ligado",
       "carrinho": {
        "agendado_para": "2030-11-05T14:00:00-03:00",
        "atualizado_em": "<variavel>",
@@ -4732,6 +4741,7 @@
       "itens_ativos": 7
      },
      "pedidos": {
+      "cardapio_digital": "ligado",
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
@@ -6252,6 +6262,7 @@
       "itens_ativos": 7
      },
      "pedidos": {
+      "cardapio_digital": "ligado",
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": "<variavel>",
@@ -7009,6 +7020,7 @@
       "itens_ativos": 7
      },
      "pedidos": {
+      "cardapio_digital": "ligado",
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
@@ -7436,6 +7448,7 @@
       "itens_ativos": 7
      },
      "pedidos": {
+      "cardapio_digital": "ligado",
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
@@ -7989,6 +8002,7 @@
       "itens_ativos": 7
      },
      "pedidos": {
+      "cardapio_digital": "ligado",
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
@@ -8418,6 +8432,7 @@
       "itens_ativos": 7
      },
      "pedidos": {
+      "cardapio_digital": "ligado",
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
@@ -8905,6 +8920,7 @@
       "itens_ativos": 7
      },
      "pedidos": {
+      "cardapio_digital": "ligado",
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
@@ -9367,6 +9383,7 @@
       "itens_ativos": 7
      },
      "pedidos": {
+      "cardapio_digital": "ligado",
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
@@ -9718,6 +9735,7 @@
       "itens_ativos": 7
      },
      "pedidos": {
+      "cardapio_digital": "ligado",
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
@@ -10133,6 +10151,7 @@
       "itens_ativos": 7
      },
      "pedidos": {
+      "cardapio_digital": "ligado",
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": null,
@@ -10499,6 +10518,7 @@
       "itens_ativos": 7
      },
      "pedidos": {
+      "cardapio_digital": "ligado",
       "carrinho": {
        "agendado_para": null,
        "atualizado_em": "<variavel>",

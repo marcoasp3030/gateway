@@ -20,7 +20,7 @@ COLUNAS = {
     'modo_resposta','debounce_s','debounce_curto_s','debounce_palavras','max_wait_s','media_wait_s','pause_minutes','history_turns',
     'slow_notice_s','aviso_demora','fallback','alerta_telefone','send_mode','agente_mode',
     'modo_piloto','contatos_permitidos','encerrar_vazia_min','max_lotes_simultaneos',
-    'max_concorrencia','max_msgs_por_minuto_contato','botoes_interativos','debounce_incompleta_s','refazer_turno','aviso_demora_janela_s','carrinho_expira_h','acoes_recentes_min',
+    'max_concorrencia','max_msgs_por_minuto_contato','botoes_interativos','debounce_incompleta_s','refazer_turno','aviso_demora_janela_s','carrinho_expira_h','acoes_recentes_min','enviar_link_cardapio',
     'modulos_ligados','aviso_espera_modo','aviso_espera_textos','reacoes','reacoes_emojis','reacoes_max_dia','fora_do_horario','fora_do_horario_mensagem','fora_do_horario_aceita_agendado',
     'transbordo_alerta','transbordo_horario_equipe','transbordo_fora_do_horario','notificar_equipe','transbordo_destino_externo',
     'follow_up_ativo','follow_up_escopo','follow_up_maximo','follow_up_primeiro_min','follow_up_segundo_min','follow_up_janela','follow_up_fora_unidade',

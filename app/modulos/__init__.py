@@ -46,15 +46,15 @@ async def vazio(repo, tenant, conversa):
     escopo(tenant)
     return {}
 
-async def catalogo_contexto(repo, tenant, conversa):
+async def catalogo_contexto(repo, tenant, conversa, cfg=None):
     escopo(tenant)
     n=await repo.db.fetchval('SELECT count(*) FROM catalogo_itens WHERE tenant_id=$1 AND ativo AND arquivado_em IS NULL',tenant)
     return {'itens_ativos':n}
 
-async def pedidos_contexto(repo, tenant, conversa):
+async def pedidos_contexto(repo, tenant, conversa, cfg=None):
     escopo(tenant)
     from modulos.pedidos.servico import contexto
-    return await contexto(repo,tenant,conversa)
+    return await contexto(repo,tenant,conversa,cfg)
 
 REGISTRO={
  'catalogo':Modulo('catalogo',('006_catalogo.sql','021_catalogo_pedidos.sql'),('/api/v1/catalogo/busca',),('ferramentas:catalogo',),catalogo_contexto,
@@ -65,7 +65,9 @@ REGISTRO={
                       # UX3.1: acoes_recentes do pacote = chamadas de Skill da conversa nos últimos N minutos (0 = lista vazia).
                       'acoes_recentes_min':('ritmo','inteiro',0,1440,None,True,15),
                       # UX3: carrinho sem alteração há mais de N horas é arquivado na próxima mensagem do cliente.
-                      'carrinho_expira_h':('pedidos','inteiro',1,720,None,True,6)},
+                      'carrinho_expira_h':('pedidos','inteiro',1,720,None,True,6),
+                      # CARD-LINK: off = o agente não recebe o link do cardápio digital e apresenta as opções na conversa.
+                      'enviar_link_cardapio':('pedidos','escolha',None,None,['on','off'],True,'on')},
                   telas=('pedidos','avisos_de_pedido'),
                   skills={('GET','/api/v1/carrinho/{conversation_id}'):'ver_carrinho',
                           ('POST','/api/v1/carrinho/{conversation_id}/itens'):'adicionar_item',
@@ -156,5 +158,5 @@ async def contextos(repo,tenant,conversa,cfg):
     """contexto_modulos do pacote: um bloco por módulo que vale para o agente."""
     result={}
     for nome in cfg.get('modulos') or []:
-        result[nome]=await REGISTRO[nome].contexto(repo,tenant,conversa)
+        result[nome]=await REGISTRO[nome].contexto(repo,tenant,conversa,cfg)
     return result

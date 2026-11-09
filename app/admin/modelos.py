@@ -64,6 +64,7 @@ class Comportamento(Estrito):
     aviso_espera_textos: list[Annotated[str,StringConstraints(strip_whitespace=True,min_length=2,max_length=160)]] | None = Field(None,min_length=1,max_length=6)
     carrinho_expira_h: int | None = Field(None,ge=1,le=720)
     acoes_recentes_min: int | None = Field(None,ge=0,le=1440)
+    enviar_link_cardapio: Literal['on','off'] | None = None
     # CFG1-a: no contrato desde já; executados nos blocos R1 e G3.
     reacoes: Literal['on','off'] | None = None
     reacoes_emojis: list[Literal['👍','❤️','🙏','😊','😂','👏','🎉','✅']] | None = Field(None,min_length=1,max_length=8)
