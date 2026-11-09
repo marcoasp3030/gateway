@@ -1501,6 +1501,13 @@ PY
 - **Página pública.** `cardapio/ler` traz `redes` (só as ativas, com `url` e `rotulo`), também na resposta do link já usado.
 - **Migração 063.** Testes em `tests/test_card_redes.py`. A tela é do [PAINEL].
 
+## PED-BI2: iFood junto nos gráficos da Visão de vendas — 2026-11-09
+
+- **O que é.** O campo novo `canais` em `GET …/pedidos/indicadores` junta delivery, retirada e iFood: resumo por canal, evolução, dia da semana, hora, dia × hora, forma de pagamento e produtos, cada um com `por_canal`. Especificação na seção 8 de `docs/ESPEC_PED_BI.md`.
+- **Compatível.** Os campos de antes continuam só com o WhatsApp. Sem migração.
+- **Regras.** Pagamento do iFood pela forma de maior valor, com os mesmos códigos do WhatsApp quando é a mesma forma. Produto pelo nome, sem diferença de maiúscula ou espaço.
+- **Teste.** `test_canais_juntos_com_ifood` em `tests/test_ped_bi.py`.
+
 ## CARD-LINK: ligar ou desligar o link do cardápio digital — 2026-11-09
 
 - **O que é.** Comportamento do agente `enviar_link_cardapio` (`on`/`off`, padrão `on`), por agente, só gestor e acima. Especificação em `docs/ESPEC_CARD_LINK.md`.

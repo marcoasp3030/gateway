@@ -104,3 +104,53 @@ def test_visao_de_vendas_numeros_papeis_e_filtros():
             # Padrão: últimos 30 dias.
             assert (await client.get(B)).json()['periodo']['dias']==30
     banco(cenario)
+
+
+def test_canais_juntos_com_ifood():
+    """PED-BI2: delivery, retirada e iFood nos mesmos gráficos; teste e cancelado do iFood fora; mesmo nome = mesmo produto."""
+    async def cenario(conn):
+        await migrar.aplicar(conn)
+        app,client=preparar(conn);fila=RedisFila();app.state.redis=fila;app.state.pipeline.redis=fila
+        async with client:
+            conversa,ids,_,_=await montar(conn,client,app)
+            conv=await conversa('cliente-canais-a');seq=iter(range(1000,9999))
+            async def pedido(quando,modalidade,nome,q,v,forma='pix'):
+                itens=[{'item_id':ids['GUE-0001'],'codigo':'GUE-0001','nome':nome,'categoria':'X','quantidade':q,'preco_unitario':v/q,'subtotal':v}]
+                await conn.execute("""INSERT INTO pedidos(tenant_id,numero,conversation_id,unidade,modalidade,itens,subtotal,taxa_entrega,total,status,criado_em,
+                        forma_pagamento,pagamento_rotulo,origem) VALUES ($1,$2,$3,'patio_guedala',$4,$5::jsonb,$6,0,$6,'concluido',$7,$8,$9,'real')""",
+                    T,f'CN{next(seq)}',conv,modalidade,json.dumps(itens),v,quando,forma,{'pix':'Pix','dinheiro':'Dinheiro'}[forma])
+            async def ifood(oid,quando,nome,q,v,pagamentos,status='CONCLUDED',teste=False):
+                await conn.execute("""INSERT INTO ifood_pedidos(order_id,tenant_id,merchant_id,status,teste,criado_em,tipo,total,pagamentos,itens,detalhado_em)
+                    VALUES ($1,$2,'loja-a-1',$3,$4,$5,'DELIVERY',$6,$7::jsonb,$8::jsonb,now())""",oid,T,status,teste,quando,v,json.dumps(pagamentos),
+                    json.dumps([{'nome':nome,'quantidade':q,'total':v}]))
+            d=lambda dia,h: datetime(2026,10,dia,h,0,tzinfo=SP)
+            await pedido(d(2,12),'delivery','Edamame',2,40)          # sexta
+            await pedido(d(2,19),'retirada','Purin',1,10,'dinheiro')  # sexta
+            G={'X-Role':'gestor','X-Actor':'gestor@exemplo.test'}
+            sem=(await client.get(B+OUT,headers=G)).json()['canais']
+            assert sem['disponiveis']==['delivery','retirada'] and [c['canal'] for c in sem['resumo']]==['delivery','retirada']
+            await conn.execute("INSERT INTO ifood_lojas(merchant_id,tenant_id,ligado_por) VALUES ('loja-a-1',$1,'teste')",T)
+            await ifood('if-1',d(2,19),' edamame ',3,60,[{'forma':'CREDIT','tipo':'ONLINE','valor':50},{'forma':'PIX','tipo':'ONLINE','valor':10}])
+            await ifood('if-2',d(3,20),'Temaki',1,30,[{'forma':'PIX','tipo':'ONLINE','valor':30}])          # sábado
+            await ifood('if-3',d(3,20),'Temaki',1,99,[],status='CANCELLED')
+            await ifood('if-4',d(3,20),'Temaki',1,99,[],teste=True)
+            v=(await client.get(B+OUT,headers=G)).json();c=v['canais']
+            assert v['resumo']['pedidos']==2  # o resumo de sempre continua só do WhatsApp
+            assert c['disponiveis']==['delivery','retirada','ifood'] and c['total']=={'pedidos':4,'faturamento':140.0,'ticket_medio':35.0}
+            assert {x['canal']:(x['pedidos'],x['faturamento'],x['participacao_pct']) for x in c['resumo']}=={'delivery':(1,40.0,28.6),'retirada':(1,10.0,7.1),'ifood':(2,90.0,64.3)}
+            assert len(c['evolucao'])==31 and c['evolucao'][1]['pedidos']==3 and c['evolucao'][1]['por_canal']['ifood']=={'pedidos':1,'faturamento':60.0}
+            sexta=c['dias_semana'][5];assert (sexta['pedidos'],sexta['faturamento'],sexta['por_canal']['retirada']['pedidos'])==(3,110.0,1)
+            assert len(c['dias_semana'])==7 and len(c['horas'])==24 and c['horas'][19]['pedidos']==2
+            assert {'dia_semana':6,'hora':20,'canal':'ifood','pedidos':1,'faturamento':30.0} in c['horarios']
+            # Pagamento: forma principal do iFood (a de maior valor) com o mesmo código do WhatsApp quando é a mesma.
+            pg={p['forma']:p for p in c['pagamentos']}
+            assert pg['pix']['pedidos']==2 and pg['pix']['por_canal']['delivery']['pedidos']==1 and pg['credito']['rotulo']=='Cartão de crédito'
+            assert c['pagamentos'][0]['forma']=='pix' and pg['pix']['participacao_pct']==50.0
+            # Produtos: "Edamame" do WhatsApp e " edamame " do iFood são o mesmo.
+            p=c['produtos']['itens'][0]
+            assert (p['nome'],p['quantidade'],p['faturamento'],p['pedidos'])==('Edamame',5,100.0,2) and p['por_canal']['ifood']['quantidade']==3
+            assert [x['nome'] for x in c['produtos']['itens']]==['Edamame','Temaki','Purin'] and c['produtos']['total']==3
+            # Teste do iFood só com origem=teste; outra unidade só traz loja ligada a ela.
+            assert (await client.get(B+OUT+'&origem=real,teste',headers=G)).json()['canais']['total']['pedidos']==5
+            assert (await client.get(B+OUT+'&unidade=morumbi',headers=G)).json()['canais']['total']['pedidos']==0
+    banco(cenario)

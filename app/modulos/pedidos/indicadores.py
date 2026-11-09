@@ -156,6 +156,95 @@ async def _ifood(db,tenant_id,unidade,origens,inicio,fim,ant_inicio,ant_fim,de,a
             'produtos':produtos}
 
 
+# PED-BI2: os três canais juntos (delivery e retirada do WhatsApp, e o iFood) nos mesmos gráficos. $6: inclui pedido de teste do iFood.
+CANAIS=('delivery','retirada','ifood')
+IFOOD_FORMAS={'PIX':('pix','Pix'),'CASH':('dinheiro','Dinheiro'),'CREDIT':('credito','Cartão de crédito'),'DEBIT':('debito','Cartão de débito'),
+              'MEAL_VOUCHER':('vale_refeicao','Vale-refeição'),'FOOD_VOUCHER':('vale_alimentacao','Vale-alimentação'),
+              'DIGITAL_WALLET':('carteira_digital','Carteira digital'),'GIFT_CARD':('vale_presente','Vale-presente'),'OTHER':('outro','Outro')}
+_FORMA_IFOOD='CASE '+' '.join(f"WHEN m.forma='{k}' THEN '{c}'" for k,(c,_) in IFOOD_FORMAS.items())+" ELSE coalesce('ifood_'||lower(m.forma),'nao_informado') END"
+_ROTULO_IFOOD='CASE '+' '.join(f"WHEN m.forma='{k}' THEN '{r}'" for k,(_,r) in IFOOD_FORMAS.items())+" WHEN m.forma IS NULL THEN 'Não informado' ELSE m.forma END"
+VENDAS_CANAIS=f"""WITH vendas AS (
+    SELECT 'p'||p.id AS pedido,p.modalidade AS canal,p.criado_em,p.total,coalesce(p.forma_pagamento,'nao_informado') AS forma,
+           coalesce(p.pagamento_rotulo,CASE WHEN p.forma_pagamento IS NULL THEN 'Não informado' END) AS rotulo,
+           CASE WHEN jsonb_typeof(p.itens)='array' THEN p.itens ELSE '[]'::jsonb END AS itens
+    {DE_PEDIDOS}{NO_PERIODO}{E_VENDA}
+    UNION ALL
+    SELECT 'f'||f.order_id,'ifood',f.criado_em,f.total,{_FORMA_IFOOD},{_ROTULO_IFOOD},
+           (SELECT coalesce(jsonb_agg(jsonb_build_object('nome',i->>'nome','quantidade',i->'quantidade','subtotal',i->'total')),'[]'::jsonb)
+            FROM jsonb_array_elements(CASE WHEN jsonb_typeof(f.itens)='array' THEN f.itens ELSE '[]'::jsonb END) i)
+    FROM ifood_pedidos f LEFT JOIN ifood_lojas l ON l.merchant_id=f.merchant_id
+    -- Forma principal do pedido do iFood: a de maior valor (pedido pago em mais de uma forma conta uma vez).
+    LEFT JOIN LATERAL (SELECT x->>'forma' AS forma FROM jsonb_array_elements(CASE WHEN jsonb_typeof(f.pagamentos)='array' THEN f.pagamentos ELSE '[]'::jsonb END) x
+                       ORDER BY CASE WHEN jsonb_typeof(x->'valor')='number' THEN (x->>'valor')::numeric END DESC NULLS LAST LIMIT 1) m ON true
+    WHERE f.tenant_id=$1 AND f.criado_em>=$2 AND f.criado_em<$3 AND ($4::text IS NULL OR l.unidade=$4) AND ($6 OR NOT f.teste)
+      AND f.status IN {IFOOD_VENDA})"""
+LIMITE_PRODUTOS_CANAIS=100
+
+
+def _por_canal(linhas,campos=('pedidos','faturamento')):
+    """{canal: {pedidos, faturamento}} com os três canais, zerados quando não há venda."""
+    saida={c:{k:0 if k!='faturamento' else 0.0 for k in campos} for c in CANAIS}
+    for r in linhas:
+        for k in campos: saida[r['canal']][k]=_d(r[k]) if k=='faturamento' else r[k]
+    return saida
+
+
+async def _canais(db,args,teste,de,ate,agrupar):
+    """Delivery, retirada e iFood juntos: resumo por canal, evolução, dia da semana, hora, dia × hora, pagamento e produtos.
+    Mesma regra de venda de cada canal (WhatsApp: confirmado em diante; iFood: confirmado em diante, sem cancelado)."""
+    a=(*args,teste);ifood=await db.fetchval('SELECT EXISTS(SELECT 1 FROM ifood_lojas WHERE tenant_id=$1)',args[0])
+    total=await db.fetchrow(f"{VENDAS_CANAIS} SELECT count(*) AS pedidos,coalesce(sum(total),0) AS faturamento FROM vendas",*a)
+    fat=float(total['faturamento']);n=total['pedidos']
+    porc=_por_canal(await db.fetch(f"{VENDAS_CANAIS} SELECT canal,count(*) AS pedidos,sum(total) AS faturamento FROM vendas GROUP BY 1",*a))
+    resumo=[{'canal':c,**v,'ticket_medio':_d(v['faturamento']/v['pedidos']) if v['pedidos'] else 0.0,
+             'participacao_pct':round(v['faturamento']/fat*100,1) if fat else 0.0} for c,v in porc.items() if c!='ifood' or ifood]
+    trunc={'dia':'day','semana':'week','mes':'month'}[agrupar]
+    serie={}
+    for r in await db.fetch(f"""{VENDAS_CANAIS} SELECT date_trunc('{trunc}',criado_em AT TIME ZONE 'America/Sao_Paulo')::date AS balde,canal,
+            count(*) AS pedidos,sum(total) AS faturamento FROM vendas GROUP BY 1,2""",*a): serie.setdefault(r['balde'],[]).append(r)
+    def ponto(linhas):
+        pc=_por_canal(linhas)
+        return {'pedidos':sum(v['pedidos'] for v in pc.values()),'faturamento':_d(sum(v['faturamento'] for v in pc.values())),'por_canal':pc}
+    evolucao=[{'inicio':b,**ponto(serie.get(b,[]))} for b in _baldes(de,ate,agrupar)]
+    LOCAL="criado_em AT TIME ZONE 'America/Sao_Paulo'"
+    horarios=[{'dia_semana':int(r['dow']),'hora':int(r['hora']),'canal':r['canal'],'pedidos':r['pedidos'],'faturamento':_d(r['faturamento'])}
+              for r in await db.fetch(f"""{VENDAS_CANAIS} SELECT extract(dow FROM {LOCAL}) AS dow,extract(hour FROM {LOCAL}) AS hora,canal,
+                  count(*) AS pedidos,sum(total) AS faturamento FROM vendas GROUP BY 1,2,3 ORDER BY 1,2,3""",*a)]
+    def somar(chave,valores):
+        grupos={v:[] for v in valores}
+        for h in horarios: grupos[h[chave]].append(h)
+        return [{chave:v,**ponto([{'canal':h['canal'],'pedidos':h['pedidos'],'faturamento':h['faturamento']} for h in g])} for v,g in grupos.items()]
+    dias_semana=somar('dia_semana',range(7));horas=somar('hora',range(24))
+    pagamentos={}
+    for r in await db.fetch(f"""{VENDAS_CANAIS} SELECT forma,max(rotulo) AS rotulo,canal,count(*) AS pedidos,sum(total) AS faturamento FROM vendas GROUP BY 1,3""",*a):
+        p=pagamentos.setdefault(r['forma'],{'forma':r['forma'],'rotulo':r['rotulo'],'linhas':[]})
+        p['rotulo']=p['rotulo'] or r['rotulo'];p['linhas'].append(r)
+    pagamentos=sorted(({'forma':p['forma'],'rotulo':p['rotulo'],**ponto(p['linhas'])} for p in pagamentos.values()),key=lambda p:(-p['pedidos'],-p['faturamento'],p['forma']))
+    for p in pagamentos: p['participacao_pct']=round(p['pedidos']/n*100,1) if n else 0.0
+    # Produtos: mesmo nome (sem diferença de maiúscula e espaço) é o mesmo produto nos três canais.
+    linhas=await db.fetch(f"""{VENDAS_CANAIS} SELECT lower(trim(i->>'nome')) AS chave,mode() WITHIN GROUP (ORDER BY trim(i->>'nome')) AS nome,canal,
+            sum((i->>'quantidade')::numeric) AS quantidade,sum(CASE WHEN jsonb_typeof(i->'subtotal')='number' THEN (i->>'subtotal')::numeric END) AS faturamento,
+            count(DISTINCT pedido) AS pedidos
+        FROM vendas CROSS JOIN LATERAL jsonb_array_elements(itens) i
+        WHERE nullif(trim(i->>'nome'),'') IS NOT NULL AND jsonb_typeof(i->'quantidade')='number' GROUP BY 1,3""",*a)
+    produtos={}
+    for r in linhas:
+        p=produtos.setdefault(r['chave'],{'nome':r['nome'],'linhas':[]});p['linhas'].append(r)
+    fat_itens=sum(float(r['faturamento'] or 0) for r in linhas)
+    itens=[]
+    for p in produtos.values():
+        pc=_por_canal(p['linhas'],('quantidade','faturamento','pedidos'))
+        for v in pc.values(): v['quantidade']=int(v['quantidade']) if float(v['quantidade'])==int(v['quantidade']) else float(v['quantidade'])
+        f=_d(sum(v['faturamento'] for v in pc.values()))
+        itens.append({'nome':p['nome'],'quantidade':sum(v['quantidade'] for v in pc.values()),'faturamento':f,'pedidos':sum(v['pedidos'] for v in pc.values()),
+                      'participacao_pct':round(f/fat_itens*100,1) if fat_itens else 0.0,'por_canal':pc})
+    itens.sort(key=lambda p:(-p['quantidade'],-p['faturamento'],p['nome']))
+    return {'disponiveis':[c for c in CANAIS if c!='ifood' or ifood],
+            'total':{'pedidos':n,'faturamento':_d(fat),'ticket_medio':_d(fat/n) if n else 0.0},
+            'resumo':resumo,'evolucao':evolucao,'dias_semana':dias_semana,'horas':horas,'horarios':horarios,'pagamentos':pagamentos,
+            'produtos':{'itens':itens[:LIMITE_PRODUTOS_CANAIS],'total':len(itens)}}
+
+
 @router.get('/tenants/{tenant_id}/pedidos/indicadores')
 async def indicadores(request:Request,tenant_id:str,de:date|None=None,ate:date|None=None,unidade:str|None=None,origem:str|None=None,
                       agrupar:Literal['dia','semana','mes']|None=None,sumido_dias:int=Query(30,ge=7,le=365)):
@@ -273,4 +362,5 @@ async def indicadores(request:Request,tenant_id:str,de:date|None=None,ate:date|N
                         'sem_venda':{'itens':sem_venda,'total':sem_venda_total}},
             'clientes':{'por_valor':por_valor,'por_frequencia':por_frequencia,'sumidos':{'itens':sumidos,'total':sumidos_total,'dias':sumido_dias}},
             'pagamentos':pagamentos,'bairros':bairros,'operacao':{**operacao,'motivos_perda':motivos},'unidades':unidades,
-            'ifood':await _ifood(db,tenant_id,unidade,origens,inicio,fim,ant_inicio,ant_fim,de,ate,agrupar)}
+            'ifood':await _ifood(db,tenant_id,unidade,origens,inicio,fim,ant_inicio,ant_fim,de,ate,agrupar),
+            'canais':await _canais(db,args,'teste' in origens,de,ate,agrupar)}

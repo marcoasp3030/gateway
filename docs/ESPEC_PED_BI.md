@@ -93,3 +93,28 @@ Uma tela "Visão de vendas" para a empresa acompanhar os pedidos de um período:
 - Exportar CSV.
 - Cache: as consultas usam índice e o volume é pequeno. Entra se a tela ficar lenta.
 - Margem e custo, porque o catálogo não tem custo.
+
+## 8. PED-BI2: os canais juntos (09/11/2026)
+
+O campo novo `canais` junta delivery e retirada (WhatsApp) com o iFood nos mesmos gráficos. Os campos de antes continuam iguais, só com o WhatsApp, para o painel atual não quebrar.
+
+- **Venda:** a mesma regra de cada canal. No WhatsApp, confirmado em diante. No iFood, confirmado em diante; cancelado e aguardando ficam fora.
+- **Filtros:** valem os mesmos. O pedido de teste do iFood só entra com `origem` incluindo `teste`. Com `unidade`, o iFood entra só pela loja ligada àquela unidade.
+
+| Campo de `canais` | Conteúdo |
+|---|---|
+| `disponiveis` | `delivery`, `retirada` e, quando a empresa tem loja do iFood, `ifood` |
+| `total` | pedidos, faturamento e ticket médio dos canais somados |
+| `resumo` | por canal: pedidos, faturamento, ticket médio e participação no faturamento |
+| `evolucao` | `[{inicio, pedidos, faturamento, por_canal}]`, um item por balde |
+| `dias_semana` | 7 itens (0 = domingo): pedidos, faturamento e `por_canal` |
+| `horas` | 24 itens (0 a 23), no mesmo formato |
+| `horarios` | dia × hora × canal, só as combinações com venda (para o mapa de calor com filtro de canal) |
+| `pagamentos` | por forma: rótulo, pedidos, faturamento, participação em pedidos e `por_canal` |
+| `produtos` | `itens` (até 100, por quantidade): nome, quantidade, faturamento, pedidos, participação e `por_canal`; `total` |
+
+`por_canal` sempre traz os três canais, zerados quando não houve venda.
+
+- **Forma de pagamento do iFood:** conta a forma de maior valor do pedido (um pedido pago em duas formas conta uma vez). Os códigos do iFood viram os mesmos do WhatsApp quando é a mesma forma: `PIX` → `pix`, `CASH` → `dinheiro`. Os outros têm rótulo em português: `credito`, `debito`, `vale_refeicao`, `vale_alimentacao`, `carteira_digital`, `vale_presente` e `outro`. Uma forma desconhecida vira `ifood_<forma>`.
+- **Produto:** o mesmo nome, sem diferença de maiúscula ou espaço, é o mesmo produto nos três canais. Nome diferente no iFood (ex.: "Combo 1" × "Combo Um") aparece separado.
+- **Painel:** um filtro de canal (Todos, Delivery, Retirada, iFood) que vale para os gráficos de evolução, dia da semana, horário de pico, pagamento e produtos.
