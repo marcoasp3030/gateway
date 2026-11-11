@@ -275,8 +275,22 @@ O Marco pediu para seguir ("preciso da função do envio em lote"), com as recom
 3. Resultado para baixar: **XLSX**.
 4. API para a integração além do painel: **sim** (entra com o LOTE1-b).
 5. Regras de conciliação (prompt v3.3): **pendente**, o Marco envia o trecho.
-6. Pasta: **SFTP no servidor da empresa**, o gateway busca a cada 15 min e move o lido para `processados/`. Sem porta aberta na VPS. Bloco próprio depois do LOTE1-b.
+6. Pasta: ~~SFTP no servidor da empresa~~. **Trocado em 11/11 por OneDrive** (decisão abaixo).
 7. A planilha de pagamentos vem pela pasta ou pelo painel: **pendente**.
+
+**Pasta do OneDrive (decisões do Marco, 11/11/2026):**
+- A luxtia usa Microsoft 365 corporativo (OneDrive/SharePoint).
+- **Só OneDrive por enquanto.** O SFTP fica para quando algum cliente pedir.
+- **Depois da conciliação (LOTE1-b).**
+- **Desenho combinado:**
+  - "Conectar OneDrive" no painel (login Microsoft e autorização, sem senha guardada);
+  - autorização cifrada no gateway;
+  - pasta escolhida pelo gestor;
+  - a cada 15 min o gateway pede ao Microsoft Graph só o que mudou (delta), puxa PDF/XML/ZIP para um lote novo (`origem = ftp` na tabela, a renomear para `pasta`) e move o lido para `processados/`.
+- **Pré-requisitos:**
+  - aplicativo registrado no Entra ID pelo Marco, uma vez, como o do iFood;
+  - permissão `Files.ReadWrite`;
+  - o TI da empresa pode precisar aprovar o app.
 
 O LOTE1-a veio antes do NFSE1 porque o envio em lote é o que o Marco precisa primeiro. Até o NFSE1, o lote aceita o que o ARQ1 já lê: PDF (qualquer nota) e XML de NF-e/NFC-e. XML da NFS-e nacional é recusado com `xml_nao_e_nfe`.
 
