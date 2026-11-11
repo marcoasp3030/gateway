@@ -1323,7 +1323,7 @@ PY
 - Contrato final na seção 14 de `docs/ESPEC_CAT3.md`. O retrato do By Koji mudou só nos campos novos. Testes em `tests/test_cat3b.py` (4).
 
 
-## ARQ1-a1 — documentos por API (formulário, n8n): receber e ler — 2026-10-21
+## ARQ1-a1 — documentos por API (formulário, integração): receber e ler — 2026-10-21
 
 - Decisões do Marco na seção 14 de `docs/ESPEC_ARQ1.md`. O WhatsApp fica para depois e o canal é a API. O contrato da rota, do webhook e do painel está nas seções 14.3 a 14.6. Migração 048.
 - **Credenciais:**

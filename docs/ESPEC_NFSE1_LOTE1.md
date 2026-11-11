@@ -97,7 +97,7 @@
 
 ### 1. Fluxo
 
-1. O painel (ou o n8n, pela API) **cria o lote** no agente.
+1. O painel (ou a integração, pela API) **cria o lote** no agente.
 2. Envia os **arquivos um a um**: PDF, XML, ZIP com PDFs/XMLs, e a **planilha de pagamentos** (CSV ou XLSX). Cada envio passa pelos mesmos limites e pelo mesmo leitor do ARQ1 e entra na fila do lote.
 3. Na primeira vez, o painel mostra as colunas da planilha e o usuário **mapeia**. O mapeamento fica salvo no agente.
 4. **Fechar o lote:** o gateway termina de ler, junta PDF e XML de cada nota, **concilia em código** e emite `lote.concluido`.
@@ -111,7 +111,7 @@
 - **`agente_mapeamentos_planilha`:** colunas mapeadas por agente e o valor de status que conta como pago (padrão "Efetuado").
 - **A planilha:** fica cifrada como anexo, porque tem nome e CPF/CNPJ de favorecidos. As linhas lidas ficam só na memória da conciliação e no resultado, mascaradas.
 
-### 3. Rotas (painel; a API com chave da empresa espelha em `/api/v1/lotes` para o n8n)
+### 3. Rotas (painel; a API com chave da empresa espelha em `/api/v1/lotes` para a integração)
 
 | Rota | Faz | Papel |
 |---|---|---|
@@ -262,6 +262,6 @@ Para cada nota, as **linhas candidatas** são as da planilha com:
 | 4 | `openpyxl` na imagem do gateway para gerar o XLSX | Sim (Python puro). Alternativa: CSV no lugar do XLSX |
 | 5 | Onde roda a fila do lote | No agendador, um arquivo por vez, cedendo a vez a documento de atendimento |
 | 6 | Texto exato das regras do prompt v3.3 | O Marco envia o trecho para conferir status, exceções e prioridade |
-| 7 | API para o n8n além do painel | Sim, espelhada em `/api/v1/lotes` (chave `documentos:enviar`) |
+| 7 | API para a integração além do painel | Sim, espelhada em `/api/v1/lotes` (chave `documentos:enviar`) |
 
 **Ponto de parada:** só especificação.

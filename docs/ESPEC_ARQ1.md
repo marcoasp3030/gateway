@@ -505,8 +505,8 @@ Fontes externas consultadas em 21/10: documentação da uazapi (`docs.uazapi.com
 
 ### 14.1 Decisões
 
-1. **Canal de entrada:** por enquanto **não há recepção pelo WhatsApp**. Os documentos chegam por uma rota POST da API do gateway (multipart), vinda de formulário, site, sistema ou n8n. Há duas credenciais:
-   - **(a) chave da empresa:** para servidor ou n8n repassar;
+1. **Canal de entrada:** por enquanto **não há recepção pelo WhatsApp**. Os documentos chegam por uma rota POST da API do gateway (multipart), vinda de formulário, site, sistema ou integração. Há duas credenciais:
+   - **(a) chave da empresa:** para servidor ou integração repassar;
    - **(b) chave de formulário restrita:** presa a uma empresa e a um agente, com limite por minuto, tamanho, tipos, modos e sites; revogável pelo painel.
    - **A chave da empresa nunca é aceita vinda de navegador.**
 2. **Dois modos por envio:**
@@ -524,7 +524,7 @@ Fontes externas consultadas em 21/10: documentação da uazapi (`docs.uazapi.com
 |---|---|---|
 | Cabeçalho | `X-API-Key` | `X-Form-Key` |
 | Como cria | Painel, `POST /admin/v1/tenants/{t}/api-keys` com `escopos: ["documentos:enviar"]` (opcional `agente_id`, `ips_permitidos`, `expira_em`) | Painel, `POST /admin/v1/tenants/{t}/chaves-formulario` (14.5), só admin e plataforma |
-| Onde usar | Servidor, n8n. **Recusada com `Origin` ou `Sec-Fetch-*`** (403 `chave_da_empresa_no_navegador`) | Navegador (site) ou servidor |
+| Onde usar | Servidor, integração. **Recusada com `Origin` ou `Sec-Fetch-*`** (403 `chave_da_empresa_no_navegador`) | Navegador (site) ou servidor |
 | Agente | Campo `agente_id` (ou o agente da chave) | Sempre o da chave (outro → 403) |
 | Sites | — | Com `Origin`, ele precisa estar em `origens` da chave (403 `origem_nao_permitida`); a resposta traz `Access-Control-Allow-Origin`. Sem `Origin` (servidor), vale |
 | Limite por minuto | 60 envios (ou o da chave) | O da chave (padrão 10; 1–600) |
@@ -533,7 +533,7 @@ Fontes externas consultadas em 21/10: documentação da uazapi (`docs.uazapi.com
 | Consulta (GET) | Conteúdo completo | **Só o estado** (sem o conteúdo) e só dos documentos enviados por ela |
 | Outras rotas da API | As do escopo dela | **Nenhuma** (escopo `documentos:formulario`, que nenhuma outra rota aceita) |
 
-### 14.3 Rota de envio — contrato para o formulário e o n8n
+### 14.3 Rota de envio — contrato para o formulário e a integração
 
 `POST /api/v1/documentos` (pelo proxy do painel: `https://<painel>/gateway/api/v1/documentos`), `multipart/form-data`:
 
@@ -595,7 +595,7 @@ Fontes externas consultadas em 21/10: documentação da uazapi (`docs.uazapi.com
 
 **CORS (formulário no navegador):** `OPTIONS` libera `X-Form-Key` e `Content-Type`; a origem é conferida por chave no POST e no GET.
 
-**Exemplo (n8n ou servidor):**
+**Exemplo (integração ou servidor):**
 ```
 curl -X POST https://<painel>/gateway/api/v1/documentos \
   -H "X-API-Key: <chave da empresa>" \

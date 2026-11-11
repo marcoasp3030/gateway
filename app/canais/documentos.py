@@ -1,7 +1,7 @@
-"""ARQ1-a1: envio de documento por API (formulário, site, sistema ou n8n) e a Skill `ler_documento` (docs/ESPEC_ARQ1.md, seção 14).
+"""ARQ1-a1: envio de documento por API (formulário, site, sistema ou integração) e a Skill `ler_documento` (docs/ESPEC_ARQ1.md, seção 14).
 
 Duas credenciais (decisão 1 de 21/10):
-- chave da empresa (`X-API-Key`, escopo `documentos:enviar`): para servidor/n8n; recusada quando vem de navegador;
+- chave da empresa (`X-API-Key`, escopo `documentos:enviar`): para servidor/integração; recusada quando vem de navegador;
 - chave de formulário (`X-Form-Key`): só envia documento, presa a uma empresa e a um agente, com limite por minuto, tamanho,
   tipos, modos e origens (sites) próprios; revogável pelo painel. Com `Origin`, a origem precisa estar na lista da chave.
 

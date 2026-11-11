@@ -1,3 +1,18 @@
+## [2026-11-11 11:44] — Remover menções a n8n
+- **Autor:** Auto
+- **Objetivo:** Tirar o nome n8n de docs, comentários e teste.
+- **Arquivos alterados:**
+ - `app/canais/documentos.py`, `app/nucleo/pipeline.py` — modificado — comentários
+ - `docs/ESPEC_ARQ1.md`, `docs/ESPEC_NFSE1_LOTE1.md`, `PROGRESS.md` — modificado — textos
+ - `tests/test_arq1a.py` — modificado — nome da chave `integracao`
+ - `docs/worklog.md`, `instrucoes.md` — registro
+- **Resumo das mudanças:** “n8n” → “integração”/“API”. Sem mudança de comportamento.
+- **Decisões e justificativas:** Produto sem nome de ferramenta de terceiros.
+- **Comandos executados:** busca `n8n` → limpo; sem implantar (só texto)
+- **Erros e resoluções:** —
+- **Pendências / TODO:** —
+- **Próximos passos:** —
+
 ## [2026-11-03 13:37] — CARD-REDES na VPS (migração 063)
 - **Autor:** Auto
 - **Objetivo:** Implantar Instagram/Facebook/telefone no cardápio (c4a3ca0 + docs).

@@ -79,7 +79,7 @@ async def _aguardar_anexos(db,itens):
 
 async def _resposta_no_webhook(conn,tenant,conversa,conv,canal,cfg,texto,plano,rid,parte):
     """Canal api (ARQ1-a1, modo agente): cada balão do bot vai ao webhook de saída `conversa.resposta` da empresa (assinado),
-    para o sistema que enviou (formulário, n8n) entregar ao cliente."""
+    para o sistema que enviou (formulário, integração) entregar ao cliente."""
     from nucleo.webhooks import emitir
     await emitir(conn,tenant,'conversa.resposta',{'conversation_id':conversa,'agente_id':cfg['id'],'canal_id':canal['id'],'contato':conv['telefone'],
                  'request_id':str(rid),'parte':parte,'texto':botoes.numerado(texto,plano[2]),

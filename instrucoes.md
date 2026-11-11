@@ -1,5 +1,9 @@
 # Instruções — gateway By Koji
 
+## Remoção do nome n8n (11/11/2026)
+
+- Docs/comentários/teste sem “n8n”; textos usam “integração”/“API”. Sem mudança de rota ou contrato.
+
 ## CARD-REDES (03/11/2026)
 
 - Commit `7ad23e8` (código `c4a3ca0` + registro). Migração 063. Volta: `gateway:ff865b6`.

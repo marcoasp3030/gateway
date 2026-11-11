@@ -65,7 +65,7 @@ def cenario(tmp_path,monkeypatch,corpo,ligar=True,**leitor):
                 if ligar:
                     await pool.execute("""UPDATE modelos_agente m SET capacidades='{"documentos":{"ativo":true}}' FROM agentes a
                         WHERE a.tenant_id=$1 AND a.id=$2 AND m.id=a.modelo_id AND m.versao=a.modelo_versao""",T,A)
-                r1=await c.post(f'/admin/v1/tenants/{T}/api-keys',json={'nome':'n8n','escopos':['documentos:enviar']})
+                r1=await c.post(f'/admin/v1/tenants/{T}/api-keys',json={'nome':'integracao','escopos':['documentos:enviar']})
                 chave_empresa=next(v for k,v in r1.json().items() if k=='chave')
                 r2=await c.post(f'/admin/v1/tenants/{T}/api-keys',json={'nome':'skyone-docs','escopos':['ferramentas:documentos'],'agente_id':A})
                 chave_skill=next(v for k,v in r2.json().items() if k=='chave')
