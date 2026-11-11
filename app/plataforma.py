@@ -282,6 +282,9 @@ def criar_app(infra,db=None,redis=None):
     from canais.documentos import router as documentos_api
     from admin.documentos import router as documentos_admin
     app.include_router(documentos_api);app.include_router(documentos_admin)
+    # LOTE1-a: notas em lote.
+    from admin.lotes import router as lotes_admin
+    app.include_router(lotes_admin)
     from admin.atendimento import router as atendimento
     app.include_router(atendimento)
     from admin.solicitacoes import router as solicitacoes

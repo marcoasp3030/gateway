@@ -301,7 +301,8 @@ async def apagar(conn,a,estado='apagado'):
 
 async def varrer(state,limite=5):
     """Agendador: documentos parados (posse vencida) voltam a ser lidos; vencidos pela retenção são apagados."""
-    for r in await state.db.fetch("""SELECT id FROM anexos WHERE estado='processando' AND (processando_ate IS NULL OR processando_ate<now())
+    # LOTE1-a: arquivo de lote é lido pela fila do lote (um por vez, cedendo a vez ao atendimento), não aqui.
+    for r in await state.db.fetch("""SELECT id FROM anexos WHERE estado='processando' AND origem<>'lote' AND (processando_ate IS NULL OR processando_ate<now())
             ORDER BY criado_em LIMIT $1""",limite):
         try: await processar(state,r['id'])
         except Exception: log.warning('Documento não processado nesta varredura')

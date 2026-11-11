@@ -127,6 +127,7 @@ class FilaDuravel:
         self.varredura = Varredura(pipeline)
         self.varredura_s = float(os.getenv('VARREDURA_UAZAPI_S', '90') or 90)
         self.varredura_task = None
+        self.lotes_task = None
         # OPS1: alertas pelo Telegram (worker, fila, Skyone, WhatsApp), conferidos pelo agendador.
         from nucleo.alertas import Alertas, limites
         self.limites_ops = limites()
@@ -213,6 +214,7 @@ class FilaDuravel:
         proximas_vazias = 0
         proximos_sem_retorno = 0
         proximos_documentos = 0
+        proximos_lotes = 0
         proximos_follow_ups = 0
         proximos_avisos = 0
         proximos_ops = 0
@@ -258,6 +260,11 @@ class FilaDuravel:
                             proximos_documentos = agora + 10
                             from nucleo import documentos
                             await documentos.varrer(self.p)
+                        if agora >= proximos_lotes and (self.lotes_task is None or self.lotes_task.done()):
+                            # LOTE1-a: notas em lote, uma por vez, em tarefa própria (a leitura não atrasa o agendamento das conversas).
+                            proximos_lotes = agora + 3
+                            from nucleo import lotes
+                            self.lotes_task = asyncio.create_task(lotes.ciclo(self.p))
                         if agora >= proximos_follow_ups:
                             # FUP1-a: follow-ups vencidos (só ensaio) e os de agente desligado, a cada 30 s. Falha não para o agendamento.
                             proximos_follow_ups = agora + 30
@@ -273,6 +280,8 @@ class FilaDuravel:
             await asyncio.sleep(intervalo)
         if self.varredura_task and not self.varredura_task.done():
             self.varredura_task.cancel(); await asyncio.gather(self.varredura_task, return_exceptions=True)
+        if self.lotes_task and not self.lotes_task.done():
+            self.lotes_task.cancel(); await asyncio.gather(self.lotes_task, return_exceptions=True)
         await self.soltar_lideranca()
 
     async def varrer(self):

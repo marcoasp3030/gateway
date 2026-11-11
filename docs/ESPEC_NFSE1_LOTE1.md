@@ -1,6 +1,6 @@
 # NFSE1 (leitura da NFS-e nacional) e LOTE1 (lote e conciliação de pagamentos)
 
-**Situação: proposta para revisão do Marco, 26/10/2026. Nada implementado.**
+**Situação: proposta de 26/10/2026. LOTE1-a implementado em 11/11/2026 (envio em lote; ver "LOTE1-a como foi feito" no fim). NFSE1, LOTE1-b e a pasta SFTP ainda não.**
 - **Para quem:** o agente "Conciliação de Notas Fiscais de Frete" (empresa luxtia, `ag_bb770f5dda22c7a4b53b1587`, modelo `assistente_documentos` v1).
 - **Volume:** até 200 notas por lote, em PDF, XML ou os dois.
 - **Ordem:** NFSE1 antes do LOTE1. A conciliação só pode dar "APROVADO" com dado da nota que o gateway consegue verificar.
@@ -265,3 +265,44 @@ Para cada nota, as **linhas candidatas** são as da planilha com:
 | 7 | API para a integração além do painel | Sim, espelhada em `/api/v1/lotes` (chave `documentos:enviar`) |
 
 **Ponto de parada:** só especificação.
+
+## Decisões do Marco (11/11/2026)
+
+O Marco pediu para seguir ("preciso da função do envio em lote"), com as recomendações:
+
+1. Conferir a assinatura do XML: **sim**, no NFSE1.
+2. Tamanho total do lote: **200 MiB**.
+3. Resultado para baixar: **XLSX**.
+4. API para a integração além do painel: **sim** (entra com o LOTE1-b).
+5. Regras de conciliação (prompt v3.3): **pendente**, o Marco envia o trecho.
+6. Pasta: **SFTP no servidor da empresa**, o gateway busca a cada 15 min e move o lido para `processados/`. Sem porta aberta na VPS. Bloco próprio depois do LOTE1-b.
+7. A planilha de pagamentos vem pela pasta ou pelo painel: **pendente**.
+
+O LOTE1-a veio antes do NFSE1 porque o envio em lote é o que o Marco precisa primeiro. Até o NFSE1, o lote aceita o que o ARQ1 já lê: PDF (qualquer nota) e XML de NF-e/NFC-e. XML da NFS-e nacional é recusado com `xml_nao_e_nfe`.
+
+## LOTE1-a como foi feito (11/11/2026)
+
+- **Código:** `app/nucleo/lotes.py` (envio, fila, junção, notas) e `app/admin/lotes.py` (rotas). Migração `072_lote1a.sql` (`lotes`, `lote_arquivos` e a origem `lote` nos anexos). Testes em `tests/test_lote1a.py`.
+- **Cada arquivo de nota é um anexo do ARQ1:** cifrado no volume, mesma retenção, `origem = lote`, `modo = extrair`, `referencia` = id do lote. Aparece também em Documentos.
+- **Leitura:** não é na hora. O agendador lê um arquivo por vez, em tarefa própria, por até 20 s a cada 3 s. Antes de cada arquivo confere se há documento de atendimento esperando; se houver, para e deixa para o próximo ciclo. A varredura do ARQ1 não pega arquivo de lote.
+- **ZIP:** aberto no gateway, em memória, sem gravar nada antes de conferir (diferente da proposta, que abria no leitor). Defesas: até 200 entradas, até 100 MiB descompactado (o tamanho lido vale, não o declarado), taxa de compressão até 50×, sem senha, sem link simbólico, sem caminho absoluto ou `..`. Pastas dentro do ZIP são aceitas (vale o nome do arquivo). Entrada ruim vira item `recusado` com o motivo; ZIP ruim inteiro é recusado.
+- **Duplicado:** o mesmo arquivo (mesmo SHA-256) duas vezes no lote vira `duplicado` e não é lido de novo.
+- **Junção:** depois de lido, cada arquivo ganha um hash da chave de acesso (44 ou 50 dígitos) ou, sem ela, do número + CNPJ/CPF do emitente/prestador. Os campos ficam só no resultado cifrado do anexo; a tela de notas decifra na hora.
+- **Limites:** 400 arquivos aceitos e 200 MiB por lote; o arquivo segue o limite da capacidade de documentos do agente (10 MiB por padrão). Estouro → 409 `limite_do_lote` e nada do envio é gravado.
+- **Papel:** gestor e acima em todas as rotas (como os documentos).
+
+| Rota (`/admin/v1/tenants/{t}`) | Faz |
+|---|---|
+| `POST /agentes/{a}/lotes` | Cria o lote (corpo opcional `{"nome"}`) → 201 com o progresso e os `limites`. 409 `capacidade_desligada`, `agente_inativo` ou `empresa_inativa` |
+| `GET /lotes?agente_id=&estado=&limite=&cursor=` | Lotes, do mais novo ao mais antigo; os apagados só com `estado=apagado` |
+| `GET /lotes/{l}` | Progresso: `estado`, `arquivos{total,na_fila,lido,sem_texto,recusado,falhou,duplicado}`, `notas`, `estimativa_s` (1,5 s por arquivo na fila), `limites` |
+| `POST /lotes/{l}/arquivos` | multipart com `arquivo` (PDF, XML ou ZIP; um por requisição, até 16 MiB no gateway) → 202 `{"arquivos":[{arquivo_id,nome,zip,estado,motivo}],"lote":{…}}`. Arquivo solto inválido: 400 com o motivo (`tipo_nao_aceito`, `xml_nao_e_nfe`, `zip_invalido`, `zip_vazio`, `zip_protegido`, `zip_entradas_demais`, `zip_grande_demais`), 413 `tamanho`, 409 `lote_fechado` ou `limite_do_lote` |
+| `GET /lotes/{l}/arquivos?estado=&limite=&cursor=` | Arquivos na ordem de chegada, com estado, motivo, tipo do documento e páginas |
+| `GET /lotes/{l}/notas` | Notas lidas, juntando PDF e XML: `tipo_documento`, `fonte` (`xml` ou `pdf`), `campos` (com a confiança; CPF mascarado), `avisos` (`sem_chave_de_juncao`, `nota_duplicada`, `pdf_diverge_do_xml`) e os `arquivos` de cada nota |
+| `POST /lotes/{l}/fechar` | Não aceita mais arquivo → `lendo`; quando não houver nada na fila → `concluido`. 409 `lote_vazio` ou `lote_fechado` |
+| `DELETE /lotes/{l}` | Apaga os arquivos e as leituras (LGPD) → `apagado`. Auditado |
+
+- **Estados do lote:** `aberto` (recebe arquivos; já vai lendo), `lendo` (fechado, terminando de ler), `concluido`, `expirado` (retenção), `apagado`.
+- **Estados do arquivo:** `na_fila`, `lido`, `sem_texto` (PDF escaneado: precisa do OCR), `recusado`, `falhou`, `duplicado`.
+- **Auditoria:** `lote.criado`, `lote.arquivos_recebidos` (só a quantidade), `lote.fechado`, `lote.concluido`, `lote.expirado`, `lote.apagado`.
+- **Fica para o LOTE1-b:** planilha, mapeamento, conciliação, resultado XLSX, evento `lote.concluido`, turno do agente, Skill e a API `/api/v1/lotes`.

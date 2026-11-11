@@ -24,7 +24,7 @@ class LimiteCorpo:
         tamanho = headers.get(b"content-length", b"")
         # ARQ1-a1: só as rotas de envio de documento aceitam até 16 MiB (o arquivo tem teto próprio, conferido depois).
         caminho = scope.get("path", "")
-        maximo = DOCUMENTOS_BYTES if caminho == "/api/v1/documentos" or (caminho.startswith("/admin/v1/") and caminho.endswith(("/simular-documento", "/midia", "/cardapio/aparencia/imagem"))) else self.max_bytes
+        maximo = DOCUMENTOS_BYTES if caminho == "/api/v1/documentos" or (caminho.startswith("/admin/v1/") and caminho.endswith(("/simular-documento", "/midia", "/cardapio/aparencia/imagem")) or (caminho.startswith("/admin/v1/tenants/") and "/lotes/" in caminho and caminho.endswith("/arquivos"))) else self.max_bytes
         if tamanho.isdigit() and int(tamanho) > maximo:
             return await self.recusar(scope, receive, send)
         partes, total = [], 0

@@ -1501,6 +1501,13 @@ PY
 - **Página pública.** `cardapio/ler` traz `redes` (só as ativas, com `url` e `rotulo`), também na resposta do link já usado.
 - **Migração 063.** Testes em `tests/test_card_redes.py`. A tela é do [PAINEL].
 
+## LOTE1-a: envio de notas em lote — 2026-11-11
+
+- **O que é.** O gestor cria um lote no agente de documentos e manda PDF, XML ou ZIP (um arquivo por requisição). O gateway lê um por vez em segundo plano, cedendo a vez ao atendimento, junta PDF e XML da mesma nota e mostra o progresso e as notas. Rotas e regras em "LOTE1-a como foi feito" de `docs/ESPEC_NFSE1_LOTE1.md`.
+- **Decisões do Marco (11/11).** Seguir com as recomendações; as regras de conciliação e a origem da planilha ainda estão pendentes.
+- **Ainda não.** Conciliação com a planilha (LOTE1-b), XML da NFS-e nacional (NFSE1) e a pasta SFTP.
+- **Migração 072.** Testes em `tests/test_lote1a.py`.
+
 ## PED-BI2: iFood junto nos gráficos da Visão de vendas — 2026-11-09
 
 - **O que é.** O campo novo `canais` em `GET …/pedidos/indicadores` junta delivery, retirada e iFood: resumo por canal, evolução, dia da semana, hora, dia × hora, forma de pagamento e produtos, cada um com `por_canal`. Especificação na seção 8 de `docs/ESPEC_PED_BI.md`.
